@@ -1,0 +1,5 @@
+streamlit>=1.35.0
+requests>=2.31.0
+lxml>=5.0.0
+pillow>=10.0.0
+qrcode[pil]>=7.4.2
