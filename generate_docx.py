@@ -237,12 +237,132 @@ def make_qr_bytes(url):
 
 # ─── Inserting QR + graphics into "Wyniki turnieju" cell ─────────────────────
 
+def _make_anchored_text(text, posY_emu, posX_emu, width_emu, height_emu, size=18, bold=True):
+    """
+    Pływające pole tekstowe (text box / shape with text).
+    Używamy <w:drawing> z <wp:anchor> i wewnątrz <wps:txbx>.
+    """
+    uid = abs(hash(text)) % 9000 + 7000
+    bold_xml = '<w:b/><w:bCs/>' if bold else ''
+    return etree.fromstring(f'''<w:drawing xmlns:w="{W}"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <wp:anchor distT="0" distB="0" distL="0" distR="0"
+             simplePos="0" relativeHeight="{uid}"
+             behindDoc="0" locked="0" layoutInCell="0" allowOverlap="1">
+    <wp:simplePos x="0" y="0"/>
+    <wp:positionH relativeFrom="column">
+      <wp:posOffset>{int(posX_emu)}</wp:posOffset>
+    </wp:positionH>
+    <wp:positionV relativeFrom="paragraph">
+      <wp:posOffset>{int(posY_emu)}</wp:posOffset>
+    </wp:positionV>
+    <wp:extent cx="{int(width_emu)}" cy="{int(height_emu)}"/>
+    <wp:effectExtent l="0" t="0" r="0" b="0"/>
+    <wp:wrapNone/>
+    <wp:docPr id="{uid}" name="TextBox {uid}"/>
+    <wp:cNvGraphicFramePr/>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp>
+          <wps:cNvSpPr txBox="1"/>
+          <wps:spPr>
+            <a:xfrm><a:off x="0" y="0"/>
+              <a:ext cx="{int(width_emu)}" cy="{int(height_emu)}"/>
+            </a:xfrm>
+            <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+            <a:noFill/>
+            <a:ln><a:noFill/></a:ln>
+          </wps:spPr>
+          <wps:txbx>
+            <w:txbxContent>
+              <w:p>
+                <w:pPr><w:jc w:val="center"/>
+                  <w:spacing w:before="0" w:after="0"/>
+                </w:pPr>
+                <w:r>
+                  <w:rPr>
+                    <w:rFonts w:ascii="Aptos" w:hAnsi="Aptos" w:eastAsia="Aptos" w:cs="Aptos"/>
+                    {bold_xml}
+                    <w:sz w:val="{size}"/>
+                    <w:szCs w:val="{size}"/>
+                  </w:rPr>
+                  <w:t>{text}</w:t>
+                </w:r>
+              </w:p>
+            </w:txbxContent>
+          </wps:txbx>
+          <wps:bodyPr rot="0" spcFirstLastPara="0" vertOverflow="visible"
+                      horzOverflow="visible" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0"
+                      anchor="t" anchorCtr="0"/>
+        </wps:wsp>
+      </a:graphicData>
+    </a:graphic>
+  </wp:anchor>
+</w:drawing>''')
+
+
+def _make_anchored_image(rel_id, cx_emu, cy_emu, posY_emu, posX_emu=0):
+    """
+    Tworzy <w:drawing> z pływającym (anchor) obrazem, kotwiczonym w paragrafie.
+    posX_emu: pozycja X względem column (lewa krawędź obszaru tekstu)
+    posY_emu: pozycja Y względem paragraph (od góry akapitu w którym jest kotwiczony)
+    Obraz "behindDoc=0" (przed tekstem), wrap=none (tekst go ignoruje).
+    """
+    uid = abs(hash(rel_id)) % 9000 + 5000
+    return etree.fromstring(f'''<w:drawing xmlns:w="{W}"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+  xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+  <wp:anchor distT="0" distB="0" distL="0" distR="0"
+             simplePos="0" relativeHeight="{uid}"
+             behindDoc="0" locked="0" layoutInCell="0" allowOverlap="1">
+    <wp:simplePos x="0" y="0"/>
+    <wp:positionH relativeFrom="column">
+      <wp:posOffset>{int(posX_emu)}</wp:posOffset>
+    </wp:positionH>
+    <wp:positionV relativeFrom="paragraph">
+      <wp:posOffset>{int(posY_emu)}</wp:posOffset>
+    </wp:positionV>
+    <wp:extent cx="{int(cx_emu)}" cy="{int(cy_emu)}"/>
+    <wp:effectExtent l="0" t="0" r="0" b="0"/>
+    <wp:wrapNone/>
+    <wp:docPr id="{uid}" name="Picture {uid}"/>
+    <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+        <pic:pic>
+          <pic:nvPicPr>
+            <pic:cNvPr id="{uid}" name="Picture"/>
+            <pic:cNvPicPr/>
+          </pic:nvPicPr>
+          <pic:blipFill>
+            <a:blip r:embed="{rel_id}"/>
+            <a:stretch><a:fillRect/></a:stretch>
+          </pic:blipFill>
+          <pic:spPr>
+            <a:xfrm>
+              <a:off x="0" y="0"/>
+              <a:ext cx="{int(cx_emu)}" cy="{int(cy_emu)}"/>
+            </a:xfrm>
+            <a:prstGeom prst="rect"/>
+          </pic:spPr>
+        </pic:pic>
+      </a:graphicData>
+    </a:graphic>
+  </wp:anchor>
+</w:drawing>''')
+
+
 def _make_image_paragraph(rel_id, cx_emu, cy_emu, align='center'):
     """Tworzy paragraf z obrazem inline - wzór sprawdzony przez python-docx."""
     return etree.fromstring(f'''<w:p xmlns:w="{W}"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
   xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
-  <w:pPr><w:jc w:val="{align}"/><w:spacing w:before="60" w:after="60"/></w:pPr>
+  <w:pPr><w:jc w:val="{align}"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
   <w:r><w:drawing>
     <wp:inline distT="0" distB="0" distL="0" distR="0"
       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -274,14 +394,15 @@ def _make_image_paragraph(rel_id, cx_emu, cy_emu, align='center'):
 
 
 def _make_text_para(text, size=20, bold=True, align='center'):
-    """Tworzy paragraf z tekstem."""
+    """Tworzy paragraf z tekstem (zerowy padding)."""
     p = etree.Element(wt('p'))
     pPr = etree.SubElement(p, wt('pPr'))
     if align:
         jc = etree.SubElement(pPr, wt('jc'))
         jc.set(f'{{{W}}}val', align)
     sp = etree.SubElement(pPr, wt('spacing'))
-    sp.set(f'{{{W}}}before','60'); sp.set(f'{{{W}}}after','60')
+    sp.set(f'{{{W}}}before','0'); sp.set(f'{{{W}}}after','0')
+    sp.set(f'{{{W}}}line','240'); sp.set(f'{{{W}}}lineRule','auto')
     r = etree.SubElement(p, wt('r'))
     rPr = etree.SubElement(r, wt('rPr'))
     fonts = etree.SubElement(rPr, wt('rFonts'))
@@ -296,32 +417,38 @@ def _make_text_para(text, size=20, bold=True, align='center'):
     return p
 
 
-def _populate_left_area(tbl_elements, items_for_cell):
+def _populate_left_area(elements, cell_items, anchored_drawings):
     """
-    Wstawia listę paragrafów (QR + grafiki + napis "Wyniki turnieju")
-    do komórki "Wyniki turnieju" (tabela 2, wiersz 1, komórka 0).
-
-    items_for_cell to lista paragrafów XML w kolejności od góry do dołu.
+    Wstawia napis "Wyniki turnieju" jako paragraf w komórce tabeli 2 (jak we wzorcu),
+    a obrazy (QR + grafiki) jako pływające obrazy KOTWICZONE WEWNĄTRZ TEJ KOMÓRKI.
+    Komórka pozostaje wysokości pojedynczego wiersza, obrazy "wystają" poza jej granice
+    ale layoutInCell=0 sprawia że nie rozciągają komórki.
     """
-    # Znajdź drugą tabelę (z wynikami) - jest po kilku paragrafach
-    tbls = [el for el in tbl_elements if el.tag == wt('tbl')]
+    tbls = [el for el in elements if el.tag == wt('tbl')]
     if len(tbls) < 2: return
+
     score_tbl = tbls[1]
     rows = score_tbl.findall(wt('tr'))
     if len(rows) < 2: return
-    # Komórka "Wyniki turnieju" jest w wierszu 1 (drugim), tc[0]
-    # (wiersz 0 to "SET 1 / SET 2" header)
-    row1 = rows[1]
-    tcs = row1.findall(wt('tc'))
-    if not tcs: return
-    target_cell = tcs[0]
 
-    # Wyczyść istniejące paragrafy w tej komórce
+    target_cell = rows[1].findall(wt('tc'))[0]
+    # Wyczyść komórkę
     for p in target_cell.findall(wt('p')):
         target_cell.remove(p)
 
-    # Wstaw nowe paragrafy
-    for item in items_for_cell:
+    # Wstaw paragraf z pływającymi obrazami (wszystkie w 1 paragrafie)
+    p = etree.SubElement(target_cell, wt('p'))
+    pPr = etree.SubElement(p, wt('pPr'))
+    sp = etree.SubElement(pPr, wt('spacing'))
+    sp.set(f'{{{W}}}before','0'); sp.set(f'{{{W}}}after','0')
+    sp.set(f'{{{W}}}line','240'); sp.set(f'{{{W}}}lineRule','auto')
+
+    for drawing in anchored_drawings:
+        r = etree.SubElement(p, wt('r'))
+        r.append(drawing)
+
+    # Dodaj napis "Wyniki turnieju" do paragrafu w komórce
+    for item in cell_items:
         target_cell.append(item)
 
 
@@ -371,13 +498,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # ── Fix wyrównanie tabeli 1 z tabelą 2:
     # We wzorcu Oławy obie tabele zaczynają się od lewej krawędzi (brak tblInd)
     # i mają zbliżoną szerokość (~9700 DXA).
-    # Naszej tabeli 1 (suma 9090) musimy dać szerokość 9690 (= tabela 2).
-    # Robimy to przez wyrównanie SET 1=SET 2 (1080 DXA każda) i rozszerzenie
-    # kolumny "Podpis" o 600 DXA (1260 → 1860).
+    # Zwężamy 1. kolumnę o 280 DXA (~0.5 cm) i dodajemy wcięcie tabeli z lewej
+    # tblInd=280, żeby etykieta "Tor" miała trochę odstępu od krawędzi.
+    # Tabelę 1 dopasowujemy do szerokości tabeli 2 (9690 DXA).
     first_tbl = body.find(wt('tbl'))
     if first_tbl is not None:
         gcs = first_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
         if len(gcs) == 12:
+            # Kolumna z "Tor" — zostawiamy bez zmian (555),
+            # ale zwężamy następną pustą o 280 (960→680) i dajemy tblInd 280
+            gcs[1].set(f'{{{W}}}w', '680')
             gcs[4].set(f'{{{W}}}w', '720')
             gcs[5].set(f'{{{W}}}w', '360')
             gcs[11].set(f'{{{W}}}w', '1860')  # Podpis: 1260 → 1860 (+600)
@@ -390,18 +520,50 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     if tcW is None: continue
                     cur_w = int(tcW.get(f'{{{W}}}w','0'))
                     span  = int(gs.get(f'{{{W}}}val','1')) if gs is not None else 1
+                    # Pusta kolumna po "Tor" (cur=960, span=1) → 680
+                    if cur_w == 960 and span == 1:
+                        tcW.set(f'{{{W}}}w', '680')
                     # SET 1 (1050, span=2) → 1080
-                    if cur_w == 1050 and span == 2:
+                    elif cur_w == 1050 and span == 2:
                         tcW.set(f'{{{W}}}w', '1080')
-                    # Komórka "Podpis" w wierszu nagłówków/zawodnika (cur=1800 lub 2220, span=2/3)
-                    # rozszerzamy o 600 DXA bo gridCol[11] urosło o 600
+                    # Komórka nazwiska zawodnika (cur=3915, span=4) → 3635 (3915-280)
+                    elif cur_w == 3915 and span == 4:
+                        tcW.set(f'{{{W}}}w', '3635')
+                    # Wiersz 0 spacer (cur=1965, span=2) → 1685 (1965-280)
+                    elif cur_w == 1965 and span == 2:
+                        tcW.set(f'{{{W}}}w', '1685')
+                    # Wiersz 1 spacer (cur=1965, span=2 też) - już objęte powyżej
+                    # Komórka "Podpis" w wierszu nagłówków/zawodnika
                     elif cur_w == 1800 and span == 2:
                         tcW.set(f'{{{W}}}w', '2400')
                     elif cur_w == 2220 and span == 3:
                         tcW.set(f'{{{W}}}w', '2820')
                     elif cur_w == 1260 and span == 1:
                         tcW.set(f'{{{W}}}w', '1860')
-            # NIE dodajemy tblInd - tabela ma się zaczynać od lewej krawędzi
+            # Dodaj tblInd 280 DXA (~0.5 cm) z lewej
+            tblPr = first_tbl.find(wt('tblPr'))
+            if tblPr is not None:
+                tblInd = tblPr.find(wt('tblInd'))
+                if tblInd is None:
+                    tblInd = etree.SubElement(tblPr, wt('tblInd'))
+                tblInd.set(f'{{{W}}}w', '280')
+                tblInd.set(f'{{{W}}}type', 'dxa')
+
+    # Wyrównaj etykietę "Tor" do LEWEJ (zamiast do center)
+    if first_tbl is not None:
+        first_row = first_tbl.find(wt('tr'))
+        if first_row is not None:
+            tcs = first_row.findall(wt('tc'))
+            if tcs:
+                for p in tcs[0].findall(wt('p')):
+                    pPr = p.find(wt('pPr'))
+                    if pPr is None:
+                        pPr = etree.Element(wt('pPr'))
+                        p.insert(0, pPr)
+                    jc = pPr.find(wt('jc'))
+                    if jc is None:
+                        jc = etree.SubElement(pPr, wt('jc'))
+                    jc.set(f'{{{W}}}val', 'left')
 
     # ── Wyciągnij sectPr i template
     sectPr = body.find(wt('sectPr'))
@@ -427,7 +589,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             media_files['media/qrcode.png'] = qr_bytes
             rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
             rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target','media/qrcode.png')
-            qr_rid_info = (rid, int(2.0*360000), int(2.0*360000))
+            qr_rid_info = (rid, int(1.8*360000), int(1.8*360000))
 
     logo_rids = {}
     if logos:
@@ -439,9 +601,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             pil = PILImage.open(io.BytesIO(img_bytes)).convert('RGBA')
             buf = io.BytesIO(); pil.save(buf, format='PNG')
             media_files[fname] = buf.getvalue()
-            target_w_cm = 2.0
+            # Ograniczenie: max szerokość 2.4 cm, max wysokość 1.4 cm
+            # (proporcje zachowane).
+            max_w_cm = 2.4
+            max_h_cm = 1.4
+            ratio = pil.width / pil.height
+            # Najpierw dopasuj do max szerokości
+            target_w_cm = max_w_cm
+            target_h_cm = target_w_cm / ratio
+            # Jeśli za wysoki, dopasuj do max wysokości
+            if target_h_cm > max_h_cm:
+                target_h_cm = max_h_cm
+                target_w_cm = target_h_cm * ratio
             cx = int(target_w_cm * 360000)
-            cy = int(cx / (pil.width / pil.height))
+            cy = int(target_h_cm * 360000)
             rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
             rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', fname)
             logo_rids[key] = (rid, cx, cy)
@@ -460,21 +633,56 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             cloned = [copy.deepcopy(el) for el in template_elements]
             _fill_protocol(cloned, match)
 
-            # Zbuduj zawartość lewego obszaru "Wyniki turnieju"
             order = image_order if image_order else (
                 (['qr'] if qr_rid_info else []) +
                 sorted(logo_rids.keys())
             )
-            items = []
-            for key in order:
-                if key == 'qr' and qr_rid_info:
-                    items.append(_make_image_paragraph(*qr_rid_info, align='center'))
-                elif key in logo_rids:
-                    items.append(_make_image_paragraph(*logo_rids[key], align='center'))
-            # Dodaj napis "Wyniki turnieju" jako ostatni
-            items.append(_make_text_para('Wyniki turnieju', size=20, bold=True))
 
-            _populate_left_area(cloned, items)
+            anchored = []
+            current_y_emu = int(0.1 * 360000)   # zaczynamy ~1mm pod kotwicą
+            spacing_emu = int(0.15 * 360000)    # 1.5mm między obrazami
+            cell_width_emu = int(5.24 * 360000) # szerokość komórki "Wyniki turnieju"
+
+            label_inserted_after = None  # po którym kluczu wstawić "Wyniki turnieju"
+
+            for i, key in enumerate(order):
+                rid_info = None
+                if key == 'qr' and qr_rid_info:
+                    rid_info = qr_rid_info
+                elif key in logo_rids:
+                    rid_info = logo_rids[key]
+                if rid_info is None:
+                    continue
+                rid, cx, cy = rid_info
+                center_x = (cell_width_emu - cx) // 2
+                anchored.append(_make_anchored_image(rid, cx, cy,
+                                                     posY_emu=current_y_emu,
+                                                     posX_emu=center_x))
+                current_y_emu += cy + spacing_emu
+                # Po QR (jeśli był jednym z elementów) wstawiamy napis jako pływający text box
+                if key == 'qr':
+                    anchored.append(_make_anchored_text(
+                        'Wyniki turnieju',
+                        posY_emu=current_y_emu,
+                        posX_emu=0,
+                        width_emu=cell_width_emu,
+                        height_emu=int(0.5*360000),
+                        size=18, bold=True))
+                    current_y_emu += int(0.5*360000) + spacing_emu
+
+            # Jeśli nie ma QR, dodaj napis "Wyniki turnieju" na końcu jako floating
+            if not (include_qr and qr_rid_info):
+                anchored.append(_make_anchored_text(
+                    'Wyniki turnieju',
+                    posY_emu=current_y_emu,
+                    posX_emu=0,
+                    width_emu=cell_width_emu,
+                    height_emu=int(0.5*360000),
+                    size=18, bold=True))
+
+            # Komórka pozostaje pusta (ma tylko paragraf-kotwicę dla pływających obrazów)
+            cell_items = []
+            _populate_left_area(cloned, cell_items, anchored)
 
             for el in cloned:
                 body.append(el)
