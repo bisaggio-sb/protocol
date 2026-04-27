@@ -1,8 +1,14 @@
 """
 generate_docx.py – GP2 Protocol Generator
+
+Strategia pobierania zakładek (3 metody fallback):
+  1) gviz/tq?tqx=out:csv&sheet=NAME    – preferowane (obsługuje nazwy z kropką)
+  2) export?format=csv&gid=GID         – z GID wyciągniętym ze strony HTML
+  3) export?format=csv&sheet=NAME      – ostateczny fallback
 """
 
 import io, csv, re, copy, zipfile, string
+from urllib.parse import quote
 import requests
 from lxml import etree
 
@@ -13,28 +19,111 @@ REL_IMG = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/i
 def wt(n): return f'{{{W}}}{n}'
 
 
-# ─── Google Sheets ────────────────────────────────────────────────────────────
+# ─── Google Sheets fetching ───────────────────────────────────────────────────
 
-def fetch_sheet_by_name(sheet_id, sheet_name):
+def _is_html(text):
+    s = text.lstrip()[:200].lower()
+    return s.startswith('<!doctype') or s.startswith('<html') or '<head' in s
+
+
+def fetch_via_gviz(sheet_id, sheet_name):
+    """Metoda 1: gviz API (najlepsza dla nazw z kropkami)."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/export?format=csv&sheet={requests.utils.quote(sheet_name)}")
+           f"/gviz/tq?tqx=out:csv&sheet={quote(sheet_name)}")
     r = requests.get(url, timeout=15)
-    if r.status_code != 200 or r.text.strip().startswith('<!'):
+    if r.status_code != 200 or _is_html(r.text):
         return None
     return list(csv.reader(io.StringIO(r.text)))
 
 
+def fetch_via_gid(sheet_id, gid):
+    """Metoda 2: export po GID."""
+    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+           f"/export?format=csv&gid={gid}")
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200 or _is_html(r.text):
+        return None
+    return list(csv.reader(io.StringIO(r.text)))
+
+
+def fetch_via_export_name(sheet_id, sheet_name):
+    """Metoda 3: export?sheet=NAME (czasem niepewne, zwraca pierwszą zakładkę)."""
+    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+           f"/export?format=csv&sheet={quote(sheet_name)}")
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200 or _is_html(r.text):
+        return None
+    return list(csv.reader(io.StringIO(r.text)))
+
+
+def get_sheet_gids(sheet_id):
+    """
+    Wyciąga mapę {sheet_name: gid} z HTML strony arkusza.
+    Google embeduje to w bootstrap-data.
+    """
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+    try:
+        r = requests.get(url, timeout=20)
+    except Exception:
+        return {}
+    text = r.text
+    mapping = {}
+
+    # Wzorzec 1: w tagu <option value="GID">NAME</option> (sheet picker)
+    for m in re.finditer(r'value="(\d{6,12})"[^>]*>([^<]{1,80})</option>', text):
+        gid, name = m.group(1), m.group(2).strip()
+        if name and name not in mapping:
+            mapping[name] = gid
+
+    # Wzorzec 2: tablica bootstrap, np. ["Gr. A",null,...,GID,...]
+    if not mapping:
+        for m in re.finditer(r'\["([^"\\]{1,60})"(?:\s*,[^,\[\]]*){1,15},(\d{6,12})\]', text):
+            name, gid = m.group(1).strip(), m.group(2)
+            if name and name not in mapping:
+                mapping[name] = gid
+
+    # Wzorzec 3: blisko nazwy "Gr. X" znajduje numer
+    if not mapping:
+        for letter in string.ascii_uppercase[:16]:
+            name = f"Gr. {letter}"
+            idx = text.find(f'"{name}"')
+            if idx >= 0:
+                window = text[max(0, idx-300):idx+400]
+                nums = re.findall(r'\b(\d{7,12})\b', window)
+                if nums:
+                    mapping[name] = nums[0]
+
+    return mapping
+
+
+def fetch_sheet(sheet_id, sheet_name, gid_map=None):
+    """Pobiera zakładkę używając najlepszej dostępnej metody."""
+    # 1. gviz – najpewniejsze dla nazw z kropką
+    rows = fetch_via_gviz(sheet_id, sheet_name)
+    if rows:
+        return rows
+    # 2. po GID
+    if gid_map and sheet_name in gid_map:
+        rows = fetch_via_gid(sheet_id, gid_map[sheet_name])
+        if rows:
+            return rows
+    # 3. fallback – export?sheet=
+    rows = fetch_via_export_name(sheet_id, sheet_name)
+    return rows
+
+
+# ─── Parser zakładki grupy ────────────────────────────────────────────────────
+
 def parse_group_rows(rows):
     """
-    Obsługuje rzeczywistą strukturę zakładki Gr. X:
-      #  | Godzina | Tor | (opcjonalne ukryte kol.) | Grupa X (=Z1) | 1.set | 2.set | Z2 | 1.set | 2.set
-    Szuka nagłówka 'Tor' i 'Godzina', a Player1 = kolumna ze startkiem 'Gr',
-    Player2 = Player1+3 (po dwóch kolumnach punktów).
+    Struktura zakładki Gr. X (z arkusza GP2_2026_wyniki):
+      Wiersz nagłówkowy: # | Godzina | Tor | Grupa X | 1.set | 2.set | <Z2_header_pusty> | 1.set | 2.set
+    Player1 = kolumna z nagłówkiem zaczynającym się od 'Gr',
+    Player2 = Player1 + 3 (po dwóch kolumnach setów).
     """
     if not rows:
         return []
 
-    # Znajdź wiersz nagłówkowy
     header_idx, header = None, []
     for i, row in enumerate(rows):
         norm = [c.strip().lower() for c in row]
@@ -42,9 +131,10 @@ def parse_group_rows(rows):
             header_idx = i
             header = norm
             break
-
     if header_idx is None:
         return []
+
+    raw_header = rows[header_idx]
 
     def ci(name):
         try: return header.index(name)
@@ -52,32 +142,26 @@ def parse_group_rows(rows):
 
     col_tor  = ci('tor')
     col_godz = ci('godzina')
-
-    # Mecz = '#' albo pierwsza kolumna numeryczna
     col_mecz = ci('#')
     if col_mecz is None:
-        for name in ('mecz','lp','nr','numer','no','no.'):
-            col_mecz = ci(name)
-            if col_mecz is not None:
-                break
+        for n in ('mecz','lp','nr'):
+            col_mecz = ci(n)
+            if col_mecz is not None: break
     if col_mecz is None:
         col_mecz = 0
 
-    # Player 1 = kolumna z nagłówkiem startującym od 'gr'
+    # Player 1 = kolumna z nagłówkiem 'gr...' (np. "Grupa C")
     col_z1, grupa_raw = None, ''
     for i, h in enumerate(header):
         if h.startswith('gr'):
             col_z1 = i
-            grupa_raw = rows[header_idx][i].strip()
+            grupa_raw = raw_header[i].strip() if i < len(raw_header) else ''
             break
-
     if col_z1 is None and col_tor is not None:
-        col_z1 = col_tor + 1   # fallback
+        col_z1 = col_tor + 1
 
-    # Player 2 = Player1 + 3 kolumny (P1, set1, set2, P2)
-    col_z2 = (col_z1 + 3) if col_z1 is not None else None
+    col_z2 = col_z1 + 3 if col_z1 is not None else None
 
-    # Wyłuskaj literę grupy z nagłówka: "Grupa C" -> "C"
     m = re.search(r'\b([A-P])\b', grupa_raw)
     grupa = m.group(1) if m else ''
 
@@ -93,22 +177,19 @@ def parse_group_rows(rows):
         if not tor and not z1:
             continue
         matches.append({
-            'tor':   tor,
-            'godz':  g(col_godz),
-            'grupa': grupa,
-            'mecz':  g(col_mecz),
-            'z1':    z1,
-            'z2':    g(col_z2),
+            'tor': tor, 'godz': g(col_godz), 'grupa': grupa,
+            'mecz': g(col_mecz), 'z1': z1, 'z2': g(col_z2)
         })
     return matches
 
 
 def fetch_all_group_sheets(sheet_id):
+    gid_map = get_sheet_gids(sheet_id)
     results = []
     for letter in string.ascii_uppercase[:16]:
         name = f"Gr. {letter}"
         try:
-            rows = fetch_sheet_by_name(sheet_id, name)
+            rows = fetch_sheet(sheet_id, name, gid_map)
             if rows is None:
                 continue
             matches = parse_group_rows(rows)
@@ -121,19 +202,38 @@ def fetch_all_group_sheets(sheet_id):
 
 def get_sheet_names_debug(sheet_id):
     info = []
+    gid_map = get_sheet_gids(sheet_id)
+    info.append(f"📋 Wykryte zakładki w mapie GID: {len(gid_map)}")
+    if gid_map:
+        sample = list(gid_map.items())[:5]
+        info.append(f"   Przykład: {sample}")
+    info.append("")
     for letter in string.ascii_uppercase[:16]:
         name = f"Gr. {letter}"
         try:
-            rows = fetch_sheet_by_name(sheet_id, name)
-            if rows is None:
-                info.append(f"❌ {name}: brak zakładki")
+            method_used = ""
+            rows = fetch_via_gviz(sheet_id, name)
+            if rows:
+                method_used = "gviz"
+            else:
+                if name in gid_map:
+                    rows = fetch_via_gid(sheet_id, gid_map[name])
+                    if rows: method_used = f"gid={gid_map[name]}"
+                if not rows:
+                    rows = fetch_via_export_name(sheet_id, name)
+                    if rows: method_used = "export?sheet"
+            if not rows:
+                info.append(f"❌ {name}: brak (wszystkie metody zawiodły)")
                 continue
             matches = parse_group_rows(rows)
-            # Pokaż też pierwsze wiersze CSV dla diagnozy
-            header_preview = rows[0][:8] if rows else []
-            info.append(f"✅ {name}: {len(matches)} meczów | nagłówki: {header_preview}")
+            preview_hdr = []
+            for r in rows[:5]:
+                if any(c.strip() for c in r):
+                    preview_hdr = r[:6]; break
+            info.append(f"✅ {name} [{method_used}]: {len(matches)} meczów, "
+                        f"pierwszy wiersz: {preview_hdr}")
         except Exception as e:
-            info.append(f"⚠️ {name}: błąd – {e}")
+            info.append(f"⚠️ {name}: {type(e).__name__}: {e}")
     return info
 
 
@@ -146,14 +246,11 @@ def set_cell_text(tc, text, bold=False, size=None, align=None, font='Aptos'):
         p.remove(r)
     if align:
         pPr = p.find(wt('pPr'))
-        if pPr is None:
-            pPr = etree.SubElement(p, wt('pPr'))
+        if pPr is None: pPr = etree.SubElement(p, wt('pPr'))
         jc = pPr.find(wt('jc'))
-        if jc is None:
-            jc = etree.SubElement(pPr, wt('jc'))
+        if jc is None: jc = etree.SubElement(pPr, wt('jc'))
         jc.set(f'{{{W}}}val', align)
-    if not text:
-        return
+    if not text: return
     r = etree.SubElement(p, wt('r'))
     rPr = etree.SubElement(r, wt('rPr'))
     fonts = etree.SubElement(rPr, wt('rFonts'))
