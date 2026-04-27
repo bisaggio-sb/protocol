@@ -66,13 +66,14 @@ for i, f in enumerate(logo_files):
         elements_available.append((f'logo{i+1}', f'Grafika {i+1}'))
 
 if elements_available:
-    st.markdown("Pozycje (1 = na górze, większe = niżej):")
+    st.markdown("Każdemu elementowi przypisz pozycję (1 = najwyżej):")
     positions = {}
     pcols = st.columns(min(len(elements_available), 4))
+    pos_options = list(range(1, len(elements_available) + 1))
     for idx, (key, label) in enumerate(elements_available):
         with pcols[idx % len(pcols)]:
-            positions[key] = st.number_input(label, min_value=1, max_value=10,
-                                              value=idx+1, key=f"pos_{key}")
+            positions[key] = st.selectbox(label, options=pos_options,
+                                          index=idx, key=f"pos_{key}")
     # Sortuj
     image_order = [k for k, _ in sorted(elements_available,
                                           key=lambda x: positions[x[0]])]
