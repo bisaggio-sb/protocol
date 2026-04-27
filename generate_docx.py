@@ -16,63 +16,96 @@ def wt(n): return f'{{{W}}}{n}'
 # ─── Google Sheets ────────────────────────────────────────────────────────────
 
 def fetch_sheet_by_name(sheet_id, sheet_name):
-    """Pobiera CSV zakładki po NAZWIE (nie GID). Działa dla publicznych arkuszy."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
            f"/export?format=csv&sheet={requests.utils.quote(sheet_name)}")
     r = requests.get(url, timeout=15)
-    if r.status_code != 200:
-        return None
-    # Jeśli odpowiedź to HTML (strona błędu) a nie CSV — pomiń
-    if r.text.strip().startswith('<!'):
+    if r.status_code != 200 or r.text.strip().startswith('<!'):
         return None
     return list(csv.reader(io.StringIO(r.text)))
 
 
 def parse_group_rows(rows):
+    """
+    Obsługuje rzeczywistą strukturę zakładki Gr. X:
+      #  | Godzina | Tor | (opcjonalne ukryte kol.) | Grupa X (=Z1) | 1.set | 2.set | Z2 | 1.set | 2.set
+    Szuka nagłówka 'Tor' i 'Godzina', a Player1 = kolumna ze startkiem 'Gr',
+    Player2 = Player1+3 (po dwóch kolumnach punktów).
+    """
     if not rows:
         return []
-    header_idx = None
-    header = []
+
+    # Znajdź wiersz nagłówkowy
+    header_idx, header = None, []
     for i, row in enumerate(rows):
         norm = [c.strip().lower() for c in row]
         if 'tor' in norm:
             header_idx = i
             header = norm
             break
+
     if header_idx is None:
         return []
 
-    def col(name):
-        try: return header.index(name.lower())
+    def ci(name):
+        try: return header.index(name)
         except ValueError: return None
 
-    ci = {k: col(v) for k, v in {
-        'tor':'tor','godz':'godzina','grupa':'grupa',
-        'mecz':'mecz','z1':'zawodnik 1','z2':'zawodnik 2'
-    }.items()}
+    col_tor  = ci('tor')
+    col_godz = ci('godzina')
+
+    # Mecz = '#' albo pierwsza kolumna numeryczna
+    col_mecz = ci('#')
+    if col_mecz is None:
+        for name in ('mecz','lp','nr','numer','no','no.'):
+            col_mecz = ci(name)
+            if col_mecz is not None:
+                break
+    if col_mecz is None:
+        col_mecz = 0
+
+    # Player 1 = kolumna z nagłówkiem startującym od 'gr'
+    col_z1, grupa_raw = None, ''
+    for i, h in enumerate(header):
+        if h.startswith('gr'):
+            col_z1 = i
+            grupa_raw = rows[header_idx][i].strip()
+            break
+
+    if col_z1 is None and col_tor is not None:
+        col_z1 = col_tor + 1   # fallback
+
+    # Player 2 = Player1 + 3 kolumny (P1, set1, set2, P2)
+    col_z2 = (col_z1 + 3) if col_z1 is not None else None
+
+    # Wyłuskaj literę grupy z nagłówka: "Grupa C" -> "C"
+    m = re.search(r'\b([A-P])\b', grupa_raw)
+    grupa = m.group(1) if m else ''
 
     matches = []
     for row in rows[header_idx + 1:]:
         if not any(c.strip() for c in row):
             continue
-        def g(k):
-            idx = ci.get(k)
-            if idx is None or idx >= len(row): return ''
-            return row[idx].strip()
-        if not g('tor') and not g('z1'):
+        def g(c):
+            if c is None or c >= len(row): return ''
+            return row[c].strip()
+        tor = g(col_tor)
+        z1  = g(col_z1)
+        if not tor and not z1:
             continue
-        matches.append({'tor':g('tor'),'godz':g('godz'),'grupa':g('grupa'),
-                        'mecz':g('mecz'),'z1':g('z1'),'z2':g('z2')})
+        matches.append({
+            'tor':   tor,
+            'godz':  g(col_godz),
+            'grupa': grupa,
+            'mecz':  g(col_mecz),
+            'z1':    z1,
+            'z2':    g(col_z2),
+        })
     return matches
 
 
 def fetch_all_group_sheets(sheet_id):
-    """
-    Próbuje zakładek Gr. A – Gr. P po nazwie.
-    Nie potrzebuje GID — działa dla każdego publicznego arkusza.
-    """
     results = []
-    for letter in string.ascii_uppercase[:16]:   # A … P
+    for letter in string.ascii_uppercase[:16]:
         name = f"Gr. {letter}"
         try:
             rows = fetch_sheet_by_name(sheet_id, name)
@@ -87,20 +120,18 @@ def fetch_all_group_sheets(sheet_id):
 
 
 def get_sheet_names_debug(sheet_id):
-    """Zwraca listę znalezionych zakładek + ich status (do Debug)."""
     info = []
     for letter in string.ascii_uppercase[:16]:
         name = f"Gr. {letter}"
         try:
-            url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-                   f"/export?format=csv&sheet={requests.utils.quote(name)}")
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200 and not r.text.strip().startswith('<!'):
-                rows = list(csv.reader(io.StringIO(r.text)))
-                matches = parse_group_rows(rows)
-                info.append(f"✅ {name}: {len(matches)} meczów")
-            else:
-                info.append(f"❌ {name}: brak (status {r.status_code})")
+            rows = fetch_sheet_by_name(sheet_id, name)
+            if rows is None:
+                info.append(f"❌ {name}: brak zakładki")
+                continue
+            matches = parse_group_rows(rows)
+            # Pokaż też pierwsze wiersze CSV dla diagnozy
+            header_preview = rows[0][:8] if rows else []
+            info.append(f"✅ {name}: {len(matches)} meczów | nagłówki: {header_preview}")
         except Exception as e:
             info.append(f"⚠️ {name}: błąd – {e}")
     return info
@@ -160,8 +191,7 @@ def make_image_paragraph(rel_id, cx_emu, cy_emu, align='center'):
     R   = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
     p = etree.Element(wt('p'))
     pPr = etree.SubElement(p, wt('pPr'))
-    jc = etree.SubElement(pPr, wt('jc'))
-    jc.set(f'{{{W}}}val', align)
+    jc = etree.SubElement(pPr, wt('jc')); jc.set(f'{{{W}}}val', align)
     r = etree.SubElement(p, wt('r'))
     inline = etree.SubElement(r, f'{{{WP}}}inline')
     etree.SubElement(inline, f'{{{WP}}}extent', cx=str(cx_emu), cy=str(cy_emu))
@@ -171,19 +201,15 @@ def make_image_paragraph(rel_id, cx_emu, cy_emu, align='center'):
     gd = etree.SubElement(graphic, f'{{{A}}}graphicData', uri=PIC)
     pic = etree.SubElement(gd, f'{{{PIC}}}pic')
     nvP = etree.SubElement(pic, f'{{{PIC}}}nvPicPr')
-    cNv = etree.SubElement(nvP, f'{{{PIC}}}cNvPr')
-    cNv.set('id','0'); cNv.set('name','img')
+    cNv = etree.SubElement(nvP, f'{{{PIC}}}cNvPr'); cNv.set('id','0'); cNv.set('name','img')
     etree.SubElement(nvP, f'{{{PIC}}}cNvPicPr')
     bf = etree.SubElement(pic, f'{{{PIC}}}blipFill')
-    blip = etree.SubElement(bf, f'{{{A}}}blip')
-    blip.set(f'{{{R}}}embed', rel_id)
-    st = etree.SubElement(bf, f'{{{A}}}stretch')
-    etree.SubElement(st, f'{{{A}}}fillRect')
+    blip = etree.SubElement(bf, f'{{{A}}}blip'); blip.set(f'{{{R}}}embed', rel_id)
+    st = etree.SubElement(bf, f'{{{A}}}stretch'); etree.SubElement(st, f'{{{A}}}fillRect')
     spPr = etree.SubElement(pic, f'{{{PIC}}}spPr')
     xfrm = etree.SubElement(spPr, f'{{{A}}}xfrm')
     off = etree.SubElement(xfrm, f'{{{A}}}off'); off.set('x','0'); off.set('y','0')
-    ext2 = etree.SubElement(xfrm, f'{{{A}}}ext')
-    ext2.set('cx', str(cx_emu)); ext2.set('cy', str(cy_emu))
+    ext2 = etree.SubElement(xfrm, f'{{{A}}}ext'); ext2.set('cx', str(cx_emu)); ext2.set('cy', str(cy_emu))
     pg = etree.SubElement(spPr, f'{{{A}}}prstGeom'); pg.set('prst','rect')
     etree.SubElement(pg, f'{{{A}}}avLst')
     return p
@@ -261,13 +287,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None):
         rid = f'rId{next_rid[0]}'; next_rid[0] += 1
         media_files['media/qrcode.png'] = qr_bytes
         rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
-        rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', 'media/qrcode.png')
+        rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target','media/qrcode.png')
         qr_rid_info = (rid, int(4.5*360000), int(4.5*360000))
 
-    for el in list(body):
-        body.remove(el)
+    for el in list(body): body.remove(el)
 
-    # Strona tytułowa
     body.append(title_para('GP2 2026', size=52, bold=True))
     body.append(title_para('Protokoły meczowe – faza grupowa', size=28))
     p_sp = etree.Element(wt('p'))
@@ -282,8 +306,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None):
     first = True
     for group_name, matches in sheets_data:
         for match in matches:
-            if not first:
-                body.append(make_page_break())
+            if not first: body.append(make_page_break())
             first = False
 
             if logo_rids.get('banner'):
@@ -308,18 +331,15 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None):
                             set_cell_text(tcs[idx], match.get(key,''), size=28, align='center')
                 if len(rows) > 3:
                     tcs = rows[3].findall(wt('tc'))
-                    if tcs:
-                        set_cell_text(tcs[0], match.get('z1',''), size=24, align='right')
+                    if tcs: set_cell_text(tcs[0], match.get('z1',''), size=24, align='right')
                 if len(rows) > 4:
                     tcs = rows[4].findall(wt('tc'))
-                    if tcs:
-                        set_cell_text(tcs[0], match.get('z2',''), size=24, align='right')
+                    if tcs: set_cell_text(tcs[0], match.get('z2',''), size=24, align='right')
 
             if logo_rids.get('bottom_left'):
                 body.append(make_image_paragraph(*logo_rids['bottom_left'], align='left'))
 
-    if sectPr is not None:
-        body.append(sectPr)
+    if sectPr is not None: body.append(sectPr)
 
     doc_out  = etree.tostring(doc_root,  xml_declaration=True, encoding='UTF-8', standalone=True)
     rels_out = etree.tostring(rels_root, xml_declaration=True, encoding='UTF-8', standalone=True)
