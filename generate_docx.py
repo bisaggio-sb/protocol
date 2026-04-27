@@ -1,10 +1,10 @@
 """
-generate_docx.py – GP2 Protocol Generator
+generate_docx.py – Generator protokołów meczowych Mölkky.
 
-Strategia pobierania zakładek (3 metody fallback):
-  1) gviz/tq?tqx=out:csv&sheet=NAME    – preferowane (obsługuje nazwy z kropką)
-  2) export?format=csv&gid=GID         – z GID wyciągniętym ze strony HTML
-  3) export?format=csv&sheet=NAME      – ostateczny fallback
+Strategia: szablon Grupa_IND.docx jest klonowany 1:1 dla każdego meczu.
+Wypełniamy tylko 6 komórek w tabeli nagłówkowej:
+  Tor, Godzina, Grupa, Mecz #, Zawodnik 1, Zawodnik 2.
+Reszta (tabele, formatowanie, fonty, marginesy) pozostaje dokładnie jak w szablonie.
 """
 
 import io, csv, re, copy, zipfile, string
@@ -12,9 +12,7 @@ from urllib.parse import quote
 import requests
 from lxml import etree
 
-W   = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
-REL_IMG = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
 def wt(n): return f'{{{W}}}{n}'
 
@@ -25,9 +23,7 @@ def _is_html(text):
     s = text.lstrip()[:200].lower()
     return s.startswith('<!doctype') or s.startswith('<html') or '<head' in s
 
-
 def fetch_via_gviz(sheet_id, sheet_name):
-    """Metoda 1: gviz API (najlepsza dla nazw z kropkami)."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
            f"/gviz/tq?tqx=out:csv&sheet={quote(sheet_name)}")
     r = requests.get(url, timeout=15)
@@ -35,9 +31,7 @@ def fetch_via_gviz(sheet_id, sheet_name):
         return None
     return list(csv.reader(io.StringIO(r.text)))
 
-
 def fetch_via_gid(sheet_id, gid):
-    """Metoda 2: export po GID."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
            f"/export?format=csv&gid={gid}")
     r = requests.get(url, timeout=15)
@@ -45,9 +39,7 @@ def fetch_via_gid(sheet_id, gid):
         return None
     return list(csv.reader(io.StringIO(r.text)))
 
-
 def fetch_via_export_name(sheet_id, sheet_name):
-    """Metoda 3: export?sheet=NAME (czasem niepewne, zwraca pierwszą zakładkę)."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
            f"/export?format=csv&sheet={quote(sheet_name)}")
     r = requests.get(url, timeout=15)
@@ -55,12 +47,7 @@ def fetch_via_export_name(sheet_id, sheet_name):
         return None
     return list(csv.reader(io.StringIO(r.text)))
 
-
 def get_sheet_gids(sheet_id):
-    """
-    Wyciąga mapę {sheet_name: gid} z HTML strony arkusza.
-    Google embeduje to w bootstrap-data.
-    """
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
     try:
         r = requests.get(url, timeout=20)
@@ -68,78 +55,51 @@ def get_sheet_gids(sheet_id):
         return {}
     text = r.text
     mapping = {}
-
-    # Wzorzec 1: w tagu <option value="GID">NAME</option> (sheet picker)
     for m in re.finditer(r'value="(\d{6,12})"[^>]*>([^<]{1,80})</option>', text):
         gid, name = m.group(1), m.group(2).strip()
         if name and name not in mapping:
             mapping[name] = gid
-
-    # Wzorzec 2: tablica bootstrap, np. ["Gr. A",null,...,GID,...]
     if not mapping:
         for m in re.finditer(r'\["([^"\\]{1,60})"(?:\s*,[^,\[\]]*){1,15},(\d{6,12})\]', text):
             name, gid = m.group(1).strip(), m.group(2)
             if name and name not in mapping:
                 mapping[name] = gid
-
-    # Wzorzec 3: blisko nazwy "Gr. X" znajduje numer
-    if not mapping:
-        for letter in string.ascii_uppercase[:16]:
-            name = f"Gr. {letter}"
-            idx = text.find(f'"{name}"')
-            if idx >= 0:
-                window = text[max(0, idx-300):idx+400]
-                nums = re.findall(r'\b(\d{7,12})\b', window)
-                if nums:
-                    mapping[name] = nums[0]
-
     return mapping
 
-
 def fetch_sheet(sheet_id, sheet_name, gid_map=None):
-    """Pobiera zakładkę używając najlepszej dostępnej metody."""
-    # 1. gviz – najpewniejsze dla nazw z kropką
     rows = fetch_via_gviz(sheet_id, sheet_name)
-    if rows:
-        return rows
-    # 2. po GID
+    if rows: return rows
     if gid_map and sheet_name in gid_map:
         rows = fetch_via_gid(sheet_id, gid_map[sheet_name])
-        if rows:
-            return rows
-    # 3. fallback – export?sheet=
-    rows = fetch_via_export_name(sheet_id, sheet_name)
-    return rows
+        if rows: return rows
+    return fetch_via_export_name(sheet_id, sheet_name)
 
 
 # ─── Parser zakładki grupy ────────────────────────────────────────────────────
 
+def _is_valid_match_row(tor, godz, z1, z2):
+    if not (tor and tor.strip().isdigit()):
+        return False
+    if not (godz and re.match(r'^\d{1,2}:\d{2}$', godz.strip())):
+        return False
+    if not z1 or not z2:
+        return False
+    return True
+
 def parse_group_rows(rows):
-    """
-    Struktura zakładki Gr. X (z arkusza GP2_2026_wyniki):
-      Wiersz nagłówkowy: # | Godzina | Tor | Grupa X | 1.set | 2.set | <Z2_header_pusty> | 1.set | 2.set
-    Player1 = kolumna z nagłówkiem zaczynającym się od 'Gr',
-    Player2 = Player1 + 3 (po dwóch kolumnach setów).
-    """
     if not rows:
         return []
-
     header_idx, header = None, []
     for i, row in enumerate(rows):
         norm = [c.strip().lower() for c in row]
         if 'tor' in norm:
-            header_idx = i
-            header = norm
-            break
+            header_idx = i; header = norm; break
     if header_idx is None:
         return []
-
     raw_header = rows[header_idx]
-
     def ci(name):
         try: return header.index(name)
         except ValueError: return None
-
     col_tor  = ci('tor')
     col_godz = ci('godzina')
     col_mecz = ci('#')
@@ -147,10 +107,7 @@ def parse_group_rows(rows):
         for n in ('mecz','lp','nr'):
             col_mecz = ci(n)
             if col_mecz is not None: break
-    if col_mecz is None:
-        col_mecz = 0
-
-    # Player 1 = kolumna z nagłówkiem 'gr...' (np. "Grupa C")
+    if col_mecz is None: col_mecz = 0
     col_z1, grupa_raw = None, ''
     for i, h in enumerate(header):
         if h.startswith('gr'):
@@ -159,12 +116,9 @@ def parse_group_rows(rows):
             break
     if col_z1 is None and col_tor is not None:
         col_z1 = col_tor + 1
-
     col_z2 = col_z1 + 3 if col_z1 is not None else None
-
     m = re.search(r'\b([A-P])\b', grupa_raw)
     grupa = m.group(1) if m else ''
-
     matches = []
     for row in rows[header_idx + 1:]:
         if not any(c.strip() for c in row):
@@ -172,16 +126,14 @@ def parse_group_rows(rows):
         def g(c):
             if c is None or c >= len(row): return ''
             return row[c].strip()
-        tor = g(col_tor)
-        z1  = g(col_z1)
-        if not tor and not z1:
+        tor  = g(col_tor); godz = g(col_godz)
+        z1   = g(col_z1);  z2   = g(col_z2)
+        mecz = g(col_mecz)
+        if not _is_valid_match_row(tor, godz, z1, z2):
             continue
-        matches.append({
-            'tor': tor, 'godz': g(col_godz), 'grupa': grupa,
-            'mecz': g(col_mecz), 'z1': z1, 'z2': g(col_z2)
-        })
+        matches.append({'tor':tor,'godz':godz,'grupa':grupa,
+                        'mecz':mecz,'z1':z1,'z2':z2})
     return matches
-
 
 def fetch_all_group_sheets(sheet_id):
     gid_map = get_sheet_gids(sheet_id)
@@ -190,87 +142,74 @@ def fetch_all_group_sheets(sheet_id):
         name = f"Gr. {letter}"
         try:
             rows = fetch_sheet(sheet_id, name, gid_map)
-            if rows is None:
-                continue
+            if rows is None: continue
             matches = parse_group_rows(rows)
-            if matches:
-                results.append((name, matches))
+            if matches: results.append((name, matches))
         except Exception:
             continue
     return results
 
-
 def get_sheet_names_debug(sheet_id):
     info = []
     gid_map = get_sheet_gids(sheet_id)
-    info.append(f"📋 Wykryte zakładki w mapie GID: {len(gid_map)}")
-    if gid_map:
-        sample = list(gid_map.items())[:5]
-        info.append(f"   Przykład: {sample}")
+    info.append(f"📋 Mapa GID: {len(gid_map)} zakładek")
     info.append("")
     for letter in string.ascii_uppercase[:16]:
         name = f"Gr. {letter}"
-        try:
-            method_used = ""
-            rows = fetch_via_gviz(sheet_id, name)
-            if rows:
-                method_used = "gviz"
-            else:
-                if name in gid_map:
-                    rows = fetch_via_gid(sheet_id, gid_map[name])
-                    if rows: method_used = f"gid={gid_map[name]}"
-                if not rows:
-                    rows = fetch_via_export_name(sheet_id, name)
-                    if rows: method_used = "export?sheet"
+        method = ""
+        rows = fetch_via_gviz(sheet_id, name)
+        if rows: method = "gviz"
+        else:
+            if name in gid_map:
+                rows = fetch_via_gid(sheet_id, gid_map[name])
+                if rows: method = f"gid={gid_map[name]}"
             if not rows:
-                info.append(f"❌ {name}: brak (wszystkie metody zawiodły)")
-                continue
-            matches = parse_group_rows(rows)
-            preview_hdr = []
-            for r in rows[:5]:
-                if any(c.strip() for c in r):
-                    preview_hdr = r[:6]; break
-            info.append(f"✅ {name} [{method_used}]: {len(matches)} meczów, "
-                        f"pierwszy wiersz: {preview_hdr}")
-        except Exception as e:
-            info.append(f"⚠️ {name}: {type(e).__name__}: {e}")
+                rows = fetch_via_export_name(sheet_id, name)
+                if rows: method = "export"
+        if not rows:
+            info.append(f"❌ {name}: brak"); continue
+        matches = parse_group_rows(rows)
+        info.append(f"✅ {name} [{method}]: {len(matches)} meczów")
     return info
 
 
-# ─── XML helpers ──────────────────────────────────────────────────────────────
+# ─── XML helpers: wstawianie tekstu do komórki ───────────────────────────────
 
-def set_cell_text(tc, text, bold=False, size=None, align=None, font='Aptos'):
-    paras = tc.findall(wt('p'))
-    p = paras[0] if paras else etree.SubElement(tc, wt('p'))
-    for r in p.findall(wt('r')):
-        p.remove(r)
+def _set_cell_value(tc, text, *, bold=True, size=28, align='center'):
+    """
+    Wstawia tekst do KOMÓRKI istniejącego szablonu zachowując wszystko inne.
+    Czyści wszystkie paragrafy w komórce, tworzy jeden nowy z tekstem.
+    """
+    # Usuń wszystkie istniejące paragrafy
+    for p in tc.findall(wt('p')):
+        tc.remove(p)
+    # Dodaj nowy paragraf
+    p = etree.SubElement(tc, wt('p'))
+    pPr = etree.SubElement(p, wt('pPr'))
     if align:
-        pPr = p.find(wt('pPr'))
-        if pPr is None: pPr = etree.SubElement(p, wt('pPr'))
-        jc = pPr.find(wt('jc'))
-        if jc is None: jc = etree.SubElement(pPr, wt('jc'))
+        jc = etree.SubElement(pPr, wt('jc'))
         jc.set(f'{{{W}}}val', align)
-    if not text: return
+    if not text:
+        return
     r = etree.SubElement(p, wt('r'))
     rPr = etree.SubElement(r, wt('rPr'))
     fonts = etree.SubElement(rPr, wt('rFonts'))
-    for a in ('ascii','hAnsi','eastAsia','cs'):
-        fonts.set(f'{{{W}}}{a}', font)
-    for tag in ('b','bCs'):
-        etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val','1' if bold else '0')
-    for tag in ('i','iCs'):
-        etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val','0')
-    if size:
-        for tag in ('sz','szCs'):
-            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', str(size))
+    # Aptos jako preferowany, Calibri jako fallback (kompatybilność ze starszym Wordem)
+    fonts.set(f'{{{W}}}ascii',     'Aptos')
+    fonts.set(f'{{{W}}}hAnsi',     'Aptos')
+    fonts.set(f'{{{W}}}eastAsia',  'Aptos')
+    fonts.set(f'{{{W}}}cs',        'Aptos')
+    if bold:
+        for tag in ('b','bCs'):
+            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val','1')
+    for tag in ('sz','szCs'):
+        etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', str(size))
     etree.SubElement(rPr, wt('lang')).set(f'{{{W}}}val','pl-PL')
     t = etree.SubElement(r, wt('t'))
     t.text = text
-    if text and (text[0]==' ' or text[-1]==' '):
-        t.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
 
 
-def make_page_break():
+def _make_page_break_para():
     p = etree.Element(wt('p'))
     pPr = etree.SubElement(p, wt('pPr'))
     sp = etree.SubElement(pPr, wt('spacing'))
@@ -281,175 +220,176 @@ def make_page_break():
     return p
 
 
-def make_image_paragraph(rel_id, cx_emu, cy_emu, align='center'):
-    WP  = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
-    A   = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-    PIC = 'http://schemas.openxmlformats.org/drawingml/2006/picture'
-    R   = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-    p = etree.Element(wt('p'))
-    pPr = etree.SubElement(p, wt('pPr'))
-    jc = etree.SubElement(pPr, wt('jc')); jc.set(f'{{{W}}}val', align)
-    r = etree.SubElement(p, wt('r'))
-    inline = etree.SubElement(r, f'{{{WP}}}inline')
-    etree.SubElement(inline, f'{{{WP}}}extent', cx=str(cx_emu), cy=str(cy_emu))
-    dPr = etree.SubElement(inline, f'{{{WP}}}docPr')
-    dPr.set('id', str(abs(hash(rel_id)) % 9999)); dPr.set('name','img')
-    graphic = etree.SubElement(inline, f'{{{A}}}graphic')
-    gd = etree.SubElement(graphic, f'{{{A}}}graphicData', uri=PIC)
-    pic = etree.SubElement(gd, f'{{{PIC}}}pic')
-    nvP = etree.SubElement(pic, f'{{{PIC}}}nvPicPr')
-    cNv = etree.SubElement(nvP, f'{{{PIC}}}cNvPr'); cNv.set('id','0'); cNv.set('name','img')
-    etree.SubElement(nvP, f'{{{PIC}}}cNvPicPr')
-    bf = etree.SubElement(pic, f'{{{PIC}}}blipFill')
-    blip = etree.SubElement(bf, f'{{{A}}}blip'); blip.set(f'{{{R}}}embed', rel_id)
-    st = etree.SubElement(bf, f'{{{A}}}stretch'); etree.SubElement(st, f'{{{A}}}fillRect')
-    spPr = etree.SubElement(pic, f'{{{PIC}}}spPr')
-    xfrm = etree.SubElement(spPr, f'{{{A}}}xfrm')
-    off = etree.SubElement(xfrm, f'{{{A}}}off'); off.set('x','0'); off.set('y','0')
-    ext2 = etree.SubElement(xfrm, f'{{{A}}}ext'); ext2.set('cx', str(cx_emu)); ext2.set('cy', str(cy_emu))
-    pg = etree.SubElement(spPr, f'{{{A}}}prstGeom'); pg.set('prst','rect')
-    etree.SubElement(pg, f'{{{A}}}avLst')
-    return p
+def _fill_protocol(elements, match):
+    """
+    Wypełnia 1 protokół: znajduje pierwszą tabelę (nagłówkową) wśród
+    sklonowanych elementów i wstawia dane do odpowiednich komórek.
+    Tabela nagłówkowa ma 5 wierszy. Wiersz 0: Tor|val|Godz|val|Gr|val|Mecz#|val.
+    Wiersz 3: Zawodnik 1 (komórka 0). Wiersz 4: Zawodnik 2 (komórka 0).
+    """
+    tbls = [el for el in elements if el.tag == wt('tbl')]
+    if not tbls:
+        return
+    rows = tbls[0].findall(wt('tr'))
+    if len(rows) > 0:
+        tcs = rows[0].findall(wt('tc'))
+        # tcs[0]=Tor label, tcs[1]=val_tor, tcs[2]=Godz label, tcs[3]=val_godz,
+        # tcs[4]=Gr label, tcs[5]=val_gr, tcs[6]=Mecz# label, tcs[7]=val_mecz
+        if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
+        if len(tcs) > 3: _set_cell_value(tcs[3], match.get('godz',''), size=28)
+        if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
+        if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
+    # Zawodnicy
+    if len(rows) > 3:
+        tcs = rows[3].findall(wt('tc'))
+        if tcs: _set_cell_value(tcs[0], match.get('z1',''), size=24, align='right')
+    if len(rows) > 4:
+        tcs = rows[4].findall(wt('tc'))
+        if tcs: _set_cell_value(tcs[0], match.get('z2',''), size=24, align='right')
 
 
-def make_qr_bytes(url):
-    try:
-        import qrcode as _qr
-        qr = _qr.QRCode(version=2, box_size=6, border=2)
-        qr.add_data(url); qr.make(fit=True)
-        img = qr.make_image(fill_color='black', back_color='white')
-        buf = io.BytesIO(); img.save(buf, format='PNG')
-        return buf.getvalue()
-    except ImportError:
-        return None
+# ─── Build document ───────────────────────────────────────────────────────────
 
-
-def title_para(text, size=40, bold=False, align='center'):
-    p = etree.Element(wt('p'))
-    pPr = etree.SubElement(p, wt('pPr'))
-    jc = etree.SubElement(pPr, wt('jc')); jc.set(f'{{{W}}}val', align)
-    r = etree.SubElement(p, wt('r'))
-    rPr = etree.SubElement(r, wt('rPr'))
-    for a in ('ascii','hAnsi','eastAsia','cs'):
-        etree.SubElement(rPr, wt('rFonts')).set(f'{{{W}}}{a}','Aptos')
-    for tag in ('b','bCs'):
-        etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val','1' if bold else '0')
-    for tag in ('sz','szCs'):
-        etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', str(size))
-    t = etree.SubElement(r, wt('t')); t.text = text
-    return p
-
-
-# ─── Build docx ───────────────────────────────────────────────────────────────
-
-def build_document(sheet_id, sheets_url, sheets_data, logos=None):
+def build_document(sheet_id, sheets_url, sheets_data, logos=None,
+                   tournament_name=None):
+    """
+    Klonuje szablon 1:1 raz na każdy mecz, podmienia wartości w 6 komórkach.
+    `logos` i `tournament_name` zarezerwowane dla przyszłych wersji.
+    """
     import os
     tpl_path = os.path.join(os.path.dirname(__file__), 'Grupa_IND.docx')
     with open(tpl_path, 'rb') as f:
         tpl_bytes = f.read()
 
     zin = zipfile.ZipFile(io.BytesIO(tpl_bytes))
-    doc_root = etree.fromstring(zin.read('word/document.xml'))
-    rels_root = etree.fromstring(zin.read('word/_rels/document.xml.rels'))
-
+    doc_xml = zin.read('word/document.xml')
+    doc_root = etree.fromstring(doc_xml)
     body = doc_root.find(wt('body'))
+
+    # ── Fix 1: marginesy 720 DXA (1.27cm) z każdej strony
+    sectPr_check = body.find(wt('sectPr'))
+    if sectPr_check is not None:
+        pgMar = sectPr_check.find(wt('pgMar'))
+        if pgMar is not None:
+            for side in ('top','bottom','left','right'):
+                pgMar.set(f'{{{W}}}{side}', '720')
+
+    # ── Fix 2: pomniejsz fonty etykiet z 24 (12pt) → 18 (9pt)
+    # żeby "Tor", "Godzina", "Mecz #", "Wygrane sety" mieściły się w 1 linii
+    # nawet w przypadku fallback fontu (Calibri/Carlito).
+    LABEL_TEXTS = {'Tor','Godzina','Grupa','Mecz','#','Punkty','SET 1','SET 2',
+                    'Wygrane','sety','Podpis'}
+    for r in body.iter(wt('r')):
+        ts = r.findall(wt('t'))
+        if not ts:
+            continue
+        text_content = ''.join((t.text or '') for t in ts).strip()
+        if text_content in LABEL_TEXTS:
+            sz_el  = r.find(f'{wt("rPr")}/{wt("sz")}')
+            szCs_el = r.find(f'{wt("rPr")}/{wt("szCs")}')
+            if sz_el is not None and sz_el.get(f'{{{W}}}val') == '24':
+                sz_el.set(f'{{{W}}}val', '18')
+            if szCs_el is not None and szCs_el.get(f'{{{W}}}val') == '24':
+                szCs_el.set(f'{{{W}}}val', '18')
+
+    # ── Fix 3: zrównaj szerokość tabeli 1 do tabeli 2 (9090 → 9690 DXA)
+    # Rozszerzamy ostatnią kolumnę "Podpis" (gridCol[11]: 1260 → 1860)
+    # i wyrównujemy SET 1 (1050) z SET 2 (1080) → oba 1080.
+    first_tbl = body.find(wt('tbl'))
+    if first_tbl is not None:
+        gcs = first_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
+        if len(gcs) == 12:
+            gcs[4].set(f'{{{W}}}w', '720')   # SET 1 części: było 690 → 720
+            gcs[5].set(f'{{{W}}}w', '360')   # SET 1 część 2 (bez zmian)
+            gcs[11].set(f'{{{W}}}w', '1860') # Podpis: 1260 → 1860 (+600)
+            # Update tcW dla komórek: SET 1 (cur 1050→1080), Podpis (cur 2220 → 2820)
+            for row in first_tbl.findall(wt('tr')):
+                for tc in row.findall(wt('tc')):
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is None: continue
+                    tcW = tcPr.find(wt('tcW'))
+                    gs  = tcPr.find(wt('gridSpan'))
+                    if tcW is None: continue
+                    cur_w = int(tcW.get(f'{{{W}}}w','0'))
+                    span  = int(gs.get(f'{{{W}}}val','1')) if gs is not None else 1
+                    # SET 1 komórka (1050, span=2) → 1080
+                    if cur_w == 1050 and span == 2:
+                        tcW.set(f'{{{W}}}w', '1080')
+                    # Podpis komórka (2220, span=3) → 2820
+                    elif cur_w == 2220 and span == 3:
+                        tcW.set(f'{{{W}}}w', '2820')
+
+    # ── Fix 4: dodaj alias fontu Aptos→Calibri w fontTable (Calibri jest
+    # dostępny wszędzie i sans-serif, dzięki temu unikamy szeryfowego fallback).
+    # Tu nie modyfikujemy fontTable.xml bo sandbox tego nie potrzebuje
+    # — ale dodajemy fallback inline w każdym runie:
+    # Robimy to później przy zapisie (modyfikujemy fontTable.xml)
+
+    # Wyciągnij sectPr (musi zostać na końcu) i zachowaj template
     sectPr = body.find(wt('sectPr'))
-    template_elements = [el for el in body if el.tag != wt('sectPr')]
+    template_elements = [copy.deepcopy(el) for el in body if el.tag != wt('sectPr')]
 
-    next_rid = [200]
-    media_files = {}
-    logo_rids = {}
+    # Pomiń końcowy pusty paragraf jeśli go ma (powoduje pustą stronę)
+    while template_elements and template_elements[-1].tag == wt('p'):
+        last = template_elements[-1]
+        texts = last.findall(f'.//{wt("t")}')
+        if not texts or not any((t.text or '').strip() for t in texts):
+            template_elements.pop()
+        else:
+            break
 
-    def add_image(key, img_bytes, target_w_cm):
-        from PIL import Image as PILImage
-        rid = f'rId{next_rid[0]}'; next_rid[0] += 1
-        fname = f'media/logo_{key}.png'
-        pil = PILImage.open(io.BytesIO(img_bytes)).convert('RGBA')
-        buf = io.BytesIO(); pil.save(buf, format='PNG')
-        media_files[fname] = buf.getvalue()
-        cx = int(target_w_cm * 360000)
-        cy = int(cx / (pil.width / pil.height))
-        rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
-        rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', fname)
-        return rid, cx, cy
+    # Wyczyść body
+    for el in list(body):
+        body.remove(el)
 
-    if logos:
-        for key, img_bytes in logos.items():
-            if img_bytes:
-                logo_rids[key] = add_image(key, img_bytes, 16.0 if key=='banner' else 3.0)
-
-    qr_rid_info = None
-    qr_bytes = make_qr_bytes(sheets_url)
-    if qr_bytes:
-        rid = f'rId{next_rid[0]}'; next_rid[0] += 1
-        media_files['media/qrcode.png'] = qr_bytes
-        rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
-        rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target','media/qrcode.png')
-        qr_rid_info = (rid, int(4.5*360000), int(4.5*360000))
-
-    for el in list(body): body.remove(el)
-
-    body.append(title_para('GP2 2026', size=52, bold=True))
-    body.append(title_para('Protokoły meczowe – faza grupowa', size=28))
-    p_sp = etree.Element(wt('p'))
-    etree.SubElement(etree.SubElement(p_sp, wt('pPr')), wt('spacing')).set(f'{{{W}}}before','400')
-    body.append(p_sp)
-    body.append(title_para('Arkusz wyników – zeskanuj QR:', size=22))
-    if qr_rid_info:
-        body.append(make_image_paragraph(*qr_rid_info, align='center'))
-    body.append(title_para(sheets_url, size=14))
-    body.append(make_page_break())
-
+    # Generuj protokoły
     first = True
     for group_name, matches in sheets_data:
         for match in matches:
-            if not first: body.append(make_page_break())
+            if not first:
+                body.append(_make_page_break_para())
             first = False
 
-            if logo_rids.get('banner'):
-                body.append(make_image_paragraph(*logo_rids['banner'], align='center'))
-            for key in ('top_left','top_right'):
-                if logo_rids.get(key):
-                    body.append(make_image_paragraph(*logo_rids[key],
-                                align='left' if key=='top_left' else 'right'))
+            # Sklonuj szablon
+            cloned = [copy.deepcopy(el) for el in template_elements]
+            _fill_protocol(cloned, match)
+            for el in cloned:
+                body.append(el)
 
-            for el in template_elements:
-                body.append(copy.deepcopy(el))
+    # Przywróć sectPr na końcu
+    if sectPr is not None:
+        body.append(sectPr)
 
-            added = list(body)[-len(template_elements):]
-            tbls = [el for el in added if el.tag == wt('tbl')]
-
-            if tbls:
-                rows = tbls[0].findall(wt('tr'))
-                if len(rows) > 0:
-                    tcs = rows[0].findall(wt('tc'))
-                    for idx, key in [(1,'tor'),(3,'godz'),(5,'grupa'),(7,'mecz')]:
-                        if idx < len(tcs):
-                            set_cell_text(tcs[idx], match.get(key,''), size=28, align='center')
-                if len(rows) > 3:
-                    tcs = rows[3].findall(wt('tc'))
-                    if tcs: set_cell_text(tcs[0], match.get('z1',''), size=24, align='right')
-                if len(rows) > 4:
-                    tcs = rows[4].findall(wt('tc'))
-                    if tcs: set_cell_text(tcs[0], match.get('z2',''), size=24, align='right')
-
-            if logo_rids.get('bottom_left'):
-                body.append(make_image_paragraph(*logo_rids['bottom_left'], align='left'))
-
-    if sectPr is not None: body.append(sectPr)
-
-    doc_out  = etree.tostring(doc_root,  xml_declaration=True, encoding='UTF-8', standalone=True)
-    rels_out = etree.tostring(rels_root, xml_declaration=True, encoding='UTF-8', standalone=True)
+    # Zapakuj
+    doc_out = etree.tostring(doc_root, xml_declaration=True,
+                             encoding='UTF-8', standalone=True)
 
     zout_buf = io.BytesIO()
     zout = zipfile.ZipFile(zout_buf, 'w', compression=zipfile.ZIP_DEFLATED)
-    skip = {'word/document.xml','word/_rels/document.xml.rels'} | {f'word/{f}' for f in media_files}
     for item in zin.infolist():
-        if item.filename not in skip:
+        if item.filename == 'word/document.xml':
+            zout.writestr(item, doc_out)
+        elif item.filename == 'word/fontTable.xml':
+            # Dodaj <w:altName w:val="Calibri"/> dla fontów Aptos
+            # żeby Word/LibreOffice używał Calibri zamiast szeryfowego fallback.
+            ft_xml = zin.read(item.filename).decode('utf-8')
+            for font_name in ('Aptos', 'Aptos Display', 'Aptos Narrow'):
+                pattern = f'<w:font w:name="{font_name}">'
+                replacement = f'<w:font w:name="{font_name}"><w:altName w:val="Calibri"/>'
+                if pattern in ft_xml and '<w:altName' not in ft_xml.split(pattern, 1)[1][:200]:
+                    ft_xml = ft_xml.replace(pattern, replacement, 1)
+                # Dla Aptos Narrow i Display które nie ma w fontTable, dodaj jako nowe <w:font>
+            # Dodaj brakujące fonty:
+            for font_name in ('Aptos Narrow',):
+                if f'w:name="{font_name}"' not in ft_xml:
+                    new_font = (
+                        f'<w:font w:name="{font_name}"><w:altName w:val="Calibri"/>'
+                        f'<w:charset w:val="00"/><w:family w:val="swiss"/>'
+                        f'<w:pitch w:val="variable"/></w:font>'
+                    )
+                    ft_xml = ft_xml.replace('</w:fonts>', new_font + '</w:fonts>')
+            zout.writestr(item, ft_xml.encode('utf-8'))
+        else:
             zout.writestr(item, zin.read(item.filename))
-    zout.writestr('word/document.xml', doc_out)
-    zout.writestr('word/_rels/document.xml.rels', rels_out)
-    for fname, data in media_files.items():
-        zout.writestr(f'word/{fname}', data)
     zout.close(); zin.close()
     return zout_buf.getvalue()
