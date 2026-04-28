@@ -1,5 +1,6 @@
 """
 Generator protokołów meczowych Mölkky
+Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
 """
 import streamlit as st
 import io, re, base64, os
@@ -8,14 +9,10 @@ from PIL import Image
 import generate_docx
 
 st.set_page_config(page_title="Protokoły Mölkky", page_icon="🎯", layout="wide")
-st.title("🎯 Generator protokołów meczowych Mölkky")
-st.markdown("Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy `.docx`.")
 
-
-def extract_id(url):
-    m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
-    return m.group(1) if m else None
-
+# ─── Header z logo PFM zamiast emoji ───────────────────────────────────
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+PFM_PATH = os.path.join(APP_DIR, 'assets_pfm_logo.png')
 
 def img_to_data_url(file_or_bytes):
     """uploaded file lub bytes → data URL."""
@@ -27,46 +24,83 @@ def img_to_data_url(file_or_bytes):
         img_bytes = file_or_bytes
     img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
     buf = io.BytesIO()
-    img.thumbnail((300, 300))
+    img.thumbnail((400, 400))
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
     return f"data:image/png;base64,{b64}"
 
+# Header z logo PFM + tytułem
+header_cols = st.columns([1, 12])
+with header_cols[0]:
+    if os.path.exists(PFM_PATH):
+        st.image(PFM_PATH, width=70)
+with header_cols[1]:
+    st.title("Generator protokołów meczowych Mölkky")
+    st.markdown("Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy `.docx`.")
 
-def next_saturday():
-    """Zwraca string DD.MM.YYYY najbliższej soboty (lub dziś jeśli sobota)."""
-    today = date.today()
-    days_until_sat = (5 - today.weekday()) % 7  # 5 = sobota
-    sat = today + timedelta(days=days_until_sat)
-    return sat.strftime("%d.%m.%Y")
+st.divider()
 
 
-# Stan pozycji
-if 'image_positions' not in st.session_state:
-    st.session_state.image_positions = {
-        'qr':    {'x': 1.6, 'y': 0.2, 'w': 1.8, 'h': 1.8},
-        'pfm':   {'x': 1.5, 'y': 2.4, 'w': 2.0, 'h': 1.2},
-        'logo1': {'x': 1.5, 'y': 3.7, 'w': 2.0, 'h': 1.2},
-        'logo2': {'x': 1.5, 'y': 5.0, 'w': 2.0, 'h': 1.2},
-        'logo3': {'x': 1.5, 'y': 6.3, 'w': 2.0, 'h': 1.2},
-        'logo4': {'x': 1.5, 'y': 7.6, 'w': 2.0, 'h': 1.2},
+def extract_id(url):
+    m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
+    return m.group(1) if m else None
+
+
+# Stan pozycji (rozkładanie grafik z odstępami)
+def default_positions():
+    """Domyślny układ: jedna pod drugą z odstępami od góry obszaru."""
+    return {
+        'qr':    {'x': 1.7, 'y': 0.2, 'w': 1.8, 'h': 1.8},
+        'pfm':   {'x': 1.6, 'y': 2.6, 'w': 2.0, 'h': 1.8},
+        'logo1': {'x': 1.6, 'y': 4.7, 'w': 2.0, 'h': 1.8},
+        'logo2': {'x': 1.6, 'y': 6.8, 'w': 2.0, 'h': 1.8},
+        'logo3': {'x': 1.6, 'y': 8.9, 'w': 2.0, 'h': 1.8},
+        'logo4': {'x': 1.6, 'y': 11.0, 'w': 2.0, 'h': 1.8},
     }
 
+if 'image_positions' not in st.session_state:
+    st.session_state.image_positions = default_positions()
 
+
+# ════════════════════════════════════════════════════════════════════════
 col_form, col_preview = st.columns([3, 2])
+# ════════════════════════════════════════════════════════════════════════
 
 with col_form:
-    # ─── 1. Turniej (nazwa + data w jednym rzędzie, kompaktowo) ──────────
+
+    # ─── 1. Turniej (kompaktowo: nazwa + data + format) ──────────────────
     st.header("1. Turniej")
-    cols_t = st.columns([2, 1])
-    with cols_t[0]:
-        tournament_name = st.text_input("Nazwa turnieju",
-            value="GP2 2026", placeholder="np. GP2 2026")
-    with cols_t[1]:
-        tournament_date_d = st.date_input("Data turnieju",
-            value=date.today() + timedelta(days=(5 - date.today().weekday()) % 7),
-            format="DD.MM.YYYY")
+    cols_t1 = st.columns([2, 1])
+    with cols_t1[0]:
+        tournament_name = st.text_input("Nazwa", value="GP2 2026",
+                                        placeholder="np. GP2 2026")
+    with cols_t1[1]:
+        next_sat = date.today() + timedelta(days=(5 - date.today().weekday()) % 7)
+        tournament_date_d = st.date_input("Data", value=next_sat, format="DD.MM.YYYY")
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
+
+    # Format turnieju (na razie tylko 1 opcja zaimplementowana, ale UI gotowy na rozbudowę)
+    cols_t2 = st.columns(2)
+    with cols_t2[0]:
+        tournament_type = st.selectbox(
+            "Rodzaj",
+            ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
+            index=0,
+            help="Obecnie zaimplementowany tylko turniej indywidualny"
+        )
+    with cols_t2[1]:
+        tournament_phase = st.selectbox(
+            "Faza",
+            ["Faza grupowa (2 sety)", "Pucharowa best of 3", "Pucharowa best of 5"],
+            index=0,
+            help="Obecnie zaimplementowana tylko faza grupowa"
+        )
+
+    # Ostrzeżenie jeśli wybór niezaimplementowany
+    if tournament_type != "Indywidualny" or "grupowa" not in tournament_phase:
+        st.warning("⚠️ Obecnie zaimplementowany jest tylko **turniej indywidualny, faza grupowa**. "
+                   "Pozostałe opcje będą dostępne w kolejnych wersjach — protokoły zostaną "
+                   "wygenerowane jako faza grupowa indywidualna.")
 
     # ─── 2. Link ────────────────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
@@ -74,7 +108,7 @@ with col_form:
         placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
         help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...")
 
-    # ─── 3. QR + PFM (kompaktowo, w jednym rzędzie) ─────────────────────
+    # ─── 3. Domyślne elementy ───────────────────────────────────────────
     st.header("3. Domyślne elementy")
     cols_dom = st.columns(2)
     with cols_dom[0]:
@@ -92,7 +126,7 @@ with col_form:
             f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"], key=f"logo_{i}")
             logo_files.append(f)
 
-    # ─── 5. Lista aktywnych elementów + edycja pozycji ──────────────────
+    # ─── Aktywne elementy ────────────────────────────────────────────────
     elements_active = []
     if include_qr:
         elements_active.append(('qr', 'Kod QR'))
@@ -102,21 +136,26 @@ with col_form:
         if f is not None:
             elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
+    # ─── 5. Pozycje ─────────────────────────────────────────────────────
     if elements_active:
         st.header("5. Pozycja i rozmiar elementów")
-        st.caption("Domyślnie elementy są ułożone jeden pod drugim w lewym obszarze. "
-                   "Możesz dostosować pozycję (cm od lewego górnego rogu obszaru) i rozmiar.")
+        st.caption("Domyślnie elementy są ułożone jedna pod drugą z odstępami. "
+                   "Możesz dostosować pozycję (cm) i rozmiar.")
+        if st.button("↺ Resetuj pozycje", help="Przywróć domyślne pozycje"):
+            st.session_state.image_positions = default_positions()
+            st.rerun()
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
-                pos = st.session_state.image_positions.get(key, {'x':1.5,'y':0.2,'w':2.0,'h':1.2})
+                pos = st.session_state.image_positions.get(key,
+                        {'x':1.6,'y':0.2,'w':2.0,'h':1.8})
                 with cols[0]:
                     new_x = st.number_input("X (cm)", value=float(pos['x']),
                                            min_value=0.0, max_value=5.0, step=0.1,
                                            key=f"x_{key}")
                 with cols[1]:
                     new_y = st.number_input("Y (cm)", value=float(pos['y']),
-                                           min_value=0.0, max_value=12.0, step=0.1,
+                                           min_value=0.0, max_value=14.0, step=0.1,
                                            key=f"y_{key}")
                 with cols[2]:
                     new_w = st.number_input("Szerokość (cm)", value=float(pos['w']),
@@ -154,20 +193,18 @@ with col_preview:
     LEFT_AREA_CM = 5.24
     LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
-    # Buduj data URLs
+    # data URLs grafik
     image_urls = {}
     if include_qr:
-        image_urls['qr'] = None  # placeholder
-    if include_pfm_logo:
-        pfm_path = os.path.join(os.path.dirname(__file__), 'assets_pfm_logo.png')
-        if os.path.exists(pfm_path):
-            with open(pfm_path, 'rb') as fp:
-                image_urls['pfm'] = img_to_data_url(fp.read())
+        image_urls['qr'] = None
+    if include_pfm_logo and os.path.exists(PFM_PATH):
+        with open(PFM_PATH, 'rb') as fp:
+            image_urls['pfm'] = img_to_data_url(fp.read())
     for i, f in enumerate(logo_files):
         if f is not None:
             image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
-    # HTML elementów w lewym obszarze
+    # HTML elementów
     elements_html = ""
     for key in image_urls:
         if key not in st.session_state.image_positions:
@@ -177,7 +214,6 @@ with col_preview:
         y_px = int(pos['y'] * SCALE)
         w_px = int(pos['w'] * SCALE)
         h_px = int(pos['h'] * SCALE)
-
         if key == 'qr':
             elements_html += f"""
             <div style="position:absolute; left:{x_px}px; top:{y_px}px; 
@@ -194,15 +230,13 @@ with col_preview:
             <img src="{image_urls[key]}" 
                  style="position:absolute; left:{x_px}px; top:{y_px}px;
                         width:{w_px}px; height:{h_px}px; object-fit:contain;
-                        border:1px dashed #aaa;"/>"""
+                        border:1px dashed #ccc;"/>"""
 
-    # Etykieta "Wyniki turnieju" pod QR (lub na górze jeśli QR off)
     label_y_px = 5
     if include_qr and 'qr' in st.session_state.image_positions:
         qr_pos = st.session_state.image_positions['qr']
         label_y_px = int((qr_pos['y'] + qr_pos['h'] + 0.1) * SCALE)
 
-    # Header w prawym górnym rogu
     header_text = ""
     if tournament_name or tournament_date:
         parts = [tournament_name] if tournament_name else []
@@ -215,14 +249,10 @@ with col_preview:
                 width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                 position:relative; font-family:Arial, sans-serif;
                 box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
-      
-      <!-- Header w prawym górnym rogu -->
       <div style="position:absolute; right:8px; top:6px; 
                   font-size:9px; color:#666; font-style:italic;">
         {header_text}
       </div>
-      
-      <!-- Tabela 1: nagłówek meczu -->
       <div style="position:absolute; left:6px; top:30px; right:0; height:30px;
                   display:flex; align-items:center; padding-left:6px;
                   font-size:11px; gap:18px;">
@@ -231,8 +261,6 @@ with col_preview:
         <span>Grupa <b>A</b></span>
         <span>Mecz # <b>1</b></span>
       </div>
-      
-      <!-- Tabela 1: nagłówki kolumn -->
       <div style="position:absolute; left:{LEFT_AREA_PX}px; top:65px; right:0; height:32px;
                   background:#f0f0f0; border:1px solid #999;
                   display:flex; font-size:9px; font-weight:bold; text-align:center;
@@ -242,8 +270,6 @@ with col_preview:
         <div style="flex:1; border-right:1px solid #999;">Wygrane<br>sety</div>
         <div style="flex:2;">Podpis</div>
       </div>
-      
-      <!-- Zawodnik 1 -->
       <div style="position:absolute; left:6px; top:97px; right:0; height:24px;
                   border:1px solid #999; display:flex; font-size:11px;">
         <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px; 
@@ -255,8 +281,6 @@ with col_preview:
         <div style="flex:1; border-left:1px solid #999;"></div>
         <div style="flex:2; border-left:1px solid #999;"></div>
       </div>
-      
-      <!-- Zawodnik 2 -->
       <div style="position:absolute; left:6px; top:121px; right:0; height:24px;
                   border:1px solid #999; border-top:none; display:flex; font-size:11px;">
         <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px;
@@ -268,18 +292,13 @@ with col_preview:
         <div style="flex:1; border-left:1px solid #999;"></div>
         <div style="flex:2; border-left:1px solid #999;"></div>
       </div>
-      
-      <!-- Zasady -->
       <div style="position:absolute; left:0; right:0; top:148px;
                   text-align:center; font-size:8px; color:#555; font-style:italic;">
         Każdy zawodnik zaczyna po jednym secie (w dowolnej kolejności)<br>
         Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
       </div>
-      
-      <!-- Tabela 2 -->
       <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
                   border:1px solid #999;">
-        <!-- Lewy obszar -->
         <div style="position:absolute; left:0; top:0; bottom:0;
                     width:{LEFT_AREA_PX}px; border-right:1px solid #999;
                     overflow:hidden;">
@@ -289,10 +308,7 @@ with col_preview:
             Wyniki turnieju
           </div>
         </div>
-        
-        <!-- Prawa część tabeli wyników -->
         <div style="position:absolute; left:{LEFT_AREA_PX+1}px; top:0; right:0; bottom:0;">
-          <!-- Header SET 1, SET 2 -->
           <div style="position:absolute; left:0; top:0; right:0; height:22px;
                       background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
                       align-items:center; text-align:center; border-bottom:1px solid #999;">
@@ -300,8 +316,6 @@ with col_preview:
             <div style="flex:3.0; border-right:1px solid #999;">SET 1</div>
             <div style="flex:3.0;">SET 2</div>
           </div>
-          
-          <!-- Header IMIONA / SUMA -->
           <div style="position:absolute; left:0; top:22px; right:0; height:30px;
                       background:#f8f8f8; display:flex; font-size:8px; font-weight:bold;
                       align-items:center; text-align:center; 
@@ -318,14 +332,10 @@ with col_preview:
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
           </div>
-          
-          <!-- Pusta siatka -->
           <div style="position:absolute; left:0; top:52px; right:0; bottom:24px;
                       background:repeating-linear-gradient(
                         to bottom, transparent 0, transparent 17px,
                         #ccc 17px, #ccc 18px);"></div>
-          
-          <!-- WYNIK -->
           <div style="position:absolute; left:0; right:0; bottom:0; height:24px;
                       border-top:1px solid #999;
                       background:#f0f0f0; display:flex;
@@ -339,9 +349,8 @@ with col_preview:
       </div>
     </div>
     """
-
     st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=True)
-    st.caption("📝 Podgląd schematyczny. Dokładny wygląd zobaczysz w pobranym .docx")
+    st.caption("📝 Podgląd schematyczny. Dokładny wygląd w pobranym .docx")
 
 
 # ─── Generuj ────────────────────────────────────────────────────────────
@@ -374,7 +383,6 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
                 logos_bytes[f'logo{i+1}'] = f.read()
 
         image_order = [k for k, _ in elements_active]
-
         image_positions = {}
         for key in image_order:
             if key in st.session_state.image_positions:
