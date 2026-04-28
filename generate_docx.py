@@ -559,8 +559,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     x_cm = pos.get('x', (cell_w_cm - w_cm) / 2)
                     y_cm = pos.get('y', cur_y_cm)
                     if 'width' in pos:
-                        w_cm = pos['width']
-                        h_cm = w_cm / (rid_info[1]/rid_info[2])
+                        new_w_cm = pos['width']
+                        # Dla QR (kwadratowy) zachowujemy proporcje 1:1
+                        if key == 'qr':
+                            h_cm = new_w_cm
+                        else:
+                            h_cm = new_w_cm / (w_cm / h_cm)
+                        w_cm = new_w_cm
                 else:
                     # Domyślnie jedna pod drugą, wycentrowane
                     x_cm = (cell_w_cm - w_cm) / 2
