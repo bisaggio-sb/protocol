@@ -2,7 +2,7 @@
 generate_docx.py – Generator protokołów meczowych Mölkky.
 """
 
-import io, csv, re, copy, zipfile, string
+import io, os, csv, re, copy, zipfile, string
 from urllib.parse import quote
 import requests
 from lxml import etree
@@ -341,9 +341,12 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
 # ─── Build document ───────────────────────────────────────────────────────────
 
 def build_document(sheet_id, sheets_url, sheets_data, logos=None,
-                   tournament_name=None, include_qr=True,
+                   tournament_name=None, tournament_date=None,
+                   include_qr=True, include_pfm_logo=True,
                    image_order=None, image_positions=None):
     """
+    `tournament_date`: string (np. "10.05.2026") wyświetlany w nagłówku obok nazwy.
+    `include_pfm_logo`: czy dodać domyślne logo PFM.
     image_positions: dict {key: (x_cm, y_cm, width_cm)} dla każdej grafiki/QR.
     Jeśli None, używamy domyślnego ułożenia jedna pod drugą.
     """
@@ -498,6 +501,29 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             qr_rid_info = (rid, 1.8, 1.8)  # cm
 
     logo_rids = {}
+
+    # Logo PFM z lokalnego asseta (domyślnie włączone)
+    if include_pfm_logo:
+        pfm_path = os.path.join(os.path.dirname(__file__), 'assets_pfm_logo.png')
+        if os.path.exists(pfm_path):
+            with open(pfm_path, 'rb') as fp:
+                pfm_bytes = fp.read()
+            from PIL import Image as PILImage
+            rid = f'rId{next_rid[0]}'; next_rid[0] += 1
+            fname = 'media/pfm_logo.png'
+            pil = PILImage.open(io.BytesIO(pfm_bytes)).convert('RGBA')
+            buf = io.BytesIO(); pil.save(buf, format='PNG')
+            media_files[fname] = buf.getvalue()
+            ratio = pil.width / pil.height
+            target_w_cm = 2.4
+            target_h_cm = target_w_cm / ratio
+            if target_h_cm > 1.4:
+                target_h_cm = 1.4
+                target_w_cm = target_h_cm * ratio
+            rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
+            rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', fname)
+            logo_rids['pfm'] = (rid, target_w_cm, target_h_cm)
+
     if logos:
         from PIL import Image as PILImage
         for key, img_bytes in logos.items():
@@ -528,6 +554,38 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             first = False
 
             cloned = [copy.deepcopy(el) for el in template_elements]
+
+            # Wstaw nazwę turnieju + datę jako paragraf w prawym górnym rogu
+            # (przed pierwszą tabelą, wyrównany do prawej, małą czcionką)
+            if tournament_name or tournament_date:
+                header_parts = []
+                if tournament_name:
+                    header_parts.append(tournament_name.strip())
+                if tournament_date:
+                    header_parts.append(tournament_date.strip())
+                header_text = ' · '.join(header_parts)
+
+                hp = etree.Element(wt('p'))
+                hpPr = etree.SubElement(hp, wt('pPr'))
+                hjc = etree.SubElement(hpPr, wt('jc'))
+                hjc.set(f'{{{W}}}val', 'right')
+                hsp = etree.SubElement(hpPr, wt('spacing'))
+                hsp.set(f'{{{W}}}before', '0')
+                hsp.set(f'{{{W}}}after', '60')
+                hr = etree.SubElement(hp, wt('r'))
+                hrPr = etree.SubElement(hr, wt('rPr'))
+                hfonts = etree.SubElement(hrPr, wt('rFonts'))
+                for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                    hfonts.set(f'{{{W}}}{a}', 'Aptos')
+                for tag in ('i', 'iCs'):
+                    etree.SubElement(hrPr, wt(tag)).set(f'{{{W}}}val', '1')
+                for tag in ('sz', 'szCs'):
+                    etree.SubElement(hrPr, wt(tag)).set(f'{{{W}}}val', '16')
+                hcolor = etree.SubElement(hrPr, wt('color'))
+                hcolor.set(f'{{{W}}}val', '666666')
+                ht = etree.SubElement(hr, wt('t'))
+                ht.text = header_text
+                cloned.insert(0, hp)
             _fill_protocol(cloned, match)
 
             # Lista elementów do wstawienia w lewym obszarze

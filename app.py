@@ -2,7 +2,8 @@
 Generator protokołów meczowych Mölkky
 """
 import streamlit as st
-import io, re, base64
+import io, re, base64, os
+from datetime import date, timedelta
 from PIL import Image
 import generate_docx
 
@@ -16,11 +17,15 @@ def extract_id(url):
     return m.group(1) if m else None
 
 
-def img_to_data_url(file_obj):
-    """PIL image lub uploaded file → data URL."""
-    file_obj.seek(0)
-    img = Image.open(file_obj).convert("RGB")
-    file_obj.seek(0)
+def img_to_data_url(file_or_bytes):
+    """uploaded file lub bytes → data URL."""
+    if hasattr(file_or_bytes, 'seek'):
+        file_or_bytes.seek(0)
+        img_bytes = file_or_bytes.read()
+        file_or_bytes.seek(0)
+    else:
+        img_bytes = file_or_bytes
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
     buf = io.BytesIO()
     img.thumbnail((300, 300))
     img.save(buf, format="PNG")
@@ -28,37 +33,57 @@ def img_to_data_url(file_obj):
     return f"data:image/png;base64,{b64}"
 
 
-# Inicjalizacja stanu pozycji w session_state
+def next_saturday():
+    """Zwraca string DD.MM.YYYY najbliższej soboty (lub dziś jeśli sobota)."""
+    today = date.today()
+    days_until_sat = (5 - today.weekday()) % 7  # 5 = sobota
+    sat = today + timedelta(days=days_until_sat)
+    return sat.strftime("%d.%m.%Y")
+
+
+# Stan pozycji
 if 'image_positions' not in st.session_state:
-    # domyślne pozycje: jedna pod drugą w lewym obszarze
-    # X w cm od lewej krawędzi obszaru "Wyniki turnieju" (5.24 cm)
-    # Y w cm od góry komórki
     st.session_state.image_positions = {
         'qr':    {'x': 1.6, 'y': 0.2, 'w': 1.8, 'h': 1.8},
-        'logo1': {'x': 1.5, 'y': 2.4, 'w': 2.0, 'h': 1.2},
-        'logo2': {'x': 1.5, 'y': 3.7, 'w': 2.0, 'h': 1.2},
-        'logo3': {'x': 1.5, 'y': 5.0, 'w': 2.0, 'h': 1.2},
-        'logo4': {'x': 1.5, 'y': 6.3, 'w': 2.0, 'h': 1.2},
+        'pfm':   {'x': 1.5, 'y': 2.4, 'w': 2.0, 'h': 1.2},
+        'logo1': {'x': 1.5, 'y': 3.7, 'w': 2.0, 'h': 1.2},
+        'logo2': {'x': 1.5, 'y': 5.0, 'w': 2.0, 'h': 1.2},
+        'logo3': {'x': 1.5, 'y': 6.3, 'w': 2.0, 'h': 1.2},
+        'logo4': {'x': 1.5, 'y': 7.6, 'w': 2.0, 'h': 1.2},
     }
 
 
-# Layout: 2 kolumny - formularz po lewej, podgląd po prawej
 col_form, col_preview = st.columns([3, 2])
 
 with col_form:
-    st.header("1. Nazwa turnieju")
-    tournament_name = st.text_input("Nazwa turnieju",
-        value="GP2 2026", placeholder="np. GP2 2026")
+    # ─── 1. Turniej (nazwa + data w jednym rzędzie, kompaktowo) ──────────
+    st.header("1. Turniej")
+    cols_t = st.columns([2, 1])
+    with cols_t[0]:
+        tournament_name = st.text_input("Nazwa turnieju",
+            value="GP2 2026", placeholder="np. GP2 2026")
+    with cols_t[1]:
+        tournament_date_d = st.date_input("Data turnieju",
+            value=date.today() + timedelta(days=(5 - date.today().weekday()) % 7),
+            format="DD.MM.YYYY")
+    tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
 
+    # ─── 2. Link ────────────────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
     sheets_url = st.text_input("URL arkusza",
         placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
-        help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ..., 'Gr. P'")
+        help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...")
 
-    st.header("3. Kod QR")
-    include_qr = st.checkbox("✅ Generuj kod QR z linkiem do arkusza", value=True)
+    # ─── 3. QR + PFM (kompaktowo, w jednym rzędzie) ─────────────────────
+    st.header("3. Domyślne elementy")
+    cols_dom = st.columns(2)
+    with cols_dom[0]:
+        include_qr = st.checkbox("✅ Kod QR (link do arkusza)", value=True)
+    with cols_dom[1]:
+        include_pfm_logo = st.checkbox("✅ Logo Polskiej Federacji Mölkky", value=True)
 
-    st.header("4. Grafiki (max 4)")
+    # ─── 4. Dodatkowe grafiki ───────────────────────────────────────────
+    st.header("4. Dodatkowe grafiki (max 4)")
     NUM_LOGOS = 4
     logo_files = []
     cols_log = st.columns(2)
@@ -67,38 +92,38 @@ with col_form:
             f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"], key=f"logo_{i}")
             logo_files.append(f)
 
-    # Lista aktywnych elementów
+    # ─── 5. Lista aktywnych elementów + edycja pozycji ──────────────────
     elements_active = []
     if include_qr:
         elements_active.append(('qr', 'Kod QR'))
+    if include_pfm_logo:
+        elements_active.append(('pfm', 'Logo PFM'))
     for i, f in enumerate(logo_files):
         if f is not None:
             elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
-    # Edycja pozycji
     if elements_active:
         st.header("5. Pozycja i rozmiar elementów")
         st.caption("Domyślnie elementy są ułożone jeden pod drugim w lewym obszarze. "
                    "Możesz dostosować pozycję (cm od lewego górnego rogu obszaru) i rozmiar.")
-        
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = st.session_state.image_positions.get(key, {'x':1.5,'y':0.2,'w':2.0,'h':1.2})
                 with cols[0]:
-                    new_x = st.number_input(f"X (cm)", value=float(pos['x']),
+                    new_x = st.number_input("X (cm)", value=float(pos['x']),
                                            min_value=0.0, max_value=5.0, step=0.1,
                                            key=f"x_{key}")
                 with cols[1]:
-                    new_y = st.number_input(f"Y (cm)", value=float(pos['y']),
+                    new_y = st.number_input("Y (cm)", value=float(pos['y']),
                                            min_value=0.0, max_value=12.0, step=0.1,
                                            key=f"y_{key}")
                 with cols[2]:
-                    new_w = st.number_input(f"Szerokość (cm)", value=float(pos['w']),
+                    new_w = st.number_input("Szerokość (cm)", value=float(pos['w']),
                                            min_value=0.5, max_value=5.0, step=0.1,
                                            key=f"w_{key}")
                 with cols[3]:
-                    new_h = st.number_input(f"Wysokość (cm)", value=float(pos['h']),
+                    new_h = st.number_input("Wysokość (cm)", value=float(pos['h']),
                                            min_value=0.5, max_value=5.0, step=0.1,
                                            key=f"h_{key}")
                 st.session_state.image_positions[key] = {
@@ -116,33 +141,33 @@ with col_form:
                 st.code("\n".join(info))
 
 
-# ─── PODGLĄD HTML/CSS po prawej ─────────────────────────────────────────────
+# ─── PODGLĄD HTML/CSS po prawej ─────────────────────────────────────────
 with col_preview:
     st.header("📄 Podgląd strony")
     st.caption("Schemat dokumentu w skali")
 
-    # Wymiary A4 z marginesami 1.27cm: obszar tekstu 18.46×27.16 cm
-    # Skala podglądu: 1 cm = 22 px → 406×598 px
-    SCALE = 22  # px na cm
+    SCALE = 22
     PAGE_W_CM = 18.46
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
     PAGE_H_PX = int(PAGE_H_CM * SCALE)
-
-    # Lewy obszar "Wyniki turnieju" = 5.24 cm
     LEFT_AREA_CM = 5.24
     LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
-    # Buduj data URLs dla wgranych grafik
+    # Buduj data URLs
     image_urls = {}
     if include_qr:
-        # Symuluj QR jako wzór (prawdziwy QR będzie tylko w pobranym docx)
-        image_urls['qr'] = None  # narysuje placeholder
+        image_urls['qr'] = None  # placeholder
+    if include_pfm_logo:
+        pfm_path = os.path.join(os.path.dirname(__file__), 'assets_pfm_logo.png')
+        if os.path.exists(pfm_path):
+            with open(pfm_path, 'rb') as fp:
+                image_urls['pfm'] = img_to_data_url(fp.read())
     for i, f in enumerate(logo_files):
         if f is not None:
             image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
-    # Buduj HTML podglądu
+    # HTML elementów w lewym obszarze
     elements_html = ""
     for key in image_urls:
         if key not in st.session_state.image_positions:
@@ -154,7 +179,6 @@ with col_preview:
         h_px = int(pos['h'] * SCALE)
 
         if key == 'qr':
-            # Placeholder QR
             elements_html += f"""
             <div style="position:absolute; left:{x_px}px; top:{y_px}px; 
                         width:{w_px}px; height:{h_px}px; 
@@ -163,7 +187,6 @@ with col_preview:
                         font-size:10px; color:#333; font-family:monospace;">
               <div style="text-align:center;">
                 <div style="font-weight:bold;">QR</div>
-                <div style="font-size:7px;">code</div>
               </div>
             </div>"""
         else:
@@ -173,11 +196,19 @@ with col_preview:
                         width:{w_px}px; height:{h_px}px; object-fit:contain;
                         border:1px dashed #aaa;"/>"""
 
-    # Pozycja "Wyniki turnieju" napisu (pod ostatnim QR jeśli jest)
-    label_y_px = 22 if include_qr else 5
+    # Etykieta "Wyniki turnieju" pod QR (lub na górze jeśli QR off)
+    label_y_px = 5
     if include_qr and 'qr' in st.session_state.image_positions:
         qr_pos = st.session_state.image_positions['qr']
         label_y_px = int((qr_pos['y'] + qr_pos['h'] + 0.1) * SCALE)
+
+    # Header w prawym górnym rogu
+    header_text = ""
+    if tournament_name or tournament_date:
+        parts = [tournament_name] if tournament_name else []
+        if tournament_date:
+            parts.append(tournament_date)
+        header_text = " · ".join(parts)
 
     html = f"""
     <div style="background:white; border:1px solid #ccc; 
@@ -185,7 +216,13 @@ with col_preview:
                 position:relative; font-family:Arial, sans-serif;
                 box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
       
-      <!-- Tabela 1: nagłówek meczu (Tor/Godzina/Grupa/Mecz) -->
+      <!-- Header w prawym górnym rogu -->
+      <div style="position:absolute; right:8px; top:6px; 
+                  font-size:9px; color:#666; font-style:italic;">
+        {header_text}
+      </div>
+      
+      <!-- Tabela 1: nagłówek meczu -->
       <div style="position:absolute; left:6px; top:30px; right:0; height:30px;
                   display:flex; align-items:center; padding-left:6px;
                   font-size:11px; gap:18px;">
@@ -239,32 +276,28 @@ with col_preview:
         Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
       </div>
       
-      <!-- Tabela 2: wyniki turnieju -->
+      <!-- Tabela 2 -->
       <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
                   border:1px solid #999;">
-        <!-- Pierwsza kolumna "Wyniki turnieju" -->
+        <!-- Lewy obszar -->
         <div style="position:absolute; left:0; top:0; bottom:0;
                     width:{LEFT_AREA_PX}px; border-right:1px solid #999;
                     overflow:hidden;">
-          <!-- Tu będą floating images -->
           {elements_html}
-          
-          <!-- Napis "Wyniki turnieju" -->
           <div style="position:absolute; left:0; right:0; top:{label_y_px}px;
                       text-align:center; font-size:10px; font-weight:bold;">
             Wyniki turnieju
           </div>
         </div>
         
-        <!-- Prawa część: SET 1, SET 2, kolumny -->
+        <!-- Prawa część tabeli wyników -->
         <div style="position:absolute; left:{LEFT_AREA_PX+1}px; top:0; right:0; bottom:0;">
           <!-- Header SET 1, SET 2 -->
           <div style="position:absolute; left:0; top:0; right:0; height:22px;
                       background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
                       align-items:center; text-align:center; border-bottom:1px solid #999;">
-            <div style="flex:1.4;"></div>
-            <div style="flex:3.0; border-left:1px solid #999;
-                        border-right:1px solid #999;">SET 1</div>
+            <div style="flex:1.4; border-right:1px solid #999;"></div>
+            <div style="flex:3.0; border-right:1px solid #999;">SET 1</div>
             <div style="flex:3.0;">SET 2</div>
           </div>
           
@@ -281,30 +314,18 @@ with col_preview:
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
             <div style="flex:1.5; border-right:1px solid #999;"></div>
-            <div style="flex:1.5; border-right:1px solid #999;
-                        writing-mode:vertical-rl; transform:rotate(180deg);
-                        line-height:1.2;">SUMA</div>
-            <div style="flex:1.5; border-right:1px solid #999;"></div>
-            <div style="flex:1.5; border-right:1px solid #999;
-                        writing-mode:vertical-rl; transform:rotate(180deg);
-                        line-height:1.2;">SUMA</div>
-            <div style="flex:1.5; border-right:1px solid #999;"></div>
             <div style="flex:1.5;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
           </div>
           
-          <!-- Pusta siatka 18 wierszy -->
+          <!-- Pusta siatka -->
           <div style="position:absolute; left:0; top:52px; right:0; bottom:24px;
-                      display:flex; flex-direction:column;">
-            <!-- Generujemy 18 pustych wierszy jako stripes -->
-            <div style="flex:1; background:repeating-linear-gradient(
+                      background:repeating-linear-gradient(
                         to bottom, transparent 0, transparent 17px,
-                        #ccc 17px, #ccc 18px);
-                        background-position: 0 -1px;"></div>
-          </div>
+                        #ccc 17px, #ccc 18px);"></div>
           
-          <!-- WYNIK na dole -->
+          <!-- WYNIK -->
           <div style="position:absolute; left:0; right:0; bottom:0; height:24px;
                       border-top:1px solid #999;
                       background:#f0f0f0; display:flex;
@@ -312,7 +333,7 @@ with col_preview:
                       align-items:center;">
             <div style="flex:1.4;"></div>
             <div style="flex:1.5; border-left:1px solid #999; line-height:24px;">WYNIK</div>
-            <div style="flex:9; border-left:1px solid #999;"></div>
+            <div style="flex:4.5; border-left:1px solid #999;"></div>
           </div>
         </div>
       </div>
@@ -323,7 +344,7 @@ with col_preview:
     st.caption("📝 Podgląd schematyczny. Dokładny wygląd zobaczysz w pobranym .docx")
 
 
-# ─── Generuj ────────────────────────────────────────────────────────────────
+# ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
 st.header("6. Generuj")
 
@@ -352,24 +373,23 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
                 f.seek(0)
                 logos_bytes[f'logo{i+1}'] = f.read()
 
-        # Kolejność: wszystkie aktywne elementy w kolejności dodawania
         image_order = [k for k, _ in elements_active]
 
-        # Pozycje z session_state przekształcone na format generate_docx
         image_positions = {}
         for key in image_order:
             if key in st.session_state.image_positions:
                 p = st.session_state.image_positions[key]
                 image_positions[key] = {
-                    'x': p['x'], 'y': p['y'],
-                    'width': p['w']
+                    'x': p['x'], 'y': p['y'], 'width': p['w']
                 }
 
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
             tournament_name=tournament_name.strip() or "Turniej Mölkky",
+            tournament_date=tournament_date,
             include_qr=include_qr,
+            include_pfm_logo=include_pfm_logo,
             image_order=image_order or None,
             image_positions=image_positions or None)
 
