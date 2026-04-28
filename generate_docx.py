@@ -120,9 +120,10 @@ def parse_group_rows(rows):
     return matches
 
 def fetch_all_group_sheets(sheet_id):
+    """Skanuje wszystkie zakładki Gr. A do Gr. Z. Zwraca tylko te z meczami."""
     gid_map = get_sheet_gids(sheet_id)
     results = []
-    for letter in string.ascii_uppercase[:16]:
+    for letter in string.ascii_uppercase:   # A..Z, nie tylko A..P
         name = f"Gr. {letter}"
         try:
             rows = fetch_sheet(sheet_id, name, gid_map)
@@ -133,12 +134,15 @@ def fetch_all_group_sheets(sheet_id):
             continue
     return results
 
+
 def get_sheet_names_debug(sheet_id):
-    """Uproszczony debug — bez technicznych szczegółów GID/gviz."""
+    """Czytelny debug: liczba grup, liczba meczów per grupa, total. 
+    Pomija grupy bez meczów."""
     info = []
     gid_map = get_sheet_gids(sheet_id)
-    found = 0
-    for letter in string.ascii_uppercase[:16]:
+    found_groups = []
+    total_matches = 0
+    for letter in string.ascii_uppercase:
         name = f"Gr. {letter}"
         rows = fetch_via_gviz(sheet_id, name)
         if not rows and name in gid_map:
@@ -146,12 +150,22 @@ def get_sheet_names_debug(sheet_id):
         if not rows:
             rows = fetch_via_export_name(sheet_id, name)
         if not rows:
-            info.append(f"❌ {name}: nie znaleziono")
             continue
         matches = parse_group_rows(rows)
-        info.append(f"✅ {name}: {len(matches)} meczów")
-        found += 1
-    info.insert(0, f"Znaleziono {found} grup\n")
+        if not matches:
+            continue
+        found_groups.append((name, len(matches)))
+        total_matches += len(matches)
+
+    if not found_groups:
+        info.append("❌ Nie znaleziono żadnych grup z meczami w arkuszu.")
+        info.append("   Sprawdź czy arkusz jest publiczny i czy zakładki nazywają się 'Gr. A', 'Gr. B' itd.")
+        return info
+
+    info.append(f"✅ Znaleziono {len(found_groups)} grup, łącznie {total_matches} meczów:")
+    info.append("")
+    for name, count in found_groups:
+        info.append(f"  • {name}: {count} meczów")
     return info
 
 
@@ -340,6 +354,27 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
 
 # ─── Build document ───────────────────────────────────────────────────────────
 
+def build_blank_document(num_pages=1, logos=None, tournament_name=None,
+                         tournament_date=None, include_qr=False,
+                         include_pfm_logo=True, sheets_url='',
+                         image_order=None, image_positions=None):
+    """
+    Generuje pusty formularz protokołu (bez wypełnionych danych z arkusza).
+    Tworzy `num_pages` identycznych pustych protokołów.
+    """
+    # Tworzymy listę pustych meczów
+    blank_match = {'tor':'','godz':'','grupa':'','mecz':'','z1':'','z2':''}
+    blank_data = [('', [blank_match for _ in range(num_pages)])]
+    return build_document(
+        sheet_id='', sheets_url=sheets_url, sheets_data=blank_data,
+        logos=logos,
+        tournament_name=tournament_name, tournament_date=tournament_date,
+        include_qr=include_qr and bool(sheets_url),  # QR tylko jeśli jest URL
+        include_pfm_logo=include_pfm_logo,
+        image_order=image_order, image_positions=image_positions
+    )
+
+
 def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                    tournament_name=None, tournament_date=None,
                    include_qr=True, include_pfm_logo=True,
@@ -447,17 +482,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         jc = etree.SubElement(pPr, wt('jc'))
                     jc.set(f'{{{W}}}val', 'left')
 
-    # ── Fix WYNIK na końcu tabeli wyników: poszerz kolumnę z "WYNIK"
-    # gridCol[1] tabeli 2 (840 DXA = 1.48 cm) jest za wąska na "WYNIK".
-    # Poszerzamy ją do 1240 DXA przez przeniesienie z gridCol[2] (735 → 335).
+    # ── Fix WYNIK + zwężenie kolumny IMIONA na rzecz obszaru grafik:
+    # gridCol[0] "Wyniki turnieju" 2970→3270 DXA (+300, więcej miejsca na grafiki)
+    # gridCol[1] IMIONA / WYNIK 840→1100 DXA (+260, "WYNIK" mieści się w 1 linii)
+    # gridCol[2] pierwsza pusta SET 1 735→175 DXA (-560) — kompensata
+    # Suma bez zmian: 9690.
     tbls = body.findall(wt('tbl'))
     if len(tbls) >= 2:
         score_tbl = tbls[1]
         gcs = score_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
         if len(gcs) >= 3:
-            gcs[1].set(f'{{{W}}}w', '1240')   # IMIONA / WYNIK
-            gcs[2].set(f'{{{W}}}w', '335')    # zmniejsz pierwszą SET 1 (była 735)
-            # Update tcW dla komórek
+            gcs[0].set(f'{{{W}}}w', '3270')   # Wyniki turnieju (grafiki)
+            gcs[1].set(f'{{{W}}}w', '1100')   # IMIONA / WYNIK
+            gcs[2].set(f'{{{W}}}w', '175')    # pierwsza SET 1 - zmniejszona
+            # Update tcW komórek
             for row in score_tbl.findall(wt('tr')):
                 for tc in row.findall(wt('tc')):
                     tcPr = tc.find(wt('tcPr'))
@@ -465,14 +503,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     tcW = tcPr.find(wt('tcW'))
                     if tcW is None: continue
                     cur_w = int(tcW.get(f'{{{W}}}w','0'))
-                    if cur_w == 840:
-                        tcW.set(f'{{{W}}}w', '1240')
-                    elif cur_w == 1470:
-                        # Pierwsza komórka span=2 (735+735) zmniejszamy do (335+735=1070)
-                        # Sprawdź czy to pierwsza w wierszu (po IMIONA) - w wierszu nagłówka
-                        # Wystarczy zmienić tylko jedną z nich w każdym wierszu
-                        # Zostawiamy bez zmian — tablica wciąż się sumuje OK z 1240+335
-                        pass
+                    if cur_w == 2970:
+                        tcW.set(f'{{{W}}}w', '3270')
+                    elif cur_w == 840:
+                        tcW.set(f'{{{W}}}w', '1100')
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
@@ -498,7 +532,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             media_files['media/qrcode.png'] = qr_bytes
             rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
             rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target','media/qrcode.png')
-            qr_rid_info = (rid, 1.8, 1.8)  # cm
+            qr_rid_info = (rid, 2.4, 2.4)  # cm - większy QR
 
     logo_rids = {}
 
@@ -515,10 +549,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             buf = io.BytesIO(); pil.save(buf, format='PNG')
             media_files[fname] = buf.getvalue()
             ratio = pil.width / pil.height
-            target_w_cm = 2.4
+            target_w_cm = 3.5
             target_h_cm = target_w_cm / ratio
-            if target_h_cm > 1.4:
-                target_h_cm = 1.4
+            if target_h_cm > 2.5:
+                target_h_cm = 2.5
                 target_w_cm = target_h_cm * ratio
             rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
             rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', fname)
@@ -534,10 +568,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             buf = io.BytesIO(); pil.save(buf, format='PNG')
             media_files[fname] = buf.getvalue()
             ratio = pil.width / pil.height
-            target_w_cm = 2.4
+            target_w_cm = 3.5
             target_h_cm = target_w_cm / ratio
-            if target_h_cm > 1.4:
-                target_h_cm = 1.4
+            if target_h_cm > 2.5:
+                target_h_cm = 2.5
                 target_w_cm = target_h_cm * ratio
             rel = etree.SubElement(rels_root, f'{{{REL}}}Relationship')
             rel.set('Id', rid); rel.set('Type', REL_IMG); rel.set('Target', fname)
