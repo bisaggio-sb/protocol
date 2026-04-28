@@ -3,19 +3,18 @@ Generator protokołów meczowych Mölkky
 Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
 """
 import streamlit as st
-import io, re, base64, os
+import io, re, base64, os, subprocess, tempfile
 from datetime import date, timedelta
 from PIL import Image
 import generate_docx
 
 st.set_page_config(page_title="Protokoły Mölkky", page_icon="🎯", layout="wide")
 
-# ─── Header z logo PFM zamiast emoji ───────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PFM_PATH = os.path.join(APP_DIR, 'assets_pfm_logo.png')
 
+
 def img_to_data_url(file_or_bytes):
-    """uploaded file lub bytes → data URL."""
     if hasattr(file_or_bytes, 'seek'):
         file_or_bytes.seek(0)
         img_bytes = file_or_bytes.read()
@@ -29,14 +28,27 @@ def img_to_data_url(file_or_bytes):
     b64 = base64.b64encode(buf.getvalue()).decode()
     return f"data:image/png;base64,{b64}"
 
-# Header z logo PFM + tytułem
-header_cols = st.columns([1, 12])
-with header_cols[0]:
-    if os.path.exists(PFM_PATH):
-        st.image(PFM_PATH, width=70)
-with header_cols[1]:
-    st.title("Generator protokołów meczowych Mölkky")
-    st.markdown("Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy `.docx`.")
+
+# ─── Header z logo PFM (HTML/CSS dla wyrównania) ─────────────────────
+if os.path.exists(PFM_PATH):
+    with open(PFM_PATH, 'rb') as fp:
+        pfm_data_url = img_to_data_url(fp.read())
+else:
+    pfm_data_url = ""
+
+st.markdown(f"""
+<div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
+  <img src="{pfm_data_url}" style="height:64px; width:auto; flex-shrink:0;"/>
+  <div>
+    <h1 style="margin:0; padding:0; font-size:2.2rem; line-height:1.2;">
+      Generator protokołów meczowych Mölkky
+    </h1>
+    <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
+      Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy <code>.docx</code> lub <code>.pdf</code>.
+    </p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.divider()
 
@@ -46,20 +58,55 @@ def extract_id(url):
     return m.group(1) if m else None
 
 
-# Stan pozycji (rozkładanie grafik z odstępami)
-def default_positions():
-    """Domyślny układ: jedna pod drugą z odstępami od góry obszaru."""
-    return {
-        'qr':    {'x': 1.7, 'y': 0.2, 'w': 1.8, 'h': 1.8},
-        'pfm':   {'x': 1.6, 'y': 2.6, 'w': 2.0, 'h': 1.8},
-        'logo1': {'x': 1.6, 'y': 4.7, 'w': 2.0, 'h': 1.8},
-        'logo2': {'x': 1.6, 'y': 6.8, 'w': 2.0, 'h': 1.8},
-        'logo3': {'x': 1.6, 'y': 8.9, 'w': 2.0, 'h': 1.8},
-        'logo4': {'x': 1.6, 'y': 11.0, 'w': 2.0, 'h': 1.8},
-    }
+# ─── Dynamiczne rozkładanie domyślnych pozycji ────────────────────────
+def compute_default_positions(active_keys, area_height_cm=15.5, area_width_cm=5.24):
+    """
+    Rozkłada elementy równomiernie w lewym obszarze.
+    QR (jeśli jest) zawsze na górze, potem napis "Wyniki turnieju",
+    a pozostałe elementy (PFM, logo1-4) rozłożone równomiernie poniżej.
 
+    Zwraca dict {key: {'x','y','w','h'}}.
+    """
+    positions = {}
+    cur_y = 0.2
+
+    # QR zawsze na górze (jeśli aktywny)
+    if 'qr' in active_keys:
+        qr_w = 2.4
+        qr_x = (area_width_cm - qr_w) / 2  # wycentrowany
+        positions['qr'] = {'x': qr_x, 'y': cur_y, 'w': qr_w, 'h': qr_w}
+        cur_y += qr_w + 0.1  # mały odstęp
+        cur_y += 0.6  # miejsce na napis "Wyniki turnieju"
+
+    # Pozostałe elementy (PFM + logo)
+    other_keys = [k for k in active_keys if k != 'qr']
+    if other_keys:
+        # Dostępna przestrzeń poniżej (od cur_y do area_height_cm)
+        available = area_height_cm - cur_y
+        n = len(other_keys)
+        # Każdy element dostaje równo
+        slot_h = available / n
+        # Wysokość obrazka = slot_h - mały margines
+        img_h = min(2.5, slot_h - 0.4)
+        img_w = 3.5  # domyślnie 3.5 cm szerokości
+        if img_w > area_width_cm - 0.4:
+            img_w = area_width_cm - 0.4
+        img_x = (area_width_cm - img_w) / 2
+
+        for i, key in enumerate(other_keys):
+            slot_top = cur_y + i * slot_h
+            # Wycentruj obrazek w slocie pionowo
+            img_y = slot_top + (slot_h - img_h) / 2
+            positions[key] = {'x': img_x, 'y': img_y, 'w': img_w, 'h': img_h}
+
+    return positions
+
+
+# Inicjalizacja stanu
 if 'image_positions' not in st.session_state:
-    st.session_state.image_positions = default_positions()
+    st.session_state.image_positions = {}
+if 'positions_initialized_for' not in st.session_state:
+    st.session_state.positions_initialized_for = ""
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -68,7 +115,7 @@ col_form, col_preview = st.columns([3, 2])
 
 with col_form:
 
-    # ─── 1. Turniej (kompaktowo: nazwa + data + format) ──────────────────
+    # ─── 1. Turniej ──────────────────────────────────────────────────────
     st.header("1. Turniej")
     cols_t1 = st.columns([2, 1])
     with cols_t1[0]:
@@ -79,7 +126,6 @@ with col_form:
         tournament_date_d = st.date_input("Data", value=next_sat, format="DD.MM.YYYY")
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
 
-    # Format turnieju (na razie tylko 1 opcja zaimplementowana, ale UI gotowy na rozbudowę)
     cols_t2 = st.columns(2)
     with cols_t2[0]:
         tournament_type = st.selectbox(
@@ -91,16 +137,23 @@ with col_form:
     with cols_t2[1]:
         tournament_phase = st.selectbox(
             "Faza",
-            ["Faza grupowa (2 sety)", "Pucharowa best of 3", "Pucharowa best of 5"],
+            ["Grupowa (2 sety)",
+             "Pucharowa 1/64 (best of 3)",
+             "Pucharowa 1/32 (best of 3)",
+             "Pucharowa 1/16 (best of 3)",
+             "Pucharowa 1/8 (best of 3)",
+             "Pucharowa 1/4 (best of 5)",
+             "Pucharowa 1/2 (best of 5)",
+             "Mecz o 3. miejsce (best of 5)",
+             "Finał (best of 5)"],
             index=0,
-            help="Obecnie zaimplementowana tylko faza grupowa"
+            help="Obecnie zaimplementowana tylko faza grupowa indywidualna"
         )
 
-    # Ostrzeżenie jeśli wybór niezaimplementowany
-    if tournament_type != "Indywidualny" or "grupowa" not in tournament_phase:
-        st.warning("⚠️ Obecnie zaimplementowany jest tylko **turniej indywidualny, faza grupowa**. "
-                   "Pozostałe opcje będą dostępne w kolejnych wersjach — protokoły zostaną "
-                   "wygenerowane jako faza grupowa indywidualna.")
+    if tournament_type != "Indywidualny" or "Grupowa" not in tournament_phase:
+        st.warning("⚠️ Obecnie zaimplementowana jest tylko **faza grupowa turnieju indywidualnego**. "
+                   "Pozostałe opcje (drużynowe, pucharowe) będą dostępne w kolejnych wersjach — "
+                   "protokoły zostaną wygenerowane jako faza grupowa indywidualna.")
 
     # ─── 2. Link ────────────────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
@@ -136,33 +189,52 @@ with col_form:
         if f is not None:
             elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
+    # Auto-aktualizuj domyślne pozycje gdy zmienia się zestaw aktywnych elementów
+    active_keys_signature = "|".join(k for k, _ in elements_active)
+    if active_keys_signature != st.session_state.positions_initialized_for:
+        # Zachowaj manualnie zmienione pozycje, ustaw domyślne tylko dla nowych
+        new_defaults = compute_default_positions([k for k, _ in elements_active])
+        # Zachowaj istniejące pozycje, dodaj nowe domyślne
+        for key, pos in new_defaults.items():
+            if key not in st.session_state.image_positions:
+                st.session_state.image_positions[key] = pos
+        # Jeśli to pierwsza inicjalizacja, ustaw wszystkie
+        if not st.session_state.positions_initialized_for:
+            st.session_state.image_positions = new_defaults
+        st.session_state.positions_initialized_for = active_keys_signature
+
     # ─── 5. Pozycje ─────────────────────────────────────────────────────
     if elements_active:
         st.header("5. Pozycja i rozmiar elementów")
-        st.caption("Domyślnie elementy są ułożone jedna pod drugą z odstępami. "
-                   "Możesz dostosować pozycję (cm) i rozmiar.")
-        if st.button("↺ Resetuj pozycje", help="Przywróć domyślne pozycje"):
-            st.session_state.image_positions = default_positions()
-            st.rerun()
+        cols_h5 = st.columns([4, 1])
+        with cols_h5[0]:
+            st.caption("Domyślnie elementy są ułożone równomiernie w lewym obszarze. "
+                       "Możesz dostosować pozycję (cm) i rozmiar.")
+        with cols_h5[1]:
+            if st.button("↺ Resetuj", help="Przywróć równomierny rozkład"):
+                st.session_state.image_positions = compute_default_positions(
+                    [k for k, _ in elements_active])
+                st.rerun()
+
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = st.session_state.image_positions.get(key,
-                        {'x':1.6,'y':0.2,'w':2.0,'h':1.8})
+                        {'x':1.0,'y':0.2,'w':2.5,'h':2.0})
                 with cols[0]:
                     new_x = st.number_input("X (cm)", value=float(pos['x']),
                                            min_value=0.0, max_value=5.0, step=0.1,
                                            key=f"x_{key}")
                 with cols[1]:
                     new_y = st.number_input("Y (cm)", value=float(pos['y']),
-                                           min_value=0.0, max_value=14.0, step=0.1,
+                                           min_value=0.0, max_value=17.0, step=0.1,
                                            key=f"y_{key}")
                 with cols[2]:
-                    new_w = st.number_input("Szerokość (cm)", value=float(pos['w']),
+                    new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
                                            min_value=0.5, max_value=5.0, step=0.1,
                                            key=f"w_{key}")
                 with cols[3]:
-                    new_h = st.number_input("Wysokość (cm)", value=float(pos['h']),
+                    new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
                                            min_value=0.5, max_value=5.0, step=0.1,
                                            key=f"h_{key}")
                 st.session_state.image_positions[key] = {
@@ -193,18 +265,15 @@ with col_preview:
     LEFT_AREA_CM = 5.24
     LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
-    # data URLs grafik
     image_urls = {}
     if include_qr:
         image_urls['qr'] = None
-    if include_pfm_logo and os.path.exists(PFM_PATH):
-        with open(PFM_PATH, 'rb') as fp:
-            image_urls['pfm'] = img_to_data_url(fp.read())
+    if include_pfm_logo and pfm_data_url:
+        image_urls['pfm'] = pfm_data_url
     for i, f in enumerate(logo_files):
         if f is not None:
             image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
-    # HTML elementów
     elements_html = ""
     for key in image_urls:
         if key not in st.session_state.image_positions:
@@ -220,7 +289,7 @@ with col_preview:
                         width:{w_px}px; height:{h_px}px; 
                         background:white; border:2px solid #333;
                         display:flex; align-items:center; justify-content:center;
-                        font-size:10px; color:#333; font-family:monospace;">
+                        font-size:11px; color:#333; font-family:monospace;">
               <div style="text-align:center;">
                 <div style="font-weight:bold;">QR</div>
               </div>
@@ -350,14 +419,80 @@ with col_preview:
     </div>
     """
     st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=True)
-    st.caption("📝 Podgląd schematyczny. Dokładny wygląd w pobranym .docx")
+    st.caption("📝 Podgląd schematyczny. Dokładny wygląd w pobranym .docx/.pdf")
+
+
+# ─── Helper: konwersja docx → pdf ───────────────────────────────────────
+def docx_to_pdf(docx_bytes, name):
+    """Zwraca bytes PDF lub None + komunikat błędu."""
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, f"{name}.docx")
+            with open(docx_path, 'wb') as f:
+                f.write(docx_bytes)
+            result = subprocess.run(
+                ['libreoffice', '--headless', '--convert-to', 'pdf',
+                 '--outdir', tmpdir, docx_path],
+                capture_output=True, text=True, timeout=300
+            )
+            pdf_path = os.path.join(tmpdir, f"{name}.pdf")
+            if os.path.exists(pdf_path):
+                with open(pdf_path, 'rb') as f:
+                    return f.read(), None
+            return None, result.stderr[:500]
+    except FileNotFoundError:
+        return None, "LibreOffice nie jest zainstalowany na serwerze."
+    except subprocess.TimeoutExpired:
+        return None, "Konwersja PDF trwała zbyt długo."
+    except Exception as e:
+        return None, str(e)
+
+
+def build_image_args():
+    """Wspólna logika - zbierz logos_bytes, image_order, image_positions."""
+    logos_bytes = {}
+    for i, f in enumerate(logo_files):
+        if f is not None:
+            f.seek(0)
+            logos_bytes[f'logo{i+1}'] = f.read()
+    image_order = [k for k, _ in elements_active]
+    image_positions = {}
+    for key in image_order:
+        if key in st.session_state.image_positions:
+            p = st.session_state.image_positions[key]
+            image_positions[key] = {'x': p['x'], 'y': p['y'], 'width': p['w']}
+    return logos_bytes, image_order, image_positions
 
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
 st.header("6. Generuj")
 
-if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_width=True):
+# Format wyboru: docx czy pdf
+cols_fmt = st.columns([1, 1, 4])
+with cols_fmt[0]:
+    fmt_docx = st.checkbox("📄 Word (.docx)", value=True)
+with cols_fmt[1]:
+    fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=False,
+                          help="Wymaga LibreOffice na serwerze - nieco wolniejsze.")
+
+# Dwa przyciski obok siebie: protokoły z arkusza + pusty formularz
+cols_gen = st.columns(2)
+
+with cols_gen[0]:
+    gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
+                            type="primary", use_container_width=True,
+                            help="Pobiera dane z arkusza Google Sheets i tworzy protokoły dla każdego meczu")
+
+with cols_gen[1]:
+    blank_clicked = st.button("📝 Pobierz pusty formularz",
+                              use_container_width=True,
+                              help="Generuje 1 stronę pustego protokołu (bez wypełniania z arkusza)")
+
+# Akcja: protokoły z arkusza
+if gen_clicked:
+    if not fmt_docx and not fmt_pdf:
+        st.error("Wybierz co najmniej jeden format pliku."); st.stop()
     if not sheets_url.strip():
         st.error("Podaj link do arkusza."); st.stop()
     sid = extract_id(sheets_url.strip())
@@ -373,24 +508,10 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
     total = sum(len(m) for _,m in sheets_data)
     st.info(f"Pobrano {len(sheets_data)} grup, {total} meczów.")
     if total == 0:
-        st.error("0 meczów."); st.stop()
+        st.error("0 meczów. Użyj przycisku Debug żeby sprawdzić zakładki."); st.stop()
 
     with st.spinner(f"Generuję {total} protokołów..."):
-        logos_bytes = {}
-        for i, f in enumerate(logo_files):
-            if f is not None:
-                f.seek(0)
-                logos_bytes[f'logo{i+1}'] = f.read()
-
-        image_order = [k for k, _ in elements_active]
-        image_positions = {}
-        for key in image_order:
-            if key in st.session_state.image_positions:
-                p = st.session_state.image_positions[key]
-                image_positions[key] = {
-                    'x': p['x'], 'y': p['y'], 'width': p['w']
-                }
-
+        logos_bytes, image_order, image_positions = build_image_args()
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
@@ -403,10 +524,69 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
 
     st.success(f"✅ Gotowe! {total} protokołów w {len(sheets_data)} grupach.")
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
-    st.download_button(f"⬇️ Pobierz {safe_name}.docx", data=docx_bytes,
-        file_name=f"{safe_name}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True)
+
+    cols_dl = st.columns(2)
+    if fmt_docx:
+        with cols_dl[0]:
+            st.download_button(
+                f"⬇️ Pobierz {safe_name}.docx",
+                data=docx_bytes, file_name=f"{safe_name}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True)
+    if fmt_pdf:
+        with st.spinner("Konwertuję do PDF..."):
+            pdf_bytes, err = docx_to_pdf(docx_bytes, safe_name)
+        if pdf_bytes:
+            with cols_dl[1]:
+                st.download_button(
+                    f"⬇️ Pobierz {safe_name}.pdf",
+                    data=pdf_bytes, file_name=f"{safe_name}.pdf",
+                    mime="application/pdf", use_container_width=True)
+        else:
+            st.error(f"Konwersja PDF nie powiodła się. Pobierz docx i skonwertuj lokalnie.\n\n{err}")
+
+
+# Akcja: pusty formularz
+if blank_clicked:
+    if not fmt_docx and not fmt_pdf:
+        st.error("Wybierz co najmniej jeden format pliku."); st.stop()
+    with st.spinner("Generuję pusty formularz..."):
+        logos_bytes, image_order, image_positions = build_image_args()
+        # QR działa tylko jeśli jest URL — w pustym formularzu też możemy go dodać
+        # jeśli URL podany, traktujemy go jako "skanuj zaraz po wypełnieniu".
+        docx_bytes = generate_docx.build_blank_document(
+            num_pages=1,
+            logos=logos_bytes or None,
+            tournament_name=tournament_name.strip() or "Pusty formularz",
+            tournament_date=tournament_date,
+            sheets_url=sheets_url.strip(),
+            include_qr=include_qr,
+            include_pfm_logo=include_pfm_logo,
+            image_order=image_order or None,
+            image_positions=image_positions or None)
+
+    st.success("✅ Pusty formularz gotowy!")
+    safe_name = "pusty_formularz"
+
+    cols_dl = st.columns(2)
+    if fmt_docx:
+        with cols_dl[0]:
+            st.download_button(
+                f"⬇️ Pobierz {safe_name}.docx",
+                data=docx_bytes, file_name=f"{safe_name}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True)
+    if fmt_pdf:
+        with st.spinner("Konwertuję do PDF..."):
+            pdf_bytes, err = docx_to_pdf(docx_bytes, safe_name)
+        if pdf_bytes:
+            with cols_dl[1]:
+                st.download_button(
+                    f"⬇️ Pobierz {safe_name}.pdf",
+                    data=pdf_bytes, file_name=f"{safe_name}.pdf",
+                    mime="application/pdf", use_container_width=True)
+        else:
+            st.error(f"Konwersja PDF nie powiodła się. Pobierz docx i skonwertuj lokalnie.\n\n{err}")
 
 st.divider()
 st.caption("Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol")
