@@ -1,25 +1,54 @@
 """
 Generator protokołów meczowych Mölkky
 """
-import streamlit as st, io, re
-from PIL import Image, ImageDraw, ImageFont
+import streamlit as st
+import io, re, base64
+from PIL import Image
 import generate_docx
 
 st.set_page_config(page_title="Protokoły Mölkky", page_icon="🎯", layout="wide")
 st.title("🎯 Generator protokołów meczowych Mölkky")
 st.markdown("Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy `.docx`.")
 
+
 def extract_id(url):
     m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
     return m.group(1) if m else None
 
-# Layout: lewa kolumna z formularzem, prawa z podglądem
+
+def img_to_data_url(file_obj):
+    """PIL image lub uploaded file → data URL."""
+    file_obj.seek(0)
+    img = Image.open(file_obj).convert("RGB")
+    file_obj.seek(0)
+    buf = io.BytesIO()
+    img.thumbnail((300, 300))
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{b64}"
+
+
+# Inicjalizacja stanu pozycji w session_state
+if 'image_positions' not in st.session_state:
+    # domyślne pozycje: jedna pod drugą w lewym obszarze
+    # X w cm od lewej krawędzi obszaru "Wyniki turnieju" (5.24 cm)
+    # Y w cm od góry komórki
+    st.session_state.image_positions = {
+        'qr':    {'x': 1.6, 'y': 0.2, 'w': 1.8, 'h': 1.8},
+        'logo1': {'x': 1.5, 'y': 2.4, 'w': 2.0, 'h': 1.2},
+        'logo2': {'x': 1.5, 'y': 3.7, 'w': 2.0, 'h': 1.2},
+        'logo3': {'x': 1.5, 'y': 5.0, 'w': 2.0, 'h': 1.2},
+        'logo4': {'x': 1.5, 'y': 6.3, 'w': 2.0, 'h': 1.2},
+    }
+
+
+# Layout: 2 kolumny - formularz po lewej, podgląd po prawej
 col_form, col_preview = st.columns([3, 2])
 
 with col_form:
     st.header("1. Nazwa turnieju")
     tournament_name = st.text_input("Nazwa turnieju",
-        value="GP2 2026", placeholder="np. GP2 2026, Mistrzostwa Polski 2026")
+        value="GP2 2026", placeholder="np. GP2 2026")
 
     st.header("2. Link do arkusza Google Sheets")
     sheets_url = st.text_input("URL arkusza",
@@ -27,8 +56,7 @@ with col_form:
         help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ..., 'Gr. P'")
 
     st.header("3. Kod QR")
-    include_qr = st.checkbox("✅ Generuj kod QR z linkiem do arkusza",
-                              value=True)
+    include_qr = st.checkbox("✅ Generuj kod QR z linkiem do arkusza", value=True)
 
     st.header("4. Grafiki (max 4)")
     NUM_LOGOS = 4
@@ -39,43 +67,43 @@ with col_form:
             f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"], key=f"logo_{i}")
             logo_files.append(f)
 
-    uploaded = [(i, f) for i, f in enumerate(logo_files) if f is not None]
-    if uploaded:
-        st.markdown("**Podgląd:**")
-        pcols = st.columns(len(uploaded))
-        for col, (i, f) in zip(pcols, uploaded):
-            with col:
-                st.image(Image.open(f), caption=f"Grafika {i+1}", use_container_width=True)
-                f.seek(0)
-
-    # ─── Kolejność (rank_priorities lub po prostu lista) ─────────────
-    st.header("5. Kolejność elementów")
-    elements_available = []
+    # Lista aktywnych elementów
+    elements_active = []
     if include_qr:
-        elements_available.append(('qr', 'Kod QR'))
+        elements_active.append(('qr', 'Kod QR'))
     for i, f in enumerate(logo_files):
         if f is not None:
-            elements_available.append((f'logo{i+1}', f'Grafika {i+1}'))
+            elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
-    image_order = []
-    if elements_available:
-        st.markdown("Każdy element pojawi się od góry do dołu w wybranej kolejności:")
-        # Zamiast indywidualnych selectboxów (które pozwalały duplikaty)
-        # robimy listę reorder przez przeciąganie
-        # Streamlit nie ma natywnego drag&drop, więc używamy multiselect
-        # gdzie kolejność ma znaczenie
-        labels = [label for _, label in elements_available]
-        reordered = st.multiselect(
-            "Wybierz kolejność (klikaj kolejno od góry do dołu):",
-            options=labels,
-            default=labels,
-            help="Kolejność klikania = kolejność wyświetlania od góry"
-        )
-        # Mapuj z powrotem na klucze
-        label_to_key = {label: key for key, label in elements_available}
-        image_order = [label_to_key[lbl] for lbl in reordered]
-        if len(image_order) < len(elements_available):
-            st.info(f"Pominięto {len(elements_available) - len(image_order)} elementów - nie pojawią się na protokole.")
+    # Edycja pozycji
+    if elements_active:
+        st.header("5. Pozycja i rozmiar elementów")
+        st.caption("Domyślnie elementy są ułożone jeden pod drugim w lewym obszarze. "
+                   "Możesz dostosować pozycję (cm od lewego górnego rogu obszaru) i rozmiar.")
+        
+        for key, label in elements_active:
+            with st.expander(f"📍 {label}", expanded=False):
+                cols = st.columns(4)
+                pos = st.session_state.image_positions.get(key, {'x':1.5,'y':0.2,'w':2.0,'h':1.2})
+                with cols[0]:
+                    new_x = st.number_input(f"X (cm)", value=float(pos['x']),
+                                           min_value=0.0, max_value=5.0, step=0.1,
+                                           key=f"x_{key}")
+                with cols[1]:
+                    new_y = st.number_input(f"Y (cm)", value=float(pos['y']),
+                                           min_value=0.0, max_value=12.0, step=0.1,
+                                           key=f"y_{key}")
+                with cols[2]:
+                    new_w = st.number_input(f"Szerokość (cm)", value=float(pos['w']),
+                                           min_value=0.5, max_value=5.0, step=0.1,
+                                           key=f"w_{key}")
+                with cols[3]:
+                    new_h = st.number_input(f"Wysokość (cm)", value=float(pos['h']),
+                                           min_value=0.5, max_value=5.0, step=0.1,
+                                           key=f"h_{key}")
+                st.session_state.image_positions[key] = {
+                    'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
+                }
 
     with st.expander("🔍 Debug – sprawdź zakładki"):
         if st.button("Sprawdź zakładki"):
@@ -87,94 +115,218 @@ with col_form:
                     info = generate_docx.get_sheet_names_debug(sid)
                 st.code("\n".join(info))
 
-# ─── PRAWA KOLUMNA: Podgląd ─────────────────────────────────────────────────
+
+# ─── PODGLĄD HTML/CSS po prawej ─────────────────────────────────────────────
 with col_preview:
     st.header("📄 Podgląd strony")
-    st.caption("Tak będzie wyglądał lewy obszar protokołu (uproszczony schemat)")
+    st.caption("Schemat dokumentu w skali")
 
-    # Symulacja podglądu - rysujemy pierwszą stronę protokołu jako PIL Image
-    PAGE_W, PAGE_H = 600, 800
-    preview = Image.new('RGB', (PAGE_W, PAGE_H), 'white')
-    d = ImageDraw.Draw(preview)
+    # Wymiary A4 z marginesami 1.27cm: obszar tekstu 18.46×27.16 cm
+    # Skala podglądu: 1 cm = 22 px → 406×598 px
+    SCALE = 22  # px na cm
+    PAGE_W_CM = 18.46
+    PAGE_H_CM = 27.16
+    PAGE_W_PX = int(PAGE_W_CM * SCALE)
+    PAGE_H_PX = int(PAGE_H_CM * SCALE)
 
-    # Marginesy (1.27 cm na 600 px ≈ 36 px)
-    LEFT, TOP = 36, 36
+    # Lewy obszar "Wyniki turnieju" = 5.24 cm
+    LEFT_AREA_CM = 5.24
+    LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
-    # Tabela 1 (nagłówek mecz)
-    d.rectangle([LEFT+50, TOP+30, PAGE_W-LEFT, TOP+50], outline='gray')
-    d.text((LEFT+60, TOP+33), "Tor 1   Godzina 09:30   Grupa A   Mecz # 1", fill='black')
-
-    # Tabela 1 dolna część (zawodnicy)
-    d.rectangle([LEFT+50, TOP+60, PAGE_W-LEFT, TOP+120], outline='gray')
-    d.text((LEFT+250, TOP+68), "Łukasz Szulc", fill='black')
-    d.text((LEFT+250, TOP+95), "Anna Ściepuro", fill='black')
-
-    # Linia "Każdy zawodnik..."
-    d.text((LEFT+100, TOP+135), "Każdy zawodnik zaczyna po jednym secie...", fill='gray')
-
-    # Tabela wyników
-    TBL_TOP = TOP+170
-    TBL_BOTTOM = PAGE_H - 60
-    d.rectangle([LEFT, TBL_TOP, PAGE_W-LEFT, TBL_BOTTOM], outline='gray')
-
-    # Linia rozdzielająca "Wyniki turnieju" od "IMIONA"
-    LEFT_AREA_W = 160  # ~5.24 cm w skali
-    d.line([(LEFT+LEFT_AREA_W, TBL_TOP), (LEFT+LEFT_AREA_W, TBL_BOTTOM)], fill='gray')
-
-    # Lewy obszar - rysujemy obrazy
-    cur_y = TBL_TOP + 10
+    # Buduj data URLs dla wgranych grafik
+    image_urls = {}
     if include_qr:
-        # QR placeholder
-        qr_size = 60
-        qr_x = LEFT + (LEFT_AREA_W - qr_size) // 2
-        d.rectangle([qr_x, cur_y, qr_x+qr_size, cur_y+qr_size], outline='black', width=2)
-        d.text((qr_x+18, cur_y+22), "QR", fill='black')
-        cur_y += qr_size + 5
-        # Napis "Wyniki turnieju" pod QR
-        d.text((LEFT+30, cur_y), "Wyniki turnieju", fill='black')
-        cur_y += 25
-    else:
-        d.text((LEFT+30, cur_y), "Wyniki turnieju", fill='black')
-        cur_y += 25
-
-    # Rysuj logo placeholdery
-    logo_colors = ['red', 'orange', 'green', 'blue']
+        # Symuluj QR jako wzór (prawdziwy QR będzie tylko w pobranym docx)
+        image_urls['qr'] = None  # narysuje placeholder
     for i, f in enumerate(logo_files):
-        if f is not None and cur_y < TBL_BOTTOM - 50:
-            try:
-                f.seek(0)
-                img = Image.open(f).convert('RGB')
-                f.seek(0)
-                # Wpisz miniatury w obszar
-                logo_w = 60
-                ratio = img.width / img.height
-                logo_h = min(int(logo_w / ratio), 40)
-                logo_w = int(logo_h * ratio)
-                logo_x = LEFT + (LEFT_AREA_W - logo_w) // 2
-                img_thumb = img.resize((logo_w, logo_h))
-                preview.paste(img_thumb, (logo_x, cur_y))
-                cur_y += logo_h + 8
-            except Exception:
-                # fallback
-                d.rectangle([LEFT+50, cur_y, LEFT+110, cur_y+30],
-                            fill=logo_colors[i % len(logo_colors)])
-                cur_y += 35
+        if f is not None:
+            image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
-    # Prawy obszar tabeli wyników (siatka)
-    d.text((LEFT+LEFT_AREA_W+30, TBL_TOP+10), "SET 1     SET 2", fill='black')
-    # Pusta siatka (uproszczona)
-    for i in range(1, 18):
-        y = TBL_TOP + 50 + i*30
-        if y < TBL_BOTTOM - 30:
-            d.line([(LEFT+LEFT_AREA_W, y), (PAGE_W-LEFT, y)], fill='lightgray')
-    d.text((LEFT+LEFT_AREA_W+50, TBL_BOTTOM-25), "WYNIK", fill='black')
+    # Buduj HTML podglądu
+    elements_html = ""
+    for key in image_urls:
+        if key not in st.session_state.image_positions:
+            continue
+        pos = st.session_state.image_positions[key]
+        x_px = int(pos['x'] * SCALE)
+        y_px = int(pos['y'] * SCALE)
+        w_px = int(pos['w'] * SCALE)
+        h_px = int(pos['h'] * SCALE)
 
-    st.image(preview, use_container_width=True)
+        if key == 'qr':
+            # Placeholder QR
+            elements_html += f"""
+            <div style="position:absolute; left:{x_px}px; top:{y_px}px; 
+                        width:{w_px}px; height:{h_px}px; 
+                        background:white; border:2px solid #333;
+                        display:flex; align-items:center; justify-content:center;
+                        font-size:10px; color:#333; font-family:monospace;">
+              <div style="text-align:center;">
+                <div style="font-weight:bold;">QR</div>
+                <div style="font-size:7px;">code</div>
+              </div>
+            </div>"""
+        else:
+            elements_html += f"""
+            <img src="{image_urls[key]}" 
+                 style="position:absolute; left:{x_px}px; top:{y_px}px;
+                        width:{w_px}px; height:{h_px}px; object-fit:contain;
+                        border:1px dashed #aaa;"/>"""
 
-    st.info("📝 To uproszczony podgląd. Dokładny wygląd zobaczysz w pobranym pliku .docx")
+    # Pozycja "Wyniki turnieju" napisu (pod ostatnim QR jeśli jest)
+    label_y_px = 22 if include_qr else 5
+    if include_qr and 'qr' in st.session_state.image_positions:
+        qr_pos = st.session_state.image_positions['qr']
+        label_y_px = int((qr_pos['y'] + qr_pos['h'] + 0.1) * SCALE)
+
+    html = f"""
+    <div style="background:white; border:1px solid #ccc; 
+                width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
+                position:relative; font-family:Arial, sans-serif;
+                box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+      
+      <!-- Tabela 1: nagłówek meczu (Tor/Godzina/Grupa/Mecz) -->
+      <div style="position:absolute; left:6px; top:30px; right:0; height:30px;
+                  display:flex; align-items:center; padding-left:6px;
+                  font-size:11px; gap:18px;">
+        <span>Tor <b>1</b></span>
+        <span>Godzina <b>09:30</b></span>
+        <span>Grupa <b>A</b></span>
+        <span>Mecz # <b>1</b></span>
+      </div>
+      
+      <!-- Tabela 1: nagłówki kolumn -->
+      <div style="position:absolute; left:{LEFT_AREA_PX}px; top:65px; right:0; height:32px;
+                  background:#f0f0f0; border:1px solid #999;
+                  display:flex; font-size:9px; font-weight:bold; text-align:center;
+                  align-items:center; justify-content:space-around;">
+        <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 1</div>
+        <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 2</div>
+        <div style="flex:1; border-right:1px solid #999;">Wygrane<br>sety</div>
+        <div style="flex:2;">Podpis</div>
+      </div>
+      
+      <!-- Zawodnik 1 -->
+      <div style="position:absolute; left:6px; top:97px; right:0; height:24px;
+                  border:1px solid #999; display:flex; font-size:11px;">
+        <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px; 
+                    text-align:right; line-height:24px; font-weight:bold;">
+          Łukasz Szulc
+        </div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:2; border-left:1px solid #999;"></div>
+      </div>
+      
+      <!-- Zawodnik 2 -->
+      <div style="position:absolute; left:6px; top:121px; right:0; height:24px;
+                  border:1px solid #999; border-top:none; display:flex; font-size:11px;">
+        <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px;
+                    text-align:right; line-height:24px; font-weight:bold;">
+          Anna Ściepuro
+        </div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-left:1px solid #999;"></div>
+        <div style="flex:2; border-left:1px solid #999;"></div>
+      </div>
+      
+      <!-- Zasady -->
+      <div style="position:absolute; left:0; right:0; top:148px;
+                  text-align:center; font-size:8px; color:#555; font-style:italic;">
+        Każdy zawodnik zaczyna po jednym secie (w dowolnej kolejności)<br>
+        Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
+      </div>
+      
+      <!-- Tabela 2: wyniki turnieju -->
+      <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
+                  border:1px solid #999;">
+        <!-- Pierwsza kolumna "Wyniki turnieju" -->
+        <div style="position:absolute; left:0; top:0; bottom:0;
+                    width:{LEFT_AREA_PX}px; border-right:1px solid #999;
+                    overflow:hidden;">
+          <!-- Tu będą floating images -->
+          {elements_html}
+          
+          <!-- Napis "Wyniki turnieju" -->
+          <div style="position:absolute; left:0; right:0; top:{label_y_px}px;
+                      text-align:center; font-size:10px; font-weight:bold;">
+            Wyniki turnieju
+          </div>
+        </div>
+        
+        <!-- Prawa część: SET 1, SET 2, kolumny -->
+        <div style="position:absolute; left:{LEFT_AREA_PX+1}px; top:0; right:0; bottom:0;">
+          <!-- Header SET 1, SET 2 -->
+          <div style="position:absolute; left:0; top:0; right:0; height:22px;
+                      background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
+                      align-items:center; text-align:center; border-bottom:1px solid #999;">
+            <div style="flex:1.4;"></div>
+            <div style="flex:3.0; border-left:1px solid #999;
+                        border-right:1px solid #999;">SET 1</div>
+            <div style="flex:3.0;">SET 2</div>
+          </div>
+          
+          <!-- Header IMIONA / SUMA -->
+          <div style="position:absolute; left:0; top:22px; right:0; height:30px;
+                      background:#f8f8f8; display:flex; font-size:8px; font-weight:bold;
+                      align-items:center; text-align:center; 
+                      border-bottom:1px solid #999;">
+            <div style="flex:1.4; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">IMIONA</div>
+            <div style="flex:1.5; border-right:1px solid #999;"></div>
+            <div style="flex:1.5; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+            <div style="flex:1.5; border-right:1px solid #999;"></div>
+            <div style="flex:1.5; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+            <div style="flex:1.5; border-right:1px solid #999;"></div>
+            <div style="flex:1.5; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+            <div style="flex:1.5; border-right:1px solid #999;"></div>
+            <div style="flex:1.5;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+          </div>
+          
+          <!-- Pusta siatka 18 wierszy -->
+          <div style="position:absolute; left:0; top:52px; right:0; bottom:24px;
+                      display:flex; flex-direction:column;">
+            <!-- Generujemy 18 pustych wierszy jako stripes -->
+            <div style="flex:1; background:repeating-linear-gradient(
+                        to bottom, transparent 0, transparent 17px,
+                        #ccc 17px, #ccc 18px);
+                        background-position: 0 -1px;"></div>
+          </div>
+          
+          <!-- WYNIK na dole -->
+          <div style="position:absolute; left:0; right:0; bottom:0; height:24px;
+                      border-top:1px solid #999;
+                      background:#f0f0f0; display:flex;
+                      font-size:10px; font-weight:bold; text-align:center;
+                      align-items:center;">
+            <div style="flex:1.4;"></div>
+            <div style="flex:1.5; border-left:1px solid #999; line-height:24px;">WYNIK</div>
+            <div style="flex:9; border-left:1px solid #999;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+
+    st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=True)
+    st.caption("📝 Podgląd schematyczny. Dokładny wygląd zobaczysz w pobranym .docx")
+
 
 # ─── Generuj ────────────────────────────────────────────────────────────────
+st.divider()
 st.header("6. Generuj")
+
 if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_width=True):
     if not sheets_url.strip():
         st.error("Podaj link do arkusza."); st.stop()
@@ -190,9 +342,8 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
 
     total = sum(len(m) for _,m in sheets_data)
     st.info(f"Pobrano {len(sheets_data)} grup, {total} meczów.")
-
     if total == 0:
-        st.error("0 meczów. Sprawdź czy arkusz jest publiczny."); st.stop()
+        st.error("0 meczów."); st.stop()
 
     with st.spinner(f"Generuję {total} protokołów..."):
         logos_bytes = {}
@@ -201,12 +352,26 @@ if st.button("🚀 Generuj protokoły .docx", type="primary", use_container_widt
                 f.seek(0)
                 logos_bytes[f'logo{i+1}'] = f.read()
 
+        # Kolejność: wszystkie aktywne elementy w kolejności dodawania
+        image_order = [k for k, _ in elements_active]
+
+        # Pozycje z session_state przekształcone na format generate_docx
+        image_positions = {}
+        for key in image_order:
+            if key in st.session_state.image_positions:
+                p = st.session_state.image_positions[key]
+                image_positions[key] = {
+                    'x': p['x'], 'y': p['y'],
+                    'width': p['w']
+                }
+
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
             tournament_name=tournament_name.strip() or "Turniej Mölkky",
             include_qr=include_qr,
-            image_order=image_order or None)
+            image_order=image_order or None,
+            image_positions=image_positions or None)
 
     st.success(f"✅ Gotowe! {total} protokołów w {len(sheets_data)} grupach.")
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
