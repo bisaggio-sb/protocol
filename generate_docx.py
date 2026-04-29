@@ -302,10 +302,11 @@ def _make_anchored_image_drawing(rel_id, cx_emu, cy_emu, posY_emu, posX_emu=0):
 
 def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
     """
-    Wstawia napis "Wyniki turnieju" inline w komórce + WSZYSTKIE pływające obrazy.
-
-    Napis jest wstawiany na końcu — pływające obrazy są w pierwszym paragrafie,
-    a napis w kolejnym paragrafie z paddingiem.
+    Wstawia pływające obrazy w komórce + napis "Wyniki turnieju".
+    
+    Komórka ma swój paragraf-kotwicę dla pływających obrazów.
+    Napis "Wyniki turnieju" jest renderowany inline z paddingiem górnym
+    który ustawia go w odpowiedniej pozycji Y (np. pod QR).
     """
     tbls = [el for el in elements if el.tag == wt('tbl')]
     if len(tbls) < 2: return
@@ -314,21 +315,26 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
     if len(rows) < 2: return
     target_cell = rows[1].findall(wt('tc'))[0]
 
+    # Wyczyść istniejące paragrafy
     for p in target_cell.findall(wt('p')):
         target_cell.remove(p)
 
-    # Pierwszy paragraf — z pływającymi obrazami, bez tekstu
+    # Pierwszy paragraf - kotwiczy pływające obrazy.
+    # Wysokość minimalna (line=40 exact) żeby paragraf nie zajmował dużo miejsca
     p1 = etree.SubElement(target_cell, wt('p'))
     pPr1 = etree.SubElement(p1, wt('pPr'))
     sp1 = etree.SubElement(pPr1, wt('spacing'))
-    sp1.set(f'{{{W}}}before','0'); sp1.set(f'{{{W}}}after','0')
-    sp1.set(f'{{{W}}}line','40'); sp1.set(f'{{{W}}}lineRule','exact')
+    sp1.set(f'{{{W}}}before', '0')
+    sp1.set(f'{{{W}}}after', '0')
+    sp1.set(f'{{{W}}}line', '40')
+    sp1.set(f'{{{W}}}lineRule', 'exact')
     if anchored_drawings:
         r = etree.SubElement(p1, wt('r'))
         for drawing in anchored_drawings:
             r.append(drawing)
 
-    # Drugi paragraf — napis "Wyniki turnieju" z paddingiem górnym
+    # Drugi paragraf - napis "Wyniki turnieju".
+    # Padding górny przesuwa go do pozycji label_y_cm
     if with_label:
         p2 = etree.SubElement(target_cell, wt('p'))
         pPr2 = etree.SubElement(p2, wt('pPr'))
@@ -336,18 +342,18 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
         jc.set(f'{{{W}}}val', 'center')
         sp2 = etree.SubElement(pPr2, wt('spacing'))
         # Padding górny w twipach (1 cm = 567 twip)
-        before_twip = int(label_y_cm * 567)
+        before_twip = max(0, int(label_y_cm * 567))
         sp2.set(f'{{{W}}}before', str(before_twip))
-        sp2.set(f'{{{W}}}after','0')
+        sp2.set(f'{{{W}}}after', '0')
         r2 = etree.SubElement(p2, wt('r'))
         rPr = etree.SubElement(r2, wt('rPr'))
         fonts = etree.SubElement(rPr, wt('rFonts'))
         for a in ('ascii','hAnsi','eastAsia','cs'):
             fonts.set(f'{{{W}}}{a}', 'Aptos')
         for tag in ('b','bCs'):
-            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val','1')
+            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '1')
         for tag in ('sz','szCs'):
-            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '18')
+            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '20')
         t = etree.SubElement(r2, wt('t'))
         t.text = with_label
 
@@ -714,8 +720,22 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     label_after_qr = True
                     cur_y_cm += 0.4  # miejsce na napis "Wyniki turnieju"
 
-            # Napis "Wyniki turnieju" - inline w komórce z paddingiem żeby był pod QR
-            label_y_cm = 1.95 if (qr_rid_info and include_qr) else 0.1
+            # Napis "Wyniki turnieju" - inline w komórce z paddingiem żeby był pod QR.
+            # label_y_cm = pozycja Y od góry komórki gdzie ma być napis.
+            # Jeśli jest QR: pod QR (y + h + 0.1 odstęp)
+            # Bez QR: na samej górze
+            if qr_rid_info and include_qr:
+                # Wyciągnij faktyczną pozycję i wysokość QR z image_positions
+                if image_positions and 'qr' in image_positions:
+                    qr_pos = image_positions['qr']
+                    qr_y = qr_pos.get('y', 0.2)
+                    qr_w_cm = qr_pos.get('width', 2.4)
+                    # QR jest kwadratowy więc h = w
+                    label_y_cm = qr_y + qr_w_cm + 0.1
+                else:
+                    label_y_cm = 0.2 + 2.4 + 0.1  # default 2.7
+            else:
+                label_y_cm = 0.1
             _populate_left_area(cloned, anchored, 'Wyniki turnieju', label_y_cm)
 
             for el in cloned:
