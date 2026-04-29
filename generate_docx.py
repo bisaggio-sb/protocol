@@ -480,6 +480,30 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if tblInd is not None:
                     tblInd.set(f'{{{W}}}w', '0')
                     tblInd.set(f'{{{W}}}type', 'dxa')
+
+    # ── DODAJ widoczny LEWY border do pierwszej komórki w wierszach z nazwiskami
+    # (wiersze 2,3,4 - nagłówki + 2 zawodników). Bez tego tabela 1 wygląda jakby
+    # zaczynała się od kolumny "Punkty SET 1" zamiast od lewej krawędzi.
+    if first_tbl is not None:
+        rows = first_tbl.findall(wt('tr'))
+        for ridx in [2, 3, 4]:
+            if ridx >= len(rows): break
+            tcs = rows[ridx].findall(wt('tc'))
+            if not tcs: continue
+            first_tc = tcs[0]
+            tcPr = first_tc.find(wt('tcPr'))
+            if tcPr is None: continue
+            tcBorders = tcPr.find(wt('tcBorders'))
+            if tcBorders is None:
+                tcBorders = etree.SubElement(tcPr, wt('tcBorders'))
+            # Ustaw left + top + bottom = single (linie widoczne)
+            for side in ('left', 'top', 'bottom'):
+                b = tcBorders.find(wt(side))
+                if b is None:
+                    b = etree.SubElement(tcBorders, wt(side))
+                b.set(f'{{{W}}}val', 'single')
+                b.set(f'{{{W}}}sz', '4')
+                b.set(f'{{{W}}}color', 'auto')
         # Wyrównaj "Tor" do lewej
         first_row = first_tbl.find(wt('tr'))
         if first_row is not None:
@@ -496,8 +520,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     jc.set(f'{{{W}}}val', 'left')
 
     # ── Fix WYNIK + zwężenie kolumny IMIONA na rzecz obszaru grafik:
-    # gridCol[0] "Wyniki turnieju" 2970→3370 DXA (+400, więcej miejsca na grafiki)
-    # gridCol[1] IMIONA / WYNIK 840→1000 DXA — "WYNIK" mieści się w 1 linii (Aptos i Calibri)
+    # gridCol[0] "Wyniki turnieju" 2970→3570 DXA (+600, znacznie więcej miejsca na grafiki)
+    # gridCol[1] IMIONA / WYNIK 840→800 DXA (-40, ciasno ale wystarczy na "WYNIK")
     # gridCol[2] pierwsza pusta SET 1 735→175 DXA (-560) — kompensata
     # Suma bez zmian: 9690.
     tbls = body.findall(wt('tbl'))
@@ -505,8 +529,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         score_tbl = tbls[1]
         gcs = score_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
         if len(gcs) >= 3:
-            gcs[0].set(f'{{{W}}}w', '3370')   # Wyniki turnieju (grafiki)
-            gcs[1].set(f'{{{W}}}w', '1000')   # IMIONA / WYNIK
+            gcs[0].set(f'{{{W}}}w', '3570')   # Wyniki turnieju (grafiki)
+            gcs[1].set(f'{{{W}}}w', '800')    # IMIONA / WYNIK
             gcs[2].set(f'{{{W}}}w', '175')    # pierwsza pusta SET 1
             for row in score_tbl.findall(wt('tr')):
                 for tc in row.findall(wt('tc')):
@@ -516,9 +540,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     if tcW is None: continue
                     cur_w = int(tcW.get(f'{{{W}}}w','0'))
                     if cur_w == 2970:
-                        tcW.set(f'{{{W}}}w', '3370')
+                        tcW.set(f'{{{W}}}w', '3570')
                     elif cur_w == 840:
-                        tcW.set(f'{{{W}}}w', '1000')
+                        tcW.set(f'{{{W}}}w', '800')
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
