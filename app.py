@@ -29,7 +29,7 @@ def img_to_data_url(file_or_bytes):
     return f"data:image/png;base64,{b64}"
 
 
-# ─── Header z logo PFM (HTML/CSS dla wyrównania) ─────────────────────
+# Header z logo PFM
 if os.path.exists(PFM_PATH):
     with open(PFM_PATH, 'rb') as fp:
         pfm_data_url = img_to_data_url(fp.read())
@@ -40,11 +40,11 @@ st.markdown(f"""
 <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
   <img src="{pfm_data_url}" style="height:64px; width:auto; flex-shrink:0;"/>
   <div>
-    <h1 style="margin:0; padding:0; font-size:2.2rem; line-height:1.2;">
+    <h1 style="margin:0; padding:0; font-size:2.0rem; line-height:1.2;">
       Generator protokołów meczowych Mölkky
     </h1>
     <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
-      Podaj nazwę turnieju, link do arkusza Google Sheets, opcjonalnie dodaj grafiki — pobierz gotowy <code>.docx</code> lub <code>.pdf</code>.
+      Generuj protokoły z arkusza Google Sheets lub pobierz pusty formularz.
     </p>
   </div>
 </div>
@@ -59,45 +59,36 @@ def extract_id(url):
 
 
 # ─── Dynamiczne rozkładanie domyślnych pozycji ────────────────────────
-def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=5.94):
-    """
-    Rozkłada elementy równomiernie w lewym obszarze.
-    QR (jeśli jest) zawsze na górze, napis "Wyniki turnieju" pod QR,
-    a pozostałe elementy (PFM, logo1-4) rozłożone równomiernie poniżej.
-    Logo PFM jest zawsze pierwszą grafiką pod napisem (z małym odstępem).
+# Obszar "Wyniki turnieju" ma teraz szerokość 6.30 cm (gridCol 3570 DXA)
+LEFT_AREA_CM = 6.30
 
-    Zwraca dict {key: {'x','y','w','h'}}.
-    """
+def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
+    """Rozkłada elementy równomiernie. QR na górze, napis pod nim,
+    PFM + grafiki rozłożone równomiernie poniżej z odstępami."""
     positions = {}
     cur_y = 0.2
 
-    # QR zawsze na górze (jeśli aktywny)
     if 'qr' in active_keys:
         qr_w = 2.4
-        qr_x = (area_width_cm - qr_w) / 2  # wycentrowany
+        qr_x = (area_width_cm - qr_w) / 2
         positions['qr'] = {'x': qr_x, 'y': cur_y, 'w': qr_w, 'h': qr_w}
-        cur_y += qr_w + 0.1  # mały odstęp pod QR
-        cur_y += 0.5         # miejsce na napis "Wyniki turnieju"
-        cur_y += 0.2         # mały odstęp pod napisem (1 cm łącznie z QR-do-PFM)
+        cur_y += qr_w + 0.1
+        cur_y += 0.5  # napis "Wyniki turnieju"
+        cur_y += 0.4  # odstęp pod napisem (~1cm łącznie)
 
-    # Pozostałe elementy (PFM + logo)
     other_keys = [k for k in active_keys if k != 'qr']
     if other_keys:
-        # Dostępna przestrzeń poniżej (od cur_y do area_height_cm)
         available = area_height_cm - cur_y
         n = len(other_keys)
-        # Każdy element dostaje równo
         slot_h = available / n
-        # Wysokość obrazka = slot_h - mały margines (rozkładamy z odstępami)
         img_h = min(3.0, slot_h - 0.3)
-        img_w = 4.0  # szersze grafiki
+        img_w = 4.0
         if img_w > area_width_cm - 0.4:
             img_w = area_width_cm - 0.4
         img_x = (area_width_cm - img_w) / 2
 
         for i, key in enumerate(other_keys):
             slot_top = cur_y + i * slot_h
-            # Wycentruj obrazek w slocie pionowo
             img_y = slot_top + (slot_h - img_h) / 2
             positions[key] = {'x': img_x, 'y': img_y, 'w': img_w, 'h': img_h}
 
@@ -157,22 +148,28 @@ with col_form:
                    "Pozostałe opcje (drużynowe, pucharowe) będą dostępne w kolejnych wersjach — "
                    "protokoły zostaną wygenerowane jako faza grupowa indywidualna.")
 
-    # ─── 2. Link ────────────────────────────────────────────────────────
-    st.header("2. Link do arkusza Google Sheets")
+    # ─── 2. Pusty formularz (dostępny od razu, bez arkusza) ─────────────
+    st.header("2. Pusty formularz")
+    st.caption("Pobierz pusty protokół (1 strona) bez wypełniania danymi z arkusza.")
+
+    # ─── 3. Link do arkusza ─────────────────────────────────────────────
+    st.header("3. Link do arkusza Google Sheets")
+    st.caption("Lub jeśli chcesz wygenerować protokoły wypełnione danymi:")
     sheets_url = st.text_input("URL arkusza",
         placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
-        help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...")
+        help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
+        label_visibility="collapsed")
 
-    # ─── 3. Domyślne elementy ───────────────────────────────────────────
-    st.header("3. Domyślne elementy")
+    # ─── 4. Domyślne elementy ───────────────────────────────────────────
+    st.header("4. Domyślne elementy")
     cols_dom = st.columns(2)
     with cols_dom[0]:
         include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
     with cols_dom[1]:
         include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
-    # ─── 4. Dodatkowe grafiki ───────────────────────────────────────────
-    st.header("4. Dodatkowe grafiki (max 4)")
+    # ─── 5. Dodatkowe grafiki ───────────────────────────────────────────
+    st.header("5. Dodatkowe grafiki (max 4)")
     NUM_LOGOS = 4
     logo_files = []
     cols_log = st.columns(2)
@@ -191,29 +188,24 @@ with col_form:
         if f is not None:
             elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
-    # Auto-aktualizuj domyślne pozycje gdy zmienia się zestaw aktywnych elementów
+    # AUTO-RESET pozycji gdy zmienia się zestaw aktywnych elementów
+    # (zawsze rozkładaj równomiernie, użytkownik może potem dostosować)
     active_keys_signature = "|".join(k for k, _ in elements_active)
     if active_keys_signature != st.session_state.positions_initialized_for:
-        # Zachowaj manualnie zmienione pozycje, ustaw domyślne tylko dla nowych
-        new_defaults = compute_default_positions([k for k, _ in elements_active])
-        # Zachowaj istniejące pozycje, dodaj nowe domyślne
-        for key, pos in new_defaults.items():
-            if key not in st.session_state.image_positions:
-                st.session_state.image_positions[key] = pos
-        # Jeśli to pierwsza inicjalizacja, ustaw wszystkie
-        if not st.session_state.positions_initialized_for:
-            st.session_state.image_positions = new_defaults
+        # Zawsze resetuj wszystkie pozycje gdy zestaw się zmienia
+        st.session_state.image_positions = compute_default_positions(
+            [k for k, _ in elements_active])
         st.session_state.positions_initialized_for = active_keys_signature
 
-    # ─── 5. Pozycje ─────────────────────────────────────────────────────
+    # ─── 6. Pozycje ─────────────────────────────────────────────────────
     if elements_active:
-        st.header("5. Pozycja i rozmiar elementów")
+        st.header("6. Pozycja i rozmiar elementów")
         cols_h5 = st.columns([4, 1])
         with cols_h5[0]:
-            st.caption("Domyślnie elementy są ułożone równomiernie w lewym obszarze. "
+            st.caption("Elementy są ułożone równomiernie automatycznie. "
                        "Możesz dostosować pozycję (cm) i rozmiar.")
         with cols_h5[1]:
-            if st.button("↺ Resetuj", help="Przywróć równomierny rozkład"):
+            if st.button("↻ Rozmieść równomiernie", help="Przywróć równomierny rozkład"):
                 st.session_state.image_positions = compute_default_positions(
                     [k for k, _ in elements_active])
                 st.rerun()
@@ -225,7 +217,7 @@ with col_form:
                         {'x':1.0,'y':0.2,'w':2.5,'h':2.0})
                 with cols[0]:
                     new_x = st.number_input("X (cm)", value=float(pos['x']),
-                                           min_value=0.0, max_value=5.0, step=0.1,
+                                           min_value=0.0, max_value=6.0, step=0.1,
                                            key=f"x_{key}")
                 with cols[1]:
                     new_y = st.number_input("Y (cm)", value=float(pos['y']),
@@ -233,11 +225,11 @@ with col_form:
                                            key=f"y_{key}")
                 with cols[2]:
                     new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
-                                           min_value=0.5, max_value=5.0, step=0.1,
+                                           min_value=0.5, max_value=6.0, step=0.1,
                                            key=f"w_{key}")
                 with cols[3]:
                     new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
-                                           min_value=0.5, max_value=5.0, step=0.1,
+                                           min_value=0.5, max_value=6.0, step=0.1,
                                            key=f"h_{key}")
                 st.session_state.image_positions[key] = {
                     'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
@@ -249,7 +241,7 @@ with col_form:
             if not sid:
                 st.error("Wklej najpierw poprawny link do arkusza.")
             else:
-                with st.spinner("Sprawdzam zakładki Gr. A – Gr. P..."):
+                with st.spinner("Sprawdzam zakładki Gr. A – Gr. Z..."):
                     info = generate_docx.get_sheet_names_debug(sid)
                 st.code("\n".join(info))
 
@@ -264,7 +256,6 @@ with col_preview:
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
     PAGE_H_PX = int(PAGE_H_CM * SCALE)
-    LEFT_AREA_CM = 5.94
     LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
     image_urls = {}
@@ -315,16 +306,26 @@ with col_preview:
             parts.append(tournament_date)
         header_text = " · ".join(parts)
 
+    # Podgląd: tabela 1 zaczyna się od x=0 (lewy brzeg), kończy na full width
+    # Pierwsza komórka (z nazwiskami) zajmuje 3635/9690 = 37.5% szerokości
+    # = 0 do 0.375*PAGE_W_PX
+    NAMES_FRAC = 3635 / 9690  # ~37.5%
+    NAMES_PX = int(PAGE_W_PX * NAMES_FRAC)
+
     html = f"""
     <div style="background:white; border:1px solid #ccc; 
                 width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                 position:relative; font-family:Arial, sans-serif;
                 box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+      
+      <!-- Header w prawym górnym rogu -->
       <div style="position:absolute; right:8px; top:6px; 
                   font-size:9px; color:#666; font-style:italic;">
         {header_text}
       </div>
-      <div style="position:absolute; left:6px; top:30px; right:0; height:30px;
+      
+      <!-- Tabela 1: pierwszy wiersz (Tor/Godzina/Grupa/Mecz) -->
+      <div style="position:absolute; left:0; top:30px; right:0; height:30px;
                   display:flex; align-items:center; padding-left:6px;
                   font-size:11px; gap:18px;">
         <span>Tor <b>1</b></span>
@@ -332,44 +333,55 @@ with col_preview:
         <span>Grupa <b>A</b></span>
         <span>Mecz # <b>1</b></span>
       </div>
-      <div style="position:absolute; left:{LEFT_AREA_PX}px; top:65px; right:0; height:32px;
+      
+      <!-- Tabela 1: nagłówki kolumn (po prawej, od końca pierwszej komórki) -->
+      <div style="position:absolute; left:{NAMES_PX}px; top:65px; right:0; height:32px;
                   background:#f0f0f0; border:1px solid #999;
                   display:flex; font-size:9px; font-weight:bold; text-align:center;
                   align-items:center; justify-content:space-around;">
         <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 1</div>
         <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 2</div>
-        <div style="flex:1; border-right:1px solid #999;">Wygrane<br>sety</div>
-        <div style="flex:2;">Podpis</div>
+        <div style="flex:1.15; border-right:1px solid #999;">Wygrane<br>sety</div>
+        <div style="flex:1.95;">Podpis</div>
       </div>
-      <div style="position:absolute; left:6px; top:97px; right:0; height:24px;
+      
+      <!-- Wiersze zawodników: pierwsza komórka z borderem od lewej do NAMES_PX -->
+      <div style="position:absolute; left:0; top:97px; right:0; height:24px;
                   border:1px solid #999; display:flex; font-size:11px;">
-        <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px; 
-                    text-align:right; line-height:24px; font-weight:bold;">
+        <div style="flex:0 0 {NAMES_PX}px; padding-right:8px; 
+                    text-align:right; line-height:24px; font-weight:bold;
+                    border-right:1px solid #999;">
           Łukasz Szulc
         </div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:2; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-right:1px solid #999;"></div>
+        <div style="flex:1; border-right:1px solid #999;"></div>
+        <div style="flex:1.15; border-right:1px solid #999;"></div>
+        <div style="flex:1.95;"></div>
       </div>
-      <div style="position:absolute; left:6px; top:121px; right:0; height:24px;
+      <div style="position:absolute; left:0; top:121px; right:0; height:24px;
                   border:1px solid #999; border-top:none; display:flex; font-size:11px;">
-        <div style="flex:0 0 {LEFT_AREA_PX-6}px; padding-right:8px;
-                    text-align:right; line-height:24px; font-weight:bold;">
+        <div style="flex:0 0 {NAMES_PX}px; padding-right:8px;
+                    text-align:right; line-height:24px; font-weight:bold;
+                    border-right:1px solid #999;">
           Anna Ściepuro
         </div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:1; border-left:1px solid #999;"></div>
-        <div style="flex:2; border-left:1px solid #999;"></div>
+        <div style="flex:1; border-right:1px solid #999;"></div>
+        <div style="flex:1; border-right:1px solid #999;"></div>
+        <div style="flex:1.15; border-right:1px solid #999;"></div>
+        <div style="flex:1.95;"></div>
       </div>
+      
+      <!-- Zasady -->
       <div style="position:absolute; left:0; right:0; top:148px;
                   text-align:center; font-size:8px; color:#555; font-style:italic;">
         Każdy zawodnik zaczyna po jednym secie (w dowolnej kolejności)<br>
         Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
       </div>
+      
+      <!-- Tabela 2 -->
       <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
                   border:1px solid #999;">
+        <!-- Lewy obszar (Wyniki turnieju + grafiki) -->
         <div style="position:absolute; left:0; top:0; bottom:0;
                     width:{LEFT_AREA_PX}px; border-right:1px solid #999;
                     overflow:hidden;">
@@ -379,37 +391,39 @@ with col_preview:
             Wyniki turnieju
           </div>
         </div>
+        
+        <!-- Prawa część tabeli wyników -->
         <div style="position:absolute; left:{LEFT_AREA_PX+1}px; top:0; right:0; bottom:0;">
           <!-- Wiersz 0: SET 1 / SET 2 -->
           <div style="position:absolute; left:0; top:0; right:0; height:22px;
                       background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
                       align-items:center; text-align:center; border-bottom:1px solid #999;">
-            <div style="flex:1.36; border-right:1px solid #999;"></div>
-            <div style="flex:2.94; border-right:1px solid #999;">SET 1</div>
-            <div style="flex:2.94;">SET 2</div>
+            <div style="flex:0.97; border-right:1px solid #999;"></div>
+            <div style="flex:3.06; border-right:1px solid #999;">SET 1</div>
+            <div style="flex:3.06;">SET 2</div>
           </div>
           <!-- Wiersz 1: IMIONA + 8 kolumn (pierwsza wąska, reszta normalna) -->
           <div style="position:absolute; left:0; top:22px; right:0; height:30px;
                       background:#f8f8f8; display:flex; font-size:8px; font-weight:bold;
                       align-items:center; text-align:center; 
                       border-bottom:1px solid #999;">
-            <div style="flex:1.36; border-right:1px solid #999;
+            <div style="flex:0.97; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">IMIONA</div>
-            <div style="flex:0.24; border-right:1px solid #999;"></div>
-            <div style="flex:1.0; border-right:1px solid #999;
+            <div style="flex:0.21; border-right:1px solid #999;"></div>
+            <div style="flex:0.89; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
-            <div style="flex:1.0; border-right:1px solid #999;"></div>
-            <div style="flex:1.0; border-right:1px solid #999;
+            <div style="flex:0.89; border-right:1px solid #999;"></div>
+            <div style="flex:0.89; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
-            <div style="flex:1.0; border-right:1px solid #999;"></div>
-            <div style="flex:1.0; border-right:1px solid #999;
+            <div style="flex:0.89; border-right:1px solid #999;"></div>
+            <div style="flex:0.89; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
-            <div style="flex:1.0; border-right:1px solid #999;"></div>
-            <div style="flex:1.0;
+            <div style="flex:0.89; border-right:1px solid #999;"></div>
+            <div style="flex:0.89;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
           </div>
@@ -422,8 +436,8 @@ with col_preview:
                       background:#f0f0f0; display:flex;
                       font-size:10px; font-weight:bold; text-align:center;
                       align-items:center;">
-            <div style="flex:1.36; border-right:1px solid #999; line-height:24px;">WYNIK</div>
-            <div style="flex:7.24;"></div>
+            <div style="flex:0.97; border-right:1px solid #999; line-height:24px;">WYNIK</div>
+            <div style="flex:7.33;"></div>
           </div>
         </div>
       </div>
@@ -435,7 +449,6 @@ with col_preview:
 
 # ─── Helper: konwersja docx → pdf ───────────────────────────────────────
 def docx_to_pdf(docx_bytes, name):
-    """Zwraca bytes PDF lub None + komunikat błędu."""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             docx_path = os.path.join(tmpdir, f"{name}.docx")
@@ -460,7 +473,6 @@ def docx_to_pdf(docx_bytes, name):
 
 
 def build_image_args():
-    """Wspólna logika - zbierz logos_bytes, image_order, image_positions."""
     logos_bytes = {}
     for i, f in enumerate(logo_files):
         if f is not None:
@@ -477,30 +489,25 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("6. Generuj")
+st.header("7. Generuj")
 
-# Format wyboru: docx czy pdf
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
     fmt_docx = st.checkbox("📄 Word (.docx)", value=True)
 with cols_fmt[1]:
     fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=False,
-                          help="Wymaga LibreOffice na serwerze - nieco wolniejsze.")
+                          help="Wymaga LibreOffice na serwerze.")
 
-# Dwa przyciski obok siebie: protokoły z arkusza + pusty formularz
 cols_gen = st.columns(2)
-
 with cols_gen[0]:
     gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
                             type="primary", use_container_width=True,
-                            help="Pobiera dane z arkusza Google Sheets i tworzy protokoły dla każdego meczu")
-
+                            help="Pobiera dane z arkusza Google Sheets")
 with cols_gen[1]:
     blank_clicked = st.button("📝 Pobierz pusty formularz",
                               use_container_width=True,
-                              help="Generuje 1 stronę pustego protokołu (bez wypełniania z arkusza)")
+                              help="1 strona pustego protokołu (bez arkusza)")
 
-# Akcja: protokoły z arkusza
 if gen_clicked:
     if not fmt_docx and not fmt_pdf:
         st.error("Wybierz co najmniej jeden format pliku."); st.stop()
@@ -519,7 +526,7 @@ if gen_clicked:
     total = sum(len(m) for _,m in sheets_data)
     st.info(f"Pobrano {len(sheets_data)} grup, {total} meczów.")
     if total == 0:
-        st.error("0 meczów. Użyj przycisku Debug żeby sprawdzić zakładki."); st.stop()
+        st.error("0 meczów. Użyj Debug żeby sprawdzić zakładki."); st.stop()
 
     with st.spinner(f"Generuję {total} protokołów..."):
         logos_bytes, image_order, image_positions = build_image_args()
@@ -554,21 +561,17 @@ if gen_clicked:
                     data=pdf_bytes, file_name=f"{safe_name}.pdf",
                     mime="application/pdf", use_container_width=True)
         else:
-            st.error(f"Konwersja PDF nie powiodła się. Pobierz docx i skonwertuj lokalnie.\n\n{err}")
+            st.error(f"Konwersja PDF nie powiodła się: {err}")
 
-
-# Akcja: pusty formularz
 if blank_clicked:
     if not fmt_docx and not fmt_pdf:
         st.error("Wybierz co najmniej jeden format pliku."); st.stop()
     with st.spinner("Generuję pusty formularz..."):
         logos_bytes, image_order, image_positions = build_image_args()
-        # QR działa tylko jeśli jest URL — w pustym formularzu też możemy go dodać
-        # jeśli URL podany, traktujemy go jako "skanuj zaraz po wypełnieniu".
         docx_bytes = generate_docx.build_blank_document(
             num_pages=1,
             logos=logos_bytes or None,
-            tournament_name=tournament_name.strip() or "Pusty formularz",
+            tournament_name=tournament_name.strip() or "",
             tournament_date=tournament_date,
             sheets_url=sheets_url.strip(),
             include_qr=include_qr,
@@ -597,7 +600,7 @@ if blank_clicked:
                     data=pdf_bytes, file_name=f"{safe_name}.pdf",
                     mime="application/pdf", use_container_width=True)
         else:
-            st.error(f"Konwersja PDF nie powiodła się. Pobierz docx i skonwertuj lokalnie.\n\n{err}")
+            st.error(f"Konwersja PDF nie powiodła się: {err}")
 
 st.divider()
 st.caption("Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol")
