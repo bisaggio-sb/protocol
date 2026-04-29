@@ -59,11 +59,12 @@ def extract_id(url):
 
 
 # ─── Dynamiczne rozkładanie domyślnych pozycji ────────────────────────
-def compute_default_positions(active_keys, area_height_cm=15.5, area_width_cm=5.24):
+def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=5.94):
     """
     Rozkłada elementy równomiernie w lewym obszarze.
-    QR (jeśli jest) zawsze na górze, potem napis "Wyniki turnieju",
+    QR (jeśli jest) zawsze na górze, napis "Wyniki turnieju" pod QR,
     a pozostałe elementy (PFM, logo1-4) rozłożone równomiernie poniżej.
+    Logo PFM jest zawsze pierwszą grafiką pod napisem (z małym odstępem).
 
     Zwraca dict {key: {'x','y','w','h'}}.
     """
@@ -75,8 +76,9 @@ def compute_default_positions(active_keys, area_height_cm=15.5, area_width_cm=5.
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2  # wycentrowany
         positions['qr'] = {'x': qr_x, 'y': cur_y, 'w': qr_w, 'h': qr_w}
-        cur_y += qr_w + 0.1  # mały odstęp
-        cur_y += 0.6  # miejsce na napis "Wyniki turnieju"
+        cur_y += qr_w + 0.1  # mały odstęp pod QR
+        cur_y += 0.5         # miejsce na napis "Wyniki turnieju"
+        cur_y += 0.2         # mały odstęp pod napisem (1 cm łącznie z QR-do-PFM)
 
     # Pozostałe elementy (PFM + logo)
     other_keys = [k for k in active_keys if k != 'qr']
@@ -86,9 +88,9 @@ def compute_default_positions(active_keys, area_height_cm=15.5, area_width_cm=5.
         n = len(other_keys)
         # Każdy element dostaje równo
         slot_h = available / n
-        # Wysokość obrazka = slot_h - mały margines
-        img_h = min(2.5, slot_h - 0.4)
-        img_w = 3.5  # domyślnie 3.5 cm szerokości
+        # Wysokość obrazka = slot_h - mały margines (rozkładamy z odstępami)
+        img_h = min(3.0, slot_h - 0.3)
+        img_w = 4.0  # szersze grafiki
         if img_w > area_width_cm - 0.4:
             img_w = area_width_cm - 0.4
         img_x = (area_width_cm - img_w) / 2
@@ -165,9 +167,9 @@ with col_form:
     st.header("3. Domyślne elementy")
     cols_dom = st.columns(2)
     with cols_dom[0]:
-        include_qr = st.checkbox("✅ Kod QR (link do arkusza)", value=True)
+        include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
     with cols_dom[1]:
-        include_pfm_logo = st.checkbox("✅ Logo Polskiej Federacji Mölkky", value=True)
+        include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
     # ─── 4. Dodatkowe grafiki ───────────────────────────────────────────
     st.header("4. Dodatkowe grafiki (max 4)")
@@ -262,7 +264,7 @@ with col_preview:
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
     PAGE_H_PX = int(PAGE_H_CM * SCALE)
-    LEFT_AREA_CM = 5.24
+    LEFT_AREA_CM = 5.94
     LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
 
     image_urls = {}
@@ -378,26 +380,36 @@ with col_preview:
           </div>
         </div>
         <div style="position:absolute; left:{LEFT_AREA_PX+1}px; top:0; right:0; bottom:0;">
+          <!-- Wiersz 0: SET 1 / SET 2 -->
           <div style="position:absolute; left:0; top:0; right:0; height:22px;
                       background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
                       align-items:center; text-align:center; border-bottom:1px solid #999;">
-            <div style="flex:1.4; border-right:1px solid #999;"></div>
-            <div style="flex:3.0; border-right:1px solid #999;">SET 1</div>
-            <div style="flex:3.0;">SET 2</div>
+            <div style="flex:1.36; border-right:1px solid #999;"></div>
+            <div style="flex:2.94; border-right:1px solid #999;">SET 1</div>
+            <div style="flex:2.94;">SET 2</div>
           </div>
+          <!-- Wiersz 1: IMIONA + 8 kolumn (pierwsza wąska, reszta normalna) -->
           <div style="position:absolute; left:0; top:22px; right:0; height:30px;
                       background:#f8f8f8; display:flex; font-size:8px; font-weight:bold;
                       align-items:center; text-align:center; 
                       border-bottom:1px solid #999;">
-            <div style="flex:1.4; border-right:1px solid #999;
+            <div style="flex:1.36; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">IMIONA</div>
-            <div style="flex:1.5; border-right:1px solid #999;"></div>
-            <div style="flex:1.5; border-right:1px solid #999;
+            <div style="flex:0.24; border-right:1px solid #999;"></div>
+            <div style="flex:1.0; border-right:1px solid #999;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
-            <div style="flex:1.5; border-right:1px solid #999;"></div>
-            <div style="flex:1.5;
+            <div style="flex:1.0; border-right:1px solid #999;"></div>
+            <div style="flex:1.0; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+            <div style="flex:1.0; border-right:1px solid #999;"></div>
+            <div style="flex:1.0; border-right:1px solid #999;
+                        writing-mode:vertical-rl; transform:rotate(180deg);
+                        line-height:1.2;">SUMA</div>
+            <div style="flex:1.0; border-right:1px solid #999;"></div>
+            <div style="flex:1.0;
                         writing-mode:vertical-rl; transform:rotate(180deg);
                         line-height:1.2;">SUMA</div>
           </div>
@@ -410,9 +422,8 @@ with col_preview:
                       background:#f0f0f0; display:flex;
                       font-size:10px; font-weight:bold; text-align:center;
                       align-items:center;">
-            <div style="flex:1.4;"></div>
-            <div style="flex:1.5; border-left:1px solid #999; line-height:24px;">WYNIK</div>
-            <div style="flex:4.5; border-left:1px solid #999;"></div>
+            <div style="flex:1.36; border-right:1px solid #999; line-height:24px;">WYNIK</div>
+            <div style="flex:7.24;"></div>
           </div>
         </div>
       </div>
