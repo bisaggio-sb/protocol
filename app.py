@@ -63,35 +63,54 @@ def extract_id(url):
 LEFT_AREA_CM = 6.30
 
 def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
-    """Rozkłada elementy równomiernie. QR na górze, napis pod nim,
-    PFM + grafiki rozłożone równomiernie poniżej z odstępami."""
+    """
+    Rozkłada elementy w lewym obszarze:
+    - QR na górze (jeśli aktywny)
+    - "Wyniki turnieju" napis pod QR (renderowany w docx, nie tutaj)
+    - PFM + grafiki pod napisem, równomiernie rozłożone z 1cm odstępami
+    
+    Wszystko ma się zmieścić w obszarze 16cm. Im więcej elementów, tym ciaśniej.
+    """
     positions = {}
-    cur_y = 0.2
-
+    SPACING = 1.0  # 1 cm odstęp między elementami
+    
+    # Lista wszystkich elementów do rozłożenia (poza QR + napisem)
+    other_keys = [k for k in active_keys if k != 'qr']
+    
+    # ── QR na górze (jeśli aktywny)
     if 'qr' in active_keys:
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2
-        positions['qr'] = {'x': qr_x, 'y': cur_y, 'w': qr_w, 'h': qr_w}
-        cur_y += qr_w + 0.1
-        cur_y += 0.5  # napis "Wyniki turnieju"
-        cur_y += 0.4  # odstęp pod napisem (~1cm łącznie)
-
-    other_keys = [k for k in active_keys if k != 'qr']
-    if other_keys:
-        available = area_height_cm - cur_y
-        n = len(other_keys)
-        slot_h = available / n
-        img_h = min(3.0, slot_h - 0.3)
-        img_w = 4.0
-        if img_w > area_width_cm - 0.4:
-            img_w = area_width_cm - 0.4
-        img_x = (area_width_cm - img_w) / 2
-
-        for i, key in enumerate(other_keys):
-            slot_top = cur_y + i * slot_h
-            img_y = slot_top + (slot_h - img_h) / 2
-            positions[key] = {'x': img_x, 'y': img_y, 'w': img_w, 'h': img_h}
-
+        positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
+        # Po QR rezerwujemy 0.5cm na napis "Wyniki turnieju"
+        # + SPACING odstępu pod napisem
+        first_logo_y = 0.2 + qr_w + 0.5 + SPACING
+    else:
+        first_logo_y = 0.2  # bez QR - pierwszy element u góry
+    
+    if not other_keys:
+        return positions
+    
+    # ── Pozostałe elementy (PFM + logo) rozkładamy równomiernie
+    # Dostępna przestrzeń: od first_logo_y do area_height_cm
+    n = len(other_keys)
+    available = area_height_cm - first_logo_y
+    
+    # Obliczam wysokość elementu tak, aby wszystkie zajmowały razem available
+    # z odstępami SPACING między nimi:
+    #   n*img_h + (n-1)*SPACING = available
+    #   img_h = (available - (n-1)*SPACING) / n
+    img_h = (available - (n - 1) * SPACING) / n
+    # Limit min/max
+    img_h = max(1.5, min(3.5, img_h))
+    img_w = min(4.5, area_width_cm - 0.4)
+    img_x = (area_width_cm - img_w) / 2
+    
+    cur_y = first_logo_y
+    for key in other_keys:
+        positions[key] = {'x': img_x, 'y': cur_y, 'w': img_w, 'h': img_h}
+        cur_y += img_h + SPACING
+    
     return positions
 
 
