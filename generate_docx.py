@@ -469,6 +469,63 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
     # ── Tabela 2: ZOSTAWIAMY ORYGINAŁ (9690 DXA z szablonu, IMIONA=840 DXA).
     # Kolumna "Wyniki turnieju" ma 2970 DXA = 5.24 cm.
+    # JEDYNA modyfikacja: w wierszu z "WYNIK" daj gridSpan=2 dla komórki "WYNIK"
+    # żeby zajęła kolumnę IMIONA + pierwszą pustą kolumnę i mieściło się w 1 wierszu.
+    tbls = body.findall(wt('tbl'))
+    if len(tbls) >= 2:
+        score_tbl = tbls[1]
+        rows = score_tbl.findall(wt('tr'))
+        if rows:
+            last_row = rows[-1]
+            tcs = last_row.findall(wt('tc'))
+            for i, tc in enumerate(tcs):
+                texts = tc.findall(f'.//{wt("t")}')
+                txt = ''.join((t.text or '') for t in texts).strip()
+                if txt == 'WYNIK' and i + 1 < len(tcs):
+                    # Scal "WYNIK" z 2 sąsiednimi pustymi komórkami (gridSpan=3)
+                    # = 840 + 735 + 735 = 2310 DXA = 4.07 cm — bezpieczne dla Aptos i Carlito
+                    next_tc1 = tcs[i + 1]
+                    next_tc2 = tcs[i + 2] if i + 2 < len(tcs) else None
+                    txt1 = ''.join((t.text or '') for t in next_tc1.findall(f'.//{wt("t")}')).strip()
+                    txt2 = ''.join((t.text or '') for t in next_tc2.findall(f'.//{wt("t")}')).strip() if next_tc2 is not None else ''
+                    if not txt1 and not txt2 and next_tc2 is not None:
+                        # Scal 3 komórki w 1 z gridSpan=3
+                        tcPr = tc.find(wt('tcPr'))
+                        if tcPr is not None:
+                            gs = tcPr.find(wt('gridSpan'))
+                            if gs is None:
+                                gs = etree.SubElement(tcPr, wt('gridSpan'))
+                            # Oryginalna komórka WYNIK ma już gridSpan? Zwiększamy
+                            cur_span = int(gs.get(f'{{{W}}}val', '1'))
+                            # Następne tcW gridSpan
+                            next1_span = 1
+                            next1_gs = next_tc1.find(f'{wt("tcPr")}/{wt("gridSpan")}')
+                            if next1_gs is not None:
+                                next1_span = int(next1_gs.get(f'{{{W}}}val', '1'))
+                            next2_span = 1
+                            next2_gs = next_tc2.find(f'{wt("tcPr")}/{wt("gridSpan")}')
+                            if next2_gs is not None:
+                                next2_span = int(next2_gs.get(f'{{{W}}}val', '1'))
+                            new_span = cur_span + next1_span + next2_span
+                            gs.set(f'{{{W}}}val', str(new_span))
+                            tcW = tcPr.find(wt('tcW'))
+                            if tcW is not None:
+                                tcW.set(f'{{{W}}}w', '2310')  # 840+735+735
+                            last_row.remove(next_tc1)
+                            last_row.remove(next_tc2)
+                    elif not txt1:
+                        # Fallback: scal tylko 2 (jak wcześniej)
+                        tcPr = tc.find(wt('tcPr'))
+                        if tcPr is not None:
+                            gs = tcPr.find(wt('gridSpan'))
+                            if gs is None:
+                                gs = etree.SubElement(tcPr, wt('gridSpan'))
+                            gs.set(f'{{{W}}}val', '2')
+                            tcW = tcPr.find(wt('tcW'))
+                            if tcW is not None:
+                                tcW.set(f'{{{W}}}w', '1575')
+                            last_row.remove(next_tc1)
+                    break
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
