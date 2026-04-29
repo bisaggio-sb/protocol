@@ -434,82 +434,24 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if szCs_el is not None:
                     szCs_el.set(f'{{{W}}}val', new_size)
 
-    # ── Wyrównanie tabeli 1 z tabelą 2 (perfekcyjne, bez tblInd):
-    # Tabela 2 ma sumę gridCols = 9690 DXA. Tabela 1 z oryginału sumę 9090.
-    # Brakuje 600 DXA. Dodajemy:
-    #   - SET 1 wyrównanie: gcs[4]=720, gcs[5]=360 (było 690+360=1050, teraz 1080) = +30
-    #   - Podpis: gcs[11] = 1260 → 2110 = +850
-    #   - Pusta po Tor: gcs[1] = 960 → 680 = -280
-    # Razem: 9090 + 30 + 850 - 280 = 9690 = TABELA 2 ✓
+    # ── Wyrównanie tabeli 1 z tabelą 2 (jak we wzorcu z gridlinami):
+    # Tabela 1 ma być WĘŻSZA (9090 DXA z oryginału - bez zmian) ale PRZESUNIĘTA W PRAWO
+    # przez tblInd=600 DXA. Wtedy:
+    #   - lewy brzeg tabeli 1 = 600 DXA (= ~1.06 cm)
+    #   - prawy brzeg tabeli 1 = 600 + 9090 = 9690 DXA = prawy brzeg tabeli 2 ✓
+    # Pierwsza pusta komórka tabeli 1 (z nazwiskami) zaczyna się od pozycji 600 DXA,
+    # czyli mniej więcej tam gdzie kolumna IMIONA w tabeli 2.
     first_tbl = body.find(wt('tbl'))
     if first_tbl is not None:
-        gcs = first_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
-        if len(gcs) == 12:
-            gcs[1].set(f'{{{W}}}w', '680')   # pusta po Tor: 960 → 680 (-280)
-            gcs[4].set(f'{{{W}}}w', '720')   # SET 1 wyrównanie z SET 2
-            gcs[5].set(f'{{{W}}}w', '360')
-            gcs[11].set(f'{{{W}}}w', '2110') # Podpis: 1260 → 2110 (+850)
-            for row in first_tbl.findall(wt('tr')):
-                for tc in row.findall(wt('tc')):
-                    tcPr = tc.find(wt('tcPr'))
-                    if tcPr is None: continue
-                    tcW = tcPr.find(wt('tcW'))
-                    gs  = tcPr.find(wt('gridSpan'))
-                    if tcW is None: continue
-                    cur_w = int(tcW.get(f'{{{W}}}w','0'))
-                    span  = int(gs.get(f'{{{W}}}val','1')) if gs is not None else 1
-                    # Pusta komórka po Tor (cur=960, span=1) → 680
-                    if cur_w == 960 and span == 1:
-                        tcW.set(f'{{{W}}}w', '680')
-                    # Komórka nazwiska zawodnika (cur=3915, span=4) → 3635 (3915-280)
-                    elif cur_w == 3915 and span == 4:
-                        tcW.set(f'{{{W}}}w', '3635')
-                    # Wiersz spacer (cur=1965, span=2) → 1685
-                    elif cur_w == 1965 and span == 2:
-                        tcW.set(f'{{{W}}}w', '1685')
-                    # SET 1 (1050, span=2) → 1080
-                    elif cur_w == 1050 and span == 2:
-                        tcW.set(f'{{{W}}}w', '1080')
-                    # Podpis (1800, span=2) → 2650
-                    elif cur_w == 1800 and span == 2:
-                        tcW.set(f'{{{W}}}w', '2650')
-                    # Podpis (2220, span=3) → 3070
-                    elif cur_w == 2220 and span == 3:
-                        tcW.set(f'{{{W}}}w', '3070')
-                    # Podpis (1260, span=1) → 2110
-                    elif cur_w == 1260 and span == 1:
-                        tcW.set(f'{{{W}}}w', '2110')
-            # NIE dodajemy tblInd
-            tblPr = first_tbl.find(wt('tblPr'))
-            if tblPr is not None:
-                tblInd = tblPr.find(wt('tblInd'))
-                if tblInd is not None:
-                    tblInd.set(f'{{{W}}}w', '0')
-                    tblInd.set(f'{{{W}}}type', 'dxa')
-
-    # ── DODAJ widoczny LEWY border do pierwszej komórki w wierszach z nazwiskami
-    # (wiersze 2,3,4 - nagłówki + 2 zawodników). Bez tego tabela 1 wygląda jakby
-    # zaczynała się od kolumny "Punkty SET 1" zamiast od lewej krawędzi.
-    if first_tbl is not None:
-        rows = first_tbl.findall(wt('tr'))
-        for ridx in [2, 3, 4]:
-            if ridx >= len(rows): break
-            tcs = rows[ridx].findall(wt('tc'))
-            if not tcs: continue
-            first_tc = tcs[0]
-            tcPr = first_tc.find(wt('tcPr'))
-            if tcPr is None: continue
-            tcBorders = tcPr.find(wt('tcBorders'))
-            if tcBorders is None:
-                tcBorders = etree.SubElement(tcPr, wt('tcBorders'))
-            # Ustaw left + top + bottom = single (linie widoczne)
-            for side in ('left', 'top', 'bottom'):
-                b = tcBorders.find(wt(side))
-                if b is None:
-                    b = etree.SubElement(tcBorders, wt(side))
-                b.set(f'{{{W}}}val', 'single')
-                b.set(f'{{{W}}}sz', '4')
-                b.set(f'{{{W}}}color', 'auto')
+        # Dodaj tblInd = 600 DXA (przesunięcie w prawo)
+        tblPr = first_tbl.find(wt('tblPr'))
+        if tblPr is not None:
+            tblInd = tblPr.find(wt('tblInd'))
+            if tblInd is None:
+                tblInd = etree.SubElement(tblPr, wt('tblInd'))
+            tblInd.set(f'{{{W}}}w', '600')
+            tblInd.set(f'{{{W}}}type', 'dxa')
+        # Szerokości gridCols i komórek - bez zmian (oryginalne 9090 DXA)
         # Wyrównaj "Tor" do lewej
         first_row = first_tbl.find(wt('tr'))
         if first_row is not None:
@@ -525,30 +467,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         jc = etree.SubElement(pPr, wt('jc'))
                     jc.set(f'{{{W}}}val', 'left')
 
-    # ── Fix WYNIK + zwężenie kolumny IMIONA na rzecz obszaru grafik:
-    # gridCol[0] "Wyniki turnieju" 2970→3570 DXA (+600, znacznie więcej miejsca na grafiki)
-    # gridCol[1] IMIONA / WYNIK 840→800 DXA (-40, ciasno ale wystarczy na "WYNIK")
-    # gridCol[2] pierwsza pusta SET 1 735→175 DXA (-560) — kompensata
-    # Suma bez zmian: 9690.
-    tbls = body.findall(wt('tbl'))
-    if len(tbls) >= 2:
-        score_tbl = tbls[1]
-        gcs = score_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
-        if len(gcs) >= 3:
-            gcs[0].set(f'{{{W}}}w', '3570')   # Wyniki turnieju (grafiki)
-            gcs[1].set(f'{{{W}}}w', '800')    # IMIONA / WYNIK
-            gcs[2].set(f'{{{W}}}w', '175')    # pierwsza pusta SET 1
-            for row in score_tbl.findall(wt('tr')):
-                for tc in row.findall(wt('tc')):
-                    tcPr = tc.find(wt('tcPr'))
-                    if tcPr is None: continue
-                    tcW = tcPr.find(wt('tcW'))
-                    if tcW is None: continue
-                    cur_w = int(tcW.get(f'{{{W}}}w','0'))
-                    if cur_w == 2970:
-                        tcW.set(f'{{{W}}}w', '3570')
-                    elif cur_w == 840:
-                        tcW.set(f'{{{W}}}w', '800')
+    # ── Tabela 2: ZOSTAWIAMY ORYGINAŁ (9690 DXA z szablonu, IMIONA=840 DXA).
+    # Kolumna "Wyniki turnieju" ma 2970 DXA = 5.24 cm.
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
@@ -720,23 +640,21 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     label_after_qr = True
                     cur_y_cm += 0.4  # miejsce na napis "Wyniki turnieju"
 
-            # Napis "Wyniki turnieju" - inline w komórce z paddingiem żeby był pod QR.
-            # label_y_cm = pozycja Y od góry komórki gdzie ma być napis.
-            # Jeśli jest QR: pod QR (y + h + 0.1 odstęp)
-            # Bez QR: na samej górze
+            # Napis "Wyniki turnieju" - tylko gdy jest QR.
+            # Bez QR napis nie ma sensu (jest tylko dla podpisania QR).
             if qr_rid_info and include_qr:
                 # Wyciągnij faktyczną pozycję i wysokość QR z image_positions
                 if image_positions and 'qr' in image_positions:
                     qr_pos = image_positions['qr']
                     qr_y = qr_pos.get('y', 0.2)
                     qr_w_cm = qr_pos.get('width', 2.4)
-                    # QR jest kwadratowy więc h = w
                     label_y_cm = qr_y + qr_w_cm + 0.1
                 else:
-                    label_y_cm = 0.2 + 2.4 + 0.1  # default 2.7
+                    label_y_cm = 0.2 + 2.4 + 0.1
+                _populate_left_area(cloned, anchored, 'Wyniki turnieju', label_y_cm)
             else:
-                label_y_cm = 0.1
-            _populate_left_area(cloned, anchored, 'Wyniki turnieju', label_y_cm)
+                # Bez QR - tylko obrazy bez napisu
+                _populate_left_area(cloned, anchored, '', 0)
 
             for el in cloned:
                 body.append(el)

@@ -59,8 +59,8 @@ def extract_id(url):
 
 
 # ─── Dynamiczne rozkładanie domyślnych pozycji ────────────────────────
-# Obszar "Wyniki turnieju" ma teraz szerokość 6.30 cm (gridCol 3570 DXA)
-LEFT_AREA_CM = 6.30
+# Obszar "Wyniki turnieju" ma szerokość 5.24 cm (gridCol[0] = 2970 DXA - oryginał)
+LEFT_AREA_CM = 5.24
 
 def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
     """
@@ -69,12 +69,12 @@ def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LE
     - "Wyniki turnieju" napis pod QR (renderowany w docx, nie tutaj)
     - PFM + grafiki pod napisem, równomiernie rozłożone z 1cm odstępami
     
-    Wszystko ma się zmieścić w obszarze 16cm. Im więcej elementów, tym ciaśniej.
+    Wszystko ma się zmieścić w obszarze 16cm. Dla 6 elementów wysokość ~1.6cm.
+    Dla mniej - większe (max 3.5cm).
     """
     positions = {}
     SPACING = 1.0  # 1 cm odstęp między elementami
     
-    # Lista wszystkich elementów do rozłożenia (poza QR + napisem)
     other_keys = [k for k in active_keys if k != 'qr']
     
     # ── QR na górze (jeśli aktywny)
@@ -82,28 +82,26 @@ def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LE
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
-        # Po QR rezerwujemy 0.5cm na napis "Wyniki turnieju"
-        # + SPACING odstępu pod napisem
+        # Po QR: 0.5cm na napis "Wyniki turnieju" + 1cm odstęp = pierwszy element na 4.1
         first_logo_y = 0.2 + qr_w + 0.5 + SPACING
     else:
-        first_logo_y = 0.2  # bez QR - pierwszy element u góry
+        first_logo_y = 0.2
     
     if not other_keys:
         return positions
     
-    # ── Pozostałe elementy (PFM + logo) rozkładamy równomiernie
-    # Dostępna przestrzeń: od first_logo_y do area_height_cm
     n = len(other_keys)
     available = area_height_cm - first_logo_y
     
-    # Obliczam wysokość elementu tak, aby wszystkie zajmowały razem available
-    # z odstępami SPACING między nimi:
-    #   n*img_h + (n-1)*SPACING = available
-    #   img_h = (available - (n-1)*SPACING) / n
-    img_h = (available - (n - 1) * SPACING) / n
-    # Limit min/max
-    img_h = max(1.5, min(3.5, img_h))
-    img_w = min(4.5, area_width_cm - 0.4)
+    # Wysokość: max 3.5 cm, równomierne rozłożenie
+    if n == 1:
+        img_h = min(3.5, available)
+    else:
+        img_h = (available - (n - 1) * SPACING) / n
+        img_h = max(1.5, min(3.5, img_h))
+    
+    # Szerokość: trochę mniejsza niż dostępna, max 4.0 cm
+    img_w = min(4.0, area_width_cm - 0.6)
     img_x = (area_width_cm - img_w) / 2
     
     cur_y = first_logo_y
@@ -137,6 +135,12 @@ with col_form:
         next_sat = date.today() + timedelta(days=(5 - date.today().weekday()) % 7)
         tournament_date_d = st.date_input("Data", value=next_sat, format="DD.MM.YYYY")
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
+
+    show_header_on_protocol = st.checkbox(
+        "Pokaż nazwę i datę turnieju na protokole (prawy górny róg)",
+        value=True,
+        help="Jeśli odznaczone, nazwa i data nie pojawią się na wygenerowanym protokole."
+    )
 
     cols_t2 = st.columns(2)
     with cols_t2[0]:
@@ -319,7 +323,7 @@ with col_preview:
         label_y_px = int((qr_pos['y'] + qr_pos['h'] + 0.1) * SCALE)
 
     header_text = ""
-    if tournament_name or tournament_date:
+    if show_header_on_protocol and (tournament_name or tournament_date):
         parts = [tournament_name] if tournament_name else []
         if tournament_date:
             parts.append(tournament_date)
@@ -405,10 +409,10 @@ with col_preview:
                     width:{LEFT_AREA_PX}px; border-right:1px solid #999;
                     overflow:hidden;">
           {elements_html}
-          <div style="position:absolute; left:0; right:0; top:{label_y_px}px;
+          {f'''<div style="position:absolute; left:0; right:0; top:{label_y_px}px;
                       text-align:center; font-size:10px; font-weight:bold;">
             Wyniki turnieju
-          </div>
+          </div>''' if include_qr else ''}
         </div>
         
         <!-- Prawa część tabeli wyników -->
@@ -549,11 +553,14 @@ if gen_clicked:
 
     with st.spinner(f"Generuję {total} protokołów..."):
         logos_bytes, image_order, image_positions = build_image_args()
+        # Jeśli checkbox "pokaż nazwę i datę" jest odznaczony, przekaż puste stringi
+        show_name = tournament_name.strip() if show_header_on_protocol else ""
+        show_date = tournament_date if show_header_on_protocol else ""
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
-            tournament_name=tournament_name.strip() or "Turniej Mölkky",
-            tournament_date=tournament_date,
+            tournament_name=show_name,
+            tournament_date=show_date,
             include_qr=include_qr,
             include_pfm_logo=include_pfm_logo,
             image_order=image_order or None,
@@ -587,11 +594,13 @@ if blank_clicked:
         st.error("Wybierz co najmniej jeden format pliku."); st.stop()
     with st.spinner("Generuję pusty formularz..."):
         logos_bytes, image_order, image_positions = build_image_args()
+        show_name = tournament_name.strip() if show_header_on_protocol else ""
+        show_date = tournament_date if show_header_on_protocol else ""
         docx_bytes = generate_docx.build_blank_document(
             num_pages=1,
             logos=logos_bytes or None,
-            tournament_name=tournament_name.strip() or "",
-            tournament_date=tournament_date,
+            tournament_name=show_name,
+            tournament_date=show_date,
             sheets_url=sheets_url.strip(),
             include_qr=include_qr,
             include_pfm_logo=include_pfm_logo,
