@@ -428,15 +428,21 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if szCs_el is not None:
                     szCs_el.set(f'{{{W}}}val', new_size)
 
-    # ── Wyrównanie tabeli 1: lewy margines + wyrównanie SET 1/2 + szerokość
+    # ── Wyrównanie tabeli 1 z tabelą 2 (perfekcyjne, bez tblInd):
+    # Tabela 2 ma sumę gridCols = 9690 DXA. Tabela 1 z oryginału sumę 9090.
+    # Brakuje 600 DXA. Dodajemy:
+    #   - SET 1 wyrównanie: gcs[4]=720, gcs[5]=360 (było 690+360=1050, teraz 1080) = +30
+    #   - Podpis: gcs[11] = 1260 → 2110 = +850
+    #   - Pusta po Tor: gcs[1] = 960 → 680 = -280
+    # Razem: 9090 + 30 + 850 - 280 = 9690 = TABELA 2 ✓
     first_tbl = body.find(wt('tbl'))
     if first_tbl is not None:
         gcs = first_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
         if len(gcs) == 12:
-            gcs[1].set(f'{{{W}}}w', '680')   # zwężamy "val Tor" o 280
-            gcs[4].set(f'{{{W}}}w', '720')   # SET 1 wyrównanie
+            gcs[1].set(f'{{{W}}}w', '680')   # pusta po Tor: 960 → 680 (-280)
+            gcs[4].set(f'{{{W}}}w', '720')   # SET 1 wyrównanie z SET 2
             gcs[5].set(f'{{{W}}}w', '360')
-            gcs[11].set(f'{{{W}}}w', '1860') # Podpis: 1260 → 1860 (+600)
+            gcs[11].set(f'{{{W}}}w', '2110') # Podpis: 1260 → 2110 (+850)
             for row in first_tbl.findall(wt('tr')):
                 for tc in row.findall(wt('tc')):
                     tcPr = tc.find(wt('tcPr'))
@@ -446,27 +452,34 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     if tcW is None: continue
                     cur_w = int(tcW.get(f'{{{W}}}w','0'))
                     span  = int(gs.get(f'{{{W}}}val','1')) if gs is not None else 1
+                    # Pusta komórka po Tor (cur=960, span=1) → 680
                     if cur_w == 960 and span == 1:
                         tcW.set(f'{{{W}}}w', '680')
-                    elif cur_w == 1050 and span == 2:
-                        tcW.set(f'{{{W}}}w', '1080')
+                    # Komórka nazwiska zawodnika (cur=3915, span=4) → 3635 (3915-280)
                     elif cur_w == 3915 and span == 4:
                         tcW.set(f'{{{W}}}w', '3635')
+                    # Wiersz spacer (cur=1965, span=2) → 1685
                     elif cur_w == 1965 and span == 2:
                         tcW.set(f'{{{W}}}w', '1685')
+                    # SET 1 (1050, span=2) → 1080
+                    elif cur_w == 1050 and span == 2:
+                        tcW.set(f'{{{W}}}w', '1080')
+                    # Podpis (1800, span=2) → 2650
                     elif cur_w == 1800 and span == 2:
-                        tcW.set(f'{{{W}}}w', '2400')
+                        tcW.set(f'{{{W}}}w', '2650')
+                    # Podpis (2220, span=3) → 3070
                     elif cur_w == 2220 and span == 3:
-                        tcW.set(f'{{{W}}}w', '2820')
+                        tcW.set(f'{{{W}}}w', '3070')
+                    # Podpis (1260, span=1) → 2110
                     elif cur_w == 1260 and span == 1:
-                        tcW.set(f'{{{W}}}w', '1860')
+                        tcW.set(f'{{{W}}}w', '2110')
+            # NIE dodajemy tblInd
             tblPr = first_tbl.find(wt('tblPr'))
             if tblPr is not None:
                 tblInd = tblPr.find(wt('tblInd'))
-                if tblInd is None:
-                    tblInd = etree.SubElement(tblPr, wt('tblInd'))
-                tblInd.set(f'{{{W}}}w', '280')
-                tblInd.set(f'{{{W}}}type', 'dxa')
+                if tblInd is not None:
+                    tblInd.set(f'{{{W}}}w', '0')
+                    tblInd.set(f'{{{W}}}type', 'dxa')
         # Wyrównaj "Tor" do lewej
         first_row = first_tbl.find(wt('tr'))
         if first_row is not None:
@@ -483,8 +496,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     jc.set(f'{{{W}}}val', 'left')
 
     # ── Fix WYNIK + zwężenie kolumny IMIONA na rzecz obszaru grafik:
-    # gridCol[0] "Wyniki turnieju" 2970→3270 DXA (+300, więcej miejsca na grafiki)
-    # gridCol[1] IMIONA / WYNIK 840→1100 DXA (+260, "WYNIK" mieści się w 1 linii)
+    # gridCol[0] "Wyniki turnieju" 2970→3370 DXA (+400, więcej miejsca na grafiki)
+    # gridCol[1] IMIONA / WYNIK 840→1000 DXA — "WYNIK" mieści się w 1 linii (Aptos i Calibri)
     # gridCol[2] pierwsza pusta SET 1 735→175 DXA (-560) — kompensata
     # Suma bez zmian: 9690.
     tbls = body.findall(wt('tbl'))
@@ -492,10 +505,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         score_tbl = tbls[1]
         gcs = score_tbl.findall(f'{wt("tblGrid")}/{wt("gridCol")}')
         if len(gcs) >= 3:
-            gcs[0].set(f'{{{W}}}w', '3270')   # Wyniki turnieju (grafiki)
-            gcs[1].set(f'{{{W}}}w', '1100')   # IMIONA / WYNIK
-            gcs[2].set(f'{{{W}}}w', '175')    # pierwsza SET 1 - zmniejszona
-            # Update tcW komórek
+            gcs[0].set(f'{{{W}}}w', '3370')   # Wyniki turnieju (grafiki)
+            gcs[1].set(f'{{{W}}}w', '1000')   # IMIONA / WYNIK
+            gcs[2].set(f'{{{W}}}w', '175')    # pierwsza pusta SET 1
             for row in score_tbl.findall(wt('tr')):
                 for tc in row.findall(wt('tc')):
                     tcPr = tc.find(wt('tcPr'))
@@ -504,9 +516,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     if tcW is None: continue
                     cur_w = int(tcW.get(f'{{{W}}}w','0'))
                     if cur_w == 2970:
-                        tcW.set(f'{{{W}}}w', '3270')
+                        tcW.set(f'{{{W}}}w', '3370')
                     elif cur_w == 840:
-                        tcW.set(f'{{{W}}}w', '1100')
+                        tcW.set(f'{{{W}}}w', '1000')
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
