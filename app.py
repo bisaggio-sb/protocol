@@ -29,12 +29,27 @@ def img_to_data_url(file_or_bytes):
     return f"data:image/png;base64,{b64}"
 
 
+def get_image_aspect(file_or_bytes):
+    """Zwraca aspect ratio (width/height) obrazu."""
+    if hasattr(file_or_bytes, 'seek'):
+        file_or_bytes.seek(0)
+        img_bytes = file_or_bytes.read()
+        file_or_bytes.seek(0)
+    else:
+        img_bytes = file_or_bytes
+    img = Image.open(io.BytesIO(img_bytes))
+    return img.width / img.height
+
+
 # Header z logo PFM
 if os.path.exists(PFM_PATH):
     with open(PFM_PATH, 'rb') as fp:
         pfm_data_url = img_to_data_url(fp.read())
+        # Aspect dla PFM logo (562x509 ≈ 1.10)
+    pfm_aspect = get_image_aspect(open(PFM_PATH, 'rb').read())
 else:
     pfm_data_url = ""
+    pfm_aspect = 1.10
 
 st.markdown(f"""
 <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
@@ -58,26 +73,32 @@ def extract_id(url):
     return m.group(1) if m else None
 
 
-# Obszar "Wyniki turnieju" ma szerokość 5.24 cm (gridCol[0] = 2970 DXA - oryginał)
+# Obszar "Wyniki turnieju" ma szerokość 5.24 cm
 LEFT_AREA_CM = 5.24
 
 
-def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
+def compute_default_positions(active_keys, logos_aspect=None,
+                              area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
     """Rozkłada elementy w lewym obszarze równomiernie z 1cm odstępami.
-    QR (jeśli jest) na górze, napis pod QR (renderowany w docx),
-    PFM + grafiki rozłożone równomiernie poniżej."""
+    QR (jeśli jest) na górze. PFM jest 80% wielkości QR. Pozostałe grafiki
+    równomiernie rozłożone z zachowaniem proporcji obrazu (max h określany
+    dynamicznie żeby wszystko się zmieściło)."""
     positions = {}
     SPACING = 1.0
     
     other_keys = [k for k in active_keys if k != 'qr']
     
+    # ── QR na górze (jeśli aktywny)
     if 'qr' in active_keys:
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
         first_logo_y = 0.2 + qr_w + 0.5 + SPACING
+        # PFM = 80% wielkości QR (jeśli jest)
+        pfm_w_target = qr_w * 0.8  # 1.92 cm
     else:
         first_logo_y = 0.2
+        pfm_w_target = 2.0
     
     if not other_keys:
         return positions
@@ -85,19 +106,45 @@ def compute_default_positions(active_keys, area_height_cm=16.0, area_width_cm=LE
     n = len(other_keys)
     available = area_height_cm - first_logo_y
     
+    # Maksymalna wysokość każdego elementu (po podziale)
     if n == 1:
-        img_h = min(3.5, available)
+        max_slot_h = min(3.5, available)
     else:
-        img_h = (available - (n - 1) * SPACING) / n
-        img_h = max(1.5, min(3.5, img_h))
-    
-    img_w = min(4.0, area_width_cm - 0.6)
-    img_x = (area_width_cm - img_w) / 2
+        max_slot_h = (available - (n - 1) * SPACING) / n
+        max_slot_h = max(1.5, min(3.5, max_slot_h))
     
     cur_y = first_logo_y
     for key in other_keys:
-        positions[key] = {'x': img_x, 'y': cur_y, 'w': img_w, 'h': img_h}
-        cur_y += img_h + SPACING
+        # Określ proporcje obrazu - dla PFM mamy aspect, dla logo z uploadu też
+        if key == 'pfm':
+            aspect = pfm_aspect  # ~1.10
+            target_w = pfm_w_target  # 80% QR
+        elif logos_aspect and key in logos_aspect:
+            aspect = logos_aspect[key]
+            target_w = min(4.0, area_width_cm - 0.6)
+        else:
+            aspect = 1.5  # default
+            target_w = min(3.5, area_width_cm - 0.6)
+        
+        # Wysokość z proporcji
+        target_h = target_w / aspect
+        
+        # Jeśli wysokość przekracza max_slot_h, zmniejsz proporcjonalnie
+        if target_h > max_slot_h:
+            target_h = max_slot_h
+            target_w = target_h * aspect
+            # Limit szerokości
+            if target_w > area_width_cm - 0.4:
+                target_w = area_width_cm - 0.4
+                target_h = target_w / aspect
+        
+        # Wycentruj w slocie
+        slot_top = cur_y
+        img_y = slot_top + (max_slot_h - target_h) / 2
+        img_x = (area_width_cm - target_w) / 2
+        
+        positions[key] = {'x': img_x, 'y': img_y, 'w': target_w, 'h': target_h}
+        cur_y += max_slot_h + SPACING
     
     return positions
 
@@ -119,62 +166,104 @@ with col_form:
         tournament_date_d = st.date_input("Data", value=next_sat, format="DD.MM.YYYY")
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
 
-    show_header_on_protocol = st.checkbox(
-        "Pokaż nazwę i datę na protokole (prawy górny róg)", value=True
-    )
-
-    cols_t2 = st.columns(2)
+    # 3 dropdowny w 3 kolumnach (kompaktowo)
+    cols_t2 = st.columns(3)
     with cols_t2[0]:
-        tournament_type = st.radio(
+        tournament_type = st.selectbox(
             "Rodzaj",
             ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
             index=0,
             help="Obecnie zaimplementowany tylko turniej indywidualny"
         )
     with cols_t2[1]:
-        tournament_phase = st.radio(
+        tournament_phase = st.selectbox(
             "Faza",
-            ["Grupowa (2 sety)",
-             "Pucharowa 1/64 (best of 3)",
-             "Pucharowa 1/32 (best of 3)",
-             "Pucharowa 1/16 (best of 3)",
-             "Pucharowa 1/8 (best of 3)",
-             "Pucharowa 1/4 (best of 5)",
-             "Pucharowa 1/2 (best of 5)",
-             "Mecz o 3. miejsce (best of 5)",
-             "Finał (best of 5)"],
+            ["Grupowa",
+             "Pucharowa 1/64",
+             "Pucharowa 1/32",
+             "Pucharowa 1/16",
+             "Pucharowa 1/8",
+             "Pucharowa 1/4",
+             "Pucharowa 1/2",
+             "Mecz o 3. miejsce",
+             "Finał"],
             index=0,
             help="Obecnie zaimplementowana tylko faza grupowa indywidualna"
         )
+    with cols_t2[2]:
+        # Format setów zależny od fazy:
+        # Grupowa → tylko "2 sety"
+        # Pucharowa → "best of 3" lub "best of 5"
+        if tournament_phase == "Grupowa":
+            sets_format = st.selectbox("Format", ["2 sety"], index=0,
+                help="Faza grupowa zawsze 2 sety")
+        else:
+            sets_format = st.selectbox("Format",
+                ["Best of 3", "Best of 5"],
+                index=0 if "1/" in tournament_phase and "1/4" not in tournament_phase
+                       and "1/2" not in tournament_phase else 1,
+                help="Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej"
+            )
 
-    if tournament_type != "Indywidualny" or "Grupowa" not in tournament_phase:
-        st.warning("⚠️ Obecnie zaimplementowana jest tylko **faza grupowa turnieju indywidualnego**. "
+    # Walidacja - obecnie tylko "Indywidualny + Grupowa + 2 sety"
+    is_supported = (tournament_type == "Indywidualny" 
+                    and tournament_phase == "Grupowa"
+                    and sets_format == "2 sety")
+    if not is_supported:
+        st.warning("⚠️ Obecnie zaimplementowana jest tylko **faza grupowa turnieju indywidualnego (2 sety)**. "
                    "Pozostałe opcje będą dostępne w kolejnych wersjach.")
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
-    sheets_url = st.text_input("URL arkusza",
-        placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
-        help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
-        label_visibility="collapsed")
+    cols_link = st.columns([4, 1])
+    with cols_link[0]:
+        sheets_url = st.text_input("URL arkusza",
+            placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
+            help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
+            label_visibility="collapsed")
+    with cols_link[1]:
+        check_clicked = st.button("🔍 Sprawdź zakładki", use_container_width=True)
+    
+    if check_clicked:
+        sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+        if not sid:
+            st.error("Wklej najpierw poprawny link do arkusza.")
+        else:
+            with st.spinner("Sprawdzam zakładki Gr. A – Gr. Z..."):
+                info = generate_docx.get_sheet_names_debug(sid)
+            st.code("\n".join(info))
 
     # ─── 3. Domyślne elementy ───────────────────────────────────────────
     st.header("3. Domyślne elementy")
     cols_dom = st.columns(2)
     with cols_dom[0]:
         include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
+        show_header_on_protocol = st.checkbox(
+            "Nazwa i data turnieju w prawym górnym rogu", value=True)
     with cols_dom[1]:
         include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
-    # ─── 4. Dodatkowe grafiki ───────────────────────────────────────────
-    st.header("4. Dodatkowe grafiki (max 4)")
+    # ─── 4. Dodatkowe grafiki (zwijane) ─────────────────────────────────
     NUM_LOGOS = 4
     logo_files = []
-    cols_log = st.columns(2)
-    for i in range(NUM_LOGOS):
-        with cols_log[i % 2]:
-            f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"], key=f"logo_{i}")
-            logo_files.append(f)
+    
+    # Sprawdź ile grafik już dodanych żeby pokazać liczbę
+    n_uploaded = sum(1 for k in [f"logo_{i}" for i in range(NUM_LOGOS)] 
+                     if k in st.session_state and st.session_state[k] is not None)
+    
+    expander_label = "4. Dodatkowe grafiki"
+    if n_uploaded > 0:
+        expander_label += f" ({n_uploaded} dodano)"
+    else:
+        expander_label += " (max 4)"
+    
+    with st.expander(expander_label, expanded=(n_uploaded > 0)):
+        cols_log = st.columns(2)
+        for i in range(NUM_LOGOS):
+            with cols_log[i % 2]:
+                f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
+                                     key=f"logo_{i}", label_visibility="visible")
+                logo_files.append(f)
 
     # ─── Aktywne elementy ────────────────────────────────────────────────
     elements_active = []
@@ -186,19 +275,22 @@ with col_form:
         if f is not None:
             elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
 
-    # ─── 5. Pozycje elementów ──────────────────────────────────────────
-    # KLUCZOWA ZMIANA: pozycje są ZAWSZE auto-obliczane na podstawie
-    # aktywnych elementów. Jeśli user chce zmienić, robi to przez sliders.
-    # Dzięki temu zaznacz/odznacz checkboxa zawsze daje porządny układ.
-    
-    # Zawsze obliczamy domyślne pozycje od zera
-    default_pos = compute_default_positions([k for k, _ in elements_active])
-    
-    # active_keys_signature decyduje kiedy slidery dostają nowe klucze (= reset)
+    # Aspect ratios uploadowanych grafik
+    logos_aspect = {}
+    for i, f in enumerate(logo_files):
+        if f is not None:
+            try:
+                f.seek(0)
+                logos_aspect[f'logo{i+1}'] = get_image_aspect(f.read())
+                f.seek(0)
+            except Exception:
+                logos_aspect[f'logo{i+1}'] = 1.5
+
+    # Pozycje
+    default_pos = compute_default_positions([k for k, _ in elements_active],
+                                            logos_aspect=logos_aspect)
     active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
     
-    # Slidery używają kluczy z signature - dzięki temu Streamlit RESETUJE
-    # ich stan przy każdej zmianie zestawu aktywnych elementów
     image_positions = {}
     for key in default_pos:
         image_positions[key] = dict(default_pos[key])
@@ -207,24 +299,19 @@ with col_form:
         st.header("5. Pozycja i rozmiar elementów")
         cols_h5 = st.columns([4, 1])
         with cols_h5[0]:
-            st.caption("Elementy są ułożone automatycznie z odstępami 1 cm. "
+            st.caption("Elementy są ułożone automatycznie. "
                        "Rozwiń element żeby dostosować pozycję ręcznie.")
         with cols_h5[1]:
-            # Reset = zmiana sig, czyli wymuszona przeładowywanie wszystkich kluczy
             if st.button("↻ Rozmieść równomiernie",
                          help="Przywróć automatyczne rozmieszczenie"):
-                # Zwiększamy nonce żeby slidery dostały nowe klucze i się zresetowały
                 st.session_state['reset_nonce'] = st.session_state.get('reset_nonce', 0) + 1
                 st.rerun()
 
-        # Nonce dodajemy do klucza sliderów żeby reset działał
         nonce = st.session_state.get('reset_nonce', 0)
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
-                # Klucze sliderów ZAWIERAJĄ signature + nonce
-                # → reset przy zmianie zestawu LUB kliknięciu "Rozmieść"
                 slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
                 with cols[0]:
                     new_x = st.number_input("X (cm)", value=float(pos['x']),
@@ -246,20 +333,9 @@ with col_form:
                     'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
                 }
 
-    with st.expander("🔍 Debug – sprawdź zakładki"):
-        if st.button("Sprawdź zakładki"):
-            sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
-            if not sid:
-                st.error("Wklej najpierw poprawny link do arkusza.")
-            else:
-                with st.spinner("Sprawdzam zakładki Gr. A – Gr. Z..."):
-                    info = generate_docx.get_sheet_names_debug(sid)
-                st.code("\n".join(info))
-
 
 # ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
 with col_preview:
-    # Dodatkowy odstęp od góry żeby przesunąć podgląd niżej
     st.markdown("<div style='height:80px;'></div>", unsafe_allow_html=True)
     st.header("📄 Podgląd strony")
     st.caption("Schemat dokumentu w skali")
@@ -317,10 +393,9 @@ with col_preview:
             parts.append(tournament_date)
         header_text = " · ".join(parts)
 
-    # Tabela 1: przesunięta w prawo o 600/9690 = 6.2% (tblInd)
     TBL1_OFFSET_FRAC = 600 / 9690
     TBL1_OFFSET_PX = int(PAGE_W_PX * TBL1_OFFSET_FRAC)
-    NAMES_FRAC = 3915 / 9090  # pierwsza komórka tabeli 1 (z nazwiskami) względem tabeli 1
+    NAMES_FRAC = 3915 / 9090
     NAMES_PX = int((PAGE_W_PX - TBL1_OFFSET_PX) * NAMES_FRAC)
 
     html = f"""
@@ -334,7 +409,6 @@ with col_preview:
         {header_text}
       </div>
       
-      <!-- Tabela 1: pierwszy wiersz (Tor/Godzina/Grupa/Mecz) - przesunięty w prawo -->
       <div style="position:absolute; left:{TBL1_OFFSET_PX}px; top:30px; right:0; height:30px;
                   display:flex; align-items:center; padding-left:6px;
                   font-size:11px; gap:18px;">
@@ -344,7 +418,6 @@ with col_preview:
         <span>Mecz # <b>1</b></span>
       </div>
       
-      <!-- Tabela 1: nagłówki kolumn -->
       <div style="position:absolute; left:{TBL1_OFFSET_PX + NAMES_PX}px; top:65px; right:0; height:32px;
                   background:#f0f0f0; border:1px solid #999;
                   display:flex; font-size:9px; font-weight:bold; text-align:center;
@@ -355,7 +428,6 @@ with col_preview:
         <div style="flex:1.95;">Podpis</div>
       </div>
       
-      <!-- Wiersze zawodników -->
       <div style="position:absolute; left:{TBL1_OFFSET_PX}px; top:97px; right:0; height:24px;
                   border:1px solid #999; display:flex; font-size:11px;">
         <div style="flex:0 0 {NAMES_PX}px; padding-right:8px; 
@@ -387,7 +459,6 @@ with col_preview:
         Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
       </div>
       
-      <!-- Tabela 2 -->
       <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
                   border:1px solid #999;">
         <div style="position:absolute; left:0; top:0; bottom:0;
@@ -458,11 +529,7 @@ def docx_to_pdf(docx_bytes, name):
             docx_path = os.path.join(tmpdir, f"{name}.docx")
             with open(docx_path, 'wb') as f:
                 f.write(docx_bytes)
-            # Opcje PDF żeby zmniejszyć rozmiar:
-            # - SelectPdfVersion=0 = standard PDF 1.4 (mniejszy niż PDF/A)
-            # - EmbedStandardFonts=false = nie embeduj standardowych czcionek
-            # - ReduceImageResolution=true + MaxImageResolution=150 = niższa rozdzielczość obrazów
-            # - UseLosslessCompression=false + Quality=90 = JPEG z sensowną jakością
+            # Filtr PDF z opcjami zmniejszającymi rozmiar
             pdf_filter = ('pdf:writer_pdf_Export:'
                           '{"SelectPdfVersion":{"type":"long","value":"0"},'
                           '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
@@ -510,20 +577,17 @@ def build_image_args():
 st.divider()
 st.header("6. Generuj")
 
-# Format wyboru: docx + pdf, oba domyślnie zaznaczone
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
     fmt_docx = st.checkbox("📄 Word (.docx)", value=True)
 with cols_fmt[1]:
     fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=True)
 
-# Główny przycisk wyśrodkowany (3 kolumny: empty | button | empty)
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
     gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
                             type="primary", use_container_width=True)
 
-# ─── Dodatkowe opcje (zwijalne, dyskretne) ──────────────────────────────
 with st.expander("➕ Dodatkowe opcje"):
     st.caption("Pusty formularz przyda się gdy chcesz wydrukować protokół do ręcznego wypełnienia "
                "(bez pobierania danych z arkusza).")
@@ -548,7 +612,7 @@ if gen_clicked:
 
     total = sum(len(m) for _,m in sheets_data)
     if total == 0:
-        st.error("0 meczów. Użyj Debug żeby sprawdzić zakładki."); st.stop()
+        st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
 
     with st.spinner(f"Generuję {total} protokołów..."):
         logos_bytes, image_order, img_pos = build_image_args()
@@ -563,13 +627,11 @@ if gen_clicked:
 
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
     
-    # Konwersja do PDF od razu (jeśli wybrana)
     pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:
         with st.spinner("Konwertuję do PDF..."):
             pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
 
-    # Zapisz w session_state żeby przeżyło rerun po download_button
     st.session_state['last_gen'] = {
         'docx': docx_bytes if fmt_docx else None,
         'pdf': pdf_bytes if fmt_pdf else None,
@@ -608,7 +670,6 @@ if blank_clicked:
         'kind': 'blank',
     }
 
-# Wyświetl przyciski pobierania (poza if-blokiem żeby przeżyły rerun)
 if 'last_gen' in st.session_state:
     gen = st.session_state['last_gen']
     if gen['kind'] == 'full':
