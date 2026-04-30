@@ -235,18 +235,56 @@ def parse_drabinka_rows(rows, target_phase=None):
         if not match and target_phase.lower() not in (phase_full_name or '').lower():
             return phase_full_name, phase_time, []
     
-    # Czytamy pary wierszy
+    # Czytamy pary wierszy. Zatrzymujemy się gdy:
+    # - Pojawia się nowy nagłówek (kolejna faza, "MECZE O MIEJSCA" itp.)
+    # - Pojawiają się 2+ kolejne puste wiersze
+    # - Tekst w kolumnie zawodnika to nagłówek (zawiera "FINAŁ", "MIEJSC", "FINAŁOWY")
     matches = []
     data_rows = rows[header_idx + 1:]
     
+    # Słowa-stop: pojawienie się któregokolwiek w komórce = koniec sekcji
+    stop_keywords = ['miejsc', 'finał', 'finałow', 'mecz o', 'play-off',
+                     'ranking', 'klasyfikacja', '1/64', '1/32', '1/16',
+                     '1/8', '1/4', '1/2']
+    
+    def is_section_header(row):
+        """Czy ten wiersz wygląda jak nagłówek nowej sekcji (a nie dane)?"""
+        if not row: return False
+        joined = ' '.join(c.strip().lower() for c in row if c)
+        # Jeśli zawiera słowo-stop i nie zaczyna się od liczby (jak np. "16 Jérémy")
+        for kw in stop_keywords:
+            if kw in joined:
+                # Sprawdź czy to faktycznie nagłówek (np. "MECZE O MIEJSCA 33-64"
+                # ma "miejsc" - ale wiersz danych z "Robert Bąścik" nie ma).
+                # Wyklucz wiersze gdzie kolumna zawodnika to normalne imię.
+                player_text = row[col_player].strip() if col_player < len(row) else ''
+                # Jeśli player_text zawiera słowo-stop = to nagłówek
+                if kw in player_text.lower():
+                    return True
+                # Jeśli słowo-stop jest w jakiejś innej komórce z dużymi literami
+                # i player_text jest pusty = nagłówek
+                if not player_text and kw in joined:
+                    return True
+        return False
+    
     i = 0
     match_num = 1
+    empty_streak = 0
     while i < len(data_rows):
         row1 = data_rows[i]
         # Pomijamy puste wiersze
         if not any(c.strip() for c in row1):
+            empty_streak += 1
+            if empty_streak >= 2:
+                # 2+ puste z rzędu = koniec sekcji
+                break
             i += 1
             continue
+        empty_streak = 0
+        
+        # Sprawdź czy to nie jest nagłówek nowej sekcji
+        if is_section_header(row1):
+            break
         
         # Następny wiersz to drugi zawodnik
         row2 = data_rows[i+1] if i+1 < len(data_rows) else []
@@ -262,7 +300,11 @@ def parse_drabinka_rows(rows, target_phase=None):
         # Walidacja: oba imiona muszą być nie-puste i mieć sens
         if z1 and z2 and len(z1) >= 3 and len(z2) >= 3:
             # Imię/Nazwisko musi mieć choć jedną wielką literę
-            if any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
+            # I nie zawierać słów-stop (zabezpieczenie)
+            z1_lower = z1.lower()
+            z2_lower = z2.lower()
+            has_stop = any(kw in z1_lower or kw in z2_lower for kw in stop_keywords)
+            if not has_stop and any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
                 matches.append({
                     'tor': tor,
                     'godz': phase_time or '',
@@ -395,7 +437,7 @@ def _make_page_break_para():
     return p
 
 
-def _fill_protocol(elements, match):
+def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
     tbls = [el for el in elements if el.tag == wt('tbl')]
     if not tbls: return
     rows = tbls[0].findall(wt('tr'))
@@ -403,8 +445,16 @@ def _fill_protocol(elements, match):
         tcs = rows[0].findall(wt('tc'))
         if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
         if len(tcs) > 3: _set_cell_value(tcs[3], match.get('godz',''), size=28)
-        if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
-        if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
+        if hide_grupa_mecz:
+            # Faza pucharowa: zamiast "Grupa A / Mecz # 1" pokazujemy nazwę fazy
+            # w polu wartości grupy. Etykiety "Grupa" i "Mecz #" zostają puste.
+            if len(tcs) > 4: _set_cell_value(tcs[4], '', size=20)  # etykieta "Grupa"
+            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=22)
+            if len(tcs) > 6: _set_cell_value(tcs[6], '', size=20)  # etykieta "Mecz #"
+            if len(tcs) > 7: _set_cell_value(tcs[7], '', size=28)
+        else:
+            if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
+            if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
     if len(rows) > 3:
         tcs = rows[3].findall(wt('tc'))
         if tcs: _set_cell_value(tcs[0], match.get('z1',''), size=24, align='right')
@@ -573,12 +623,16 @@ def build_blank_document(num_pages=1, logos=None, tournament_name=None,
 def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                    tournament_name=None, tournament_date=None,
                    include_qr=True, include_pfm_logo=True,
-                   image_order=None, image_positions=None):
+                   image_order=None, image_positions=None,
+                   hide_grupa_mecz=False, phase_label=None):
     """
     `tournament_date`: string (np. "10.05.2026") wyświetlany w nagłówku obok nazwy.
     `include_pfm_logo`: czy dodać domyślne logo PFM.
     image_positions: dict {key: (x_cm, y_cm, width_cm)} dla każdej grafiki/QR.
     Jeśli None, używamy domyślnego ułożenia jedna pod drugą.
+    hide_grupa_mecz: True dla fazy pucharowej - ukrywa pola "Grupa" i "Mecz #",
+                    zamiast tego pokazuje fazę (np. "1/32 finału").
+    phase_label: nazwa fazy do wyświetlenia gdy hide_grupa_mecz=True.
     """
     import os
     _anchor_uid[0] = 1000
@@ -657,7 +711,29 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     jc.set(f'{{{W}}}val', 'left')
 
     # ── Tabela 2: ZOSTAWIAMY ORYGINAŁ (9690 DXA z szablonu, IMIONA=840 DXA, WYNIK=840 DXA).
-    # Komórka WYNIK używa fontu Aptos Narrow size 20 z szablonu — mieści się w 1 linii.
+    # Komórka WYNIK używa fontu Aptos Narrow size 20 z szablonu — który nie jest
+    # zawsze dostępny. Zmieniamy na Calibri (węższy + standardowo dostępny w Wordzie)
+    # żeby "WYNIK" zawsze mieściło się w 1 linii w 1.48 cm.
+    tbls = body.findall(wt('tbl'))
+    if len(tbls) >= 2:
+        score_tbl = tbls[1]
+        rows = score_tbl.findall(wt('tr'))
+        if rows:
+            last_row = rows[-1]
+            for tc in last_row.findall(wt('tc')):
+                txts = tc.findall(f'.//{wt("t")}')
+                txt = ''.join((t.text or '') for t in txts).strip()
+                if txt == 'WYNIK':
+                    # Zmień font na Calibri
+                    for r in tc.iter(wt('r')):
+                        rPr = r.find(wt('rPr'))
+                        if rPr is None: continue
+                        fonts = rPr.find(wt('rFonts'))
+                        if fonts is None:
+                            fonts = etree.SubElement(rPr, wt('rFonts'))
+                        for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                            fonts.set(f'{{{W}}}{a}', 'Calibri')
+                    break
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
@@ -771,7 +847,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 ht = etree.SubElement(hr, wt('t'))
                 ht.text = header_text
                 cloned.insert(0, hp)
-            _fill_protocol(cloned, match)
+            _fill_protocol(cloned, match,
+                           hide_grupa_mecz=hide_grupa_mecz,
+                           phase_label=phase_label)
 
             # Lista elementów do wstawienia w lewym obszarze
             order = image_order if image_order else (

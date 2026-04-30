@@ -78,13 +78,15 @@ LEFT_AREA_CM = 5.24
 
 
 def compute_default_positions(active_keys, logos_aspect=None,
-                              area_height_cm=16.0, area_width_cm=LEFT_AREA_CM):
+                              area_height_cm=10.5, area_width_cm=LEFT_AREA_CM):
     """Rozkłada elementy w lewym obszarze równomiernie z 1cm odstępami.
-    QR (jeśli jest) na górze. PFM jest 80% wielkości QR. Pozostałe grafiki
-    równomiernie rozłożone z zachowaniem proporcji obrazu (max h określany
-    dynamicznie żeby wszystko się zmieściło)."""
+    QR (jeśli jest) na górze. PFM ~109% szerokości QR. Pozostałe grafiki
+    równomiernie rozłożone z zachowaniem proporcji obrazu.
+    
+    area_height_cm=10.5 to faktyczna wysokość komórki "Wyniki turnieju"
+    w tabeli 2 (19 wierszy x ~0.55 cm). Przy 6 elementach skalujemy
+    odstępy żeby się zmieściło."""
     positions = {}
-    SPACING = 1.0
     
     other_keys = [k for k in active_keys if k != 'qr']
     
@@ -93,10 +95,9 @@ def compute_default_positions(active_keys, logos_aspect=None,
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
-        # Pierwsza grafika niżej: QR + napis (0.5cm) + 0.5cm odstęp = bliżej QR
+        # Po QR: napis "Wyniki turnieju" 0.5cm + 0.5cm odstęp
         first_logo_y = 0.2 + qr_w + 0.5 + 0.5
-        # PFM ~109% szerokości QR (kompromis: większy niż 80%, mniejszy niż 4cm)
-        pfm_w_target = qr_w * 1.09  # 2.6 cm
+        pfm_w_target = qr_w * 1.09  # ~2.6 cm
     else:
         first_logo_y = 0.2
         pfm_w_target = 2.6
@@ -107,39 +108,46 @@ def compute_default_positions(active_keys, logos_aspect=None,
     n = len(other_keys)
     available = area_height_cm - first_logo_y
     
-    # Maksymalna wysokość każdego elementu (po podziale)
+    # Adaptacyjny SPACING:
+    # - Mało elementów (1-2) → SPACING=1.0
+    # - 3-4 elementy → SPACING=0.6
+    # - 5+ elementów → SPACING=0.3
+    if n <= 2:
+        SPACING = 1.0
+    elif n <= 4:
+        SPACING = 0.6
+    else:
+        SPACING = 0.3
+    
+    # Wysokość każdego elementu
     if n == 1:
-        max_slot_h = min(3.5, available)
+        max_slot_h = min(3.0, available)
     else:
         max_slot_h = (available - (n - 1) * SPACING) / n
-        max_slot_h = max(1.5, min(3.5, max_slot_h))
+        max_slot_h = max(1.0, min(2.5, max_slot_h))
     
     cur_y = first_logo_y
     for key in other_keys:
-        # Określ proporcje obrazu - dla PFM mamy aspect, dla logo z uploadu też
+        # Określ proporcje obrazu
         if key == 'pfm':
             aspect = pfm_aspect  # ~1.10
-            target_w = pfm_w_target  # 80% QR
+            target_w = pfm_w_target
         elif logos_aspect and key in logos_aspect:
             aspect = logos_aspect[key]
             target_w = min(4.0, area_width_cm - 0.6)
         else:
-            aspect = 1.5  # default
+            aspect = 1.5
             target_w = min(3.5, area_width_cm - 0.6)
         
-        # Wysokość z proporcji
         target_h = target_w / aspect
         
-        # Jeśli wysokość przekracza max_slot_h, zmniejsz proporcjonalnie
         if target_h > max_slot_h:
             target_h = max_slot_h
             target_w = target_h * aspect
-            # Limit szerokości
             if target_w > area_width_cm - 0.4:
                 target_w = area_width_cm - 0.4
                 target_h = target_w / aspect
         
-        # Wycentruj w slocie
         slot_top = cur_y
         img_y = slot_top + (max_slot_h - target_h) / 2
         img_x = (area_width_cm - target_w) / 2
@@ -474,7 +482,7 @@ with col_preview:
         Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
       </div>
       
-      <div style="position:absolute; left:0; top:180px; right:0; bottom:30px;
+      <div style="position:absolute; left:0; top:180px; right:0; height:231px;
                   border:1px solid #999;">
         <div style="position:absolute; left:0; top:0; bottom:0;
                     width:{LEFT_AREA_PX}px; border-right:1px solid #999;
@@ -649,12 +657,25 @@ if gen_clicked:
         logos_bytes, image_order, img_pos = build_image_args()
         show_name = tournament_name.strip() if show_header_on_protocol else ""
         show_date = tournament_date if show_header_on_protocol else ""
+        # Dla fazy pucharowej: ukryj "Grupa" i "Mecz #" + pokaż nazwę fazy
+        # Etykieta np. "1/32 finału" (bez słowa "FINAŁU" wielkimi)
+        phase_label_short = ""
+        if is_pucharowa:
+            # tournament_phase to np. "Pucharowa 1/32" - wyciągamy "1/32"
+            m = re.search(r'(\d+/\d+)', tournament_phase)
+            if m:
+                phase_label_short = f"{m.group(1)} finału"
+            elif "3. miejsce" in tournament_phase:
+                phase_label_short = "Mecz o 3. miejsce"
+            elif tournament_phase == "Finał":
+                phase_label_short = "Finał"
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
             tournament_name=show_name, tournament_date=show_date,
             include_qr=include_qr, include_pfm_logo=include_pfm_logo,
-            image_order=image_order or None, image_positions=img_pos or None)
+            image_order=image_order or None, image_positions=img_pos or None,
+            hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short)
 
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
     if is_pucharowa:
