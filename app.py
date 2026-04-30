@@ -194,26 +194,14 @@ with col_form:
     # Zawsze obliczamy domyślne pozycje od zera
     default_pos = compute_default_positions([k for k, _ in elements_active])
     
-    # Przechowujemy nadpisane pozycje per klucz w session_state
-    if 'overrides' not in st.session_state:
-        st.session_state.overrides = {}  # {key: {'x','y','w','h'}}
-    
-    # active_signature decyduje kiedy reset overrides
+    # active_keys_signature decyduje kiedy slidery dostają nowe klucze (= reset)
     active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
-    if 'last_signature' not in st.session_state:
-        st.session_state.last_signature = ""
     
-    if active_keys_signature != st.session_state.last_signature:
-        # Zestaw się zmienił - resetuj overrides
-        st.session_state.overrides = {}
-        st.session_state.last_signature = active_keys_signature
-
-    # Finalne pozycje = default + overrides
+    # Slidery używają kluczy z signature - dzięki temu Streamlit RESETUJE
+    # ich stan przy każdej zmianie zestawu aktywnych elementów
     image_positions = {}
     for key in default_pos:
         image_positions[key] = dict(default_pos[key])
-        if key in st.session_state.overrides:
-            image_positions[key].update(st.session_state.overrides[key])
 
     if elements_active:
         st.header("5. Pozycja i rozmiar elementów")
@@ -222,40 +210,41 @@ with col_form:
             st.caption("Elementy są ułożone automatycznie z odstępami 1 cm. "
                        "Rozwiń element żeby dostosować pozycję ręcznie.")
         with cols_h5[1]:
-            if st.button("↻ Rozmieść równomiernie", help="Wyczyść wszystkie ręczne zmiany"):
-                st.session_state.overrides = {}
+            # Reset = zmiana sig, czyli wymuszona przeładowywanie wszystkich kluczy
+            if st.button("↻ Rozmieść równomiernie",
+                         help="Przywróć automatyczne rozmieszczenie"):
+                # Zwiększamy nonce żeby slidery dostały nowe klucze i się zresetowały
+                st.session_state['reset_nonce'] = st.session_state.get('reset_nonce', 0) + 1
                 st.rerun()
 
+        # Nonce dodajemy do klucza sliderów żeby reset działał
+        nonce = st.session_state.get('reset_nonce', 0)
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
+                # Klucze sliderów ZAWIERAJĄ signature + nonce
+                # → reset przy zmianie zestawu LUB kliknięciu "Rozmieść"
+                slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
                 with cols[0]:
                     new_x = st.number_input("X (cm)", value=float(pos['x']),
                                            min_value=0.0, max_value=5.0, step=0.1,
-                                           key=f"x_{key}")
+                                           key=f"x_{slider_key_base}")
                 with cols[1]:
                     new_y = st.number_input("Y (cm)", value=float(pos['y']),
                                            min_value=0.0, max_value=17.0, step=0.1,
-                                           key=f"y_{key}")
+                                           key=f"y_{slider_key_base}")
                 with cols[2]:
                     new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
                                            min_value=0.5, max_value=5.0, step=0.1,
-                                           key=f"w_{key}")
+                                           key=f"w_{slider_key_base}")
                 with cols[3]:
                     new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
                                            min_value=0.5, max_value=5.0, step=0.1,
-                                           key=f"h_{key}")
-                # Jeśli wartości się różnią od defaultu, zapisz jako override
-                d = default_pos[key]
-                if (abs(new_x - d['x']) > 0.01 or abs(new_y - d['y']) > 0.01
-                    or abs(new_w - d['w']) > 0.01 or abs(new_h - d['h']) > 0.01):
-                    st.session_state.overrides[key] = {
-                        'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
-                    }
-                    image_positions[key] = {
-                        'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
-                    }
+                                           key=f"h_{slider_key_base}")
+                image_positions[key] = {
+                    'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
+                }
 
     with st.expander("🔍 Debug – sprawdź zakładki"):
         if st.button("Sprawdź zakładki"):
@@ -555,7 +544,6 @@ if gen_clicked:
             st.error(f"Błąd pobierania: {e}"); st.stop()
 
     total = sum(len(m) for _,m in sheets_data)
-    st.info(f"Pobrano {len(sheets_data)} grup, {total} meczów.")
     if total == 0:
         st.error("0 meczów. Użyj Debug żeby sprawdzić zakładki."); st.stop()
 
@@ -570,26 +558,24 @@ if gen_clicked:
             include_qr=include_qr, include_pfm_logo=include_pfm_logo,
             image_order=image_order or None, image_positions=img_pos or None)
 
-    st.success(f"✅ Gotowe! {total} protokołów w {len(sheets_data)} grupach.")
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
-
-    cols_dl = st.columns(2)
-    if fmt_docx:
-        with cols_dl[0]:
-            st.download_button(f"⬇️ Pobierz {safe_name}.docx",
-                data=docx_bytes, file_name=f"{safe_name}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True)
+    
+    # Konwersja do PDF od razu (jeśli wybrana)
+    pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:
         with st.spinner("Konwertuję do PDF..."):
-            pdf_bytes, err = docx_to_pdf(docx_bytes, safe_name)
-        if pdf_bytes:
-            with cols_dl[1]:
-                st.download_button(f"⬇️ Pobierz {safe_name}.pdf",
-                    data=pdf_bytes, file_name=f"{safe_name}.pdf",
-                    mime="application/pdf", use_container_width=True)
-        else:
-            st.error(f"Konwersja PDF nie powiodła się: {err}")
+            pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
+
+    # Zapisz w session_state żeby przeżyło rerun po download_button
+    st.session_state['last_gen'] = {
+        'docx': docx_bytes if fmt_docx else None,
+        'pdf': pdf_bytes if fmt_pdf else None,
+        'pdf_err': pdf_err,
+        'name': safe_name,
+        'total': total,
+        'groups': len(sheets_data),
+        'kind': 'full',
+    }
 
 if blank_clicked:
     if not fmt_docx and not fmt_pdf:
@@ -605,25 +591,43 @@ if blank_clicked:
             include_qr=include_qr, include_pfm_logo=include_pfm_logo,
             image_order=image_order or None, image_positions=img_pos or None)
 
-    st.success("✅ Pusty formularz gotowy!")
     safe_name = "pusty_formularz"
-    cols_dl = st.columns(2)
-    if fmt_docx:
-        with cols_dl[0]:
-            st.download_button(f"⬇️ Pobierz {safe_name}.docx",
-                data=docx_bytes, file_name=f"{safe_name}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True)
+    pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:
         with st.spinner("Konwertuję do PDF..."):
-            pdf_bytes, err = docx_to_pdf(docx_bytes, safe_name)
-        if pdf_bytes:
-            with cols_dl[1]:
-                st.download_button(f"⬇️ Pobierz {safe_name}.pdf",
-                    data=pdf_bytes, file_name=f"{safe_name}.pdf",
-                    mime="application/pdf", use_container_width=True)
-        else:
-            st.error(f"Konwersja PDF nie powiodła się: {err}")
+            pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
+
+    st.session_state['last_gen'] = {
+        'docx': docx_bytes if fmt_docx else None,
+        'pdf': pdf_bytes if fmt_pdf else None,
+        'pdf_err': pdf_err,
+        'name': safe_name,
+        'kind': 'blank',
+    }
+
+# Wyświetl przyciski pobierania (poza if-blokiem żeby przeżyły rerun)
+if 'last_gen' in st.session_state:
+    gen = st.session_state['last_gen']
+    if gen['kind'] == 'full':
+        st.success(f"✅ Gotowe! {gen['total']} protokołów w {gen['groups']} grupach.")
+    else:
+        st.success("✅ Pusty formularz gotowy!")
+
+    cols_dl = st.columns(2)
+    if gen['docx']:
+        with cols_dl[0]:
+            st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
+                data=gen['docx'], file_name=f"{gen['name']}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True, key=f"dl_docx_{gen['name']}")
+    if gen['pdf']:
+        with cols_dl[1]:
+            st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
+                data=gen['pdf'], file_name=f"{gen['name']}.pdf",
+                mime="application/pdf",
+                use_container_width=True, key=f"dl_pdf_{gen['name']}")
+    elif gen.get('pdf_err'):
+        st.error(f"Konwersja PDF nie powiodła się: {gen['pdf_err']}")
 
 st.divider()
 st.caption("Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol")
