@@ -135,9 +135,178 @@ def fetch_all_group_sheets(sheet_id):
     return results
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Parser zakładki "Drabinka" - dla meczów fazy pucharowej
+# ─────────────────────────────────────────────────────────────────────
+
+# Rozpoznawane nazwy faz (fragment do wyszukania w arkuszu)
+PHASE_NAMES = {
+    '1/64': '1/64 FINAŁU',
+    '1/32': '1/32 FINAŁU',
+    '1/16': '1/16 FINAŁU',
+    '1/8':  '1/8 FINAŁU',
+    '1/4':  '1/4 FINAŁU',
+    '1/2':  '1/2 FINAŁU',
+    'półfinał': '1/2 FINAŁU',
+    'mecz o 3': 'MECZ O 3 MIEJSCE',
+    'finał': 'FINAŁ',
+}
+
+
+def parse_drabinka_rows(rows, target_phase=None):
+    """
+    Parsuje wiersze zakładki Drabinka i zwraca mecze z konkretnej fazy.
+    
+    Format zakładki:
+    - Wiersz nagłówka zawiera: A=("ok" lub puste), B="Tor", C="Grupa",
+      D=nazwa fazy z godziną np. "1/32 FINAŁU (13:45)", H="SETY"
+    - Co 2 wiersze: para zawodników jednego meczu
+      (kolumna Tor jest scalona dla obu wierszy, lub jest tylko w pierwszym)
+    
+    target_phase: np. "1/32 FINAŁU" - jeśli None, zwraca pierwszą znalezioną fazę.
+    
+    Zwraca: (phase_name, time, [matches])
+        matches: [{tor, godz, grupa, mecz, z1, z2}]
+    """
+    if not rows:
+        return None, None, []
+    
+    # Szukamy wiersza nagłówka - musi mieć "Tor" w którejś kolumnie
+    header_idx = None
+    header = []
+    for i, row in enumerate(rows):
+        norm = [c.strip().lower() for c in row]
+        if 'tor' in norm:
+            header_idx = i
+            header = norm
+            break
+    
+    if header_idx is None:
+        return None, None, []
+    
+    # Indeksy kolumn
+    raw_header = rows[header_idx]
+    def ci(name):
+        try: return header.index(name)
+        except ValueError: return None
+    
+    col_tor = ci('tor')
+    col_grupa = ci('grupa')
+    
+    # Kolumna z nazwą fazy + zawodnikami: szukamy w nagłówku komórki która
+    # zawiera nazwę fazy (np. "1/32 finału" lub "FINAŁ" lub "1/2 finału")
+    col_player = None
+    phase_full_name = None
+    phase_time = None
+    for i, h in enumerate(raw_header):
+        h_lower = h.strip().lower()
+        # Sprawdź czy zawiera nazwę fazy
+        for phase_key, phase_full in PHASE_NAMES.items():
+            if phase_key in h_lower:
+                col_player = i
+                # Wyciągnij nazwę fazy + godzinę
+                # np. "1/32 FINAŁU (13:45)" -> phase="1/32 FINAŁU", time="13:45"
+                phase_full_name = phase_full
+                m = re.search(r'\((\d{1,2}:\d{2})\)', h)
+                if m:
+                    phase_time = m.group(1)
+                break
+        if col_player is not None:
+            break
+    
+    if col_player is None:
+        # Fallback: kolumna zawodnika to ta po Grupie lub po Tor
+        if col_grupa is not None:
+            col_player = col_grupa + 1
+        elif col_tor is not None:
+            col_player = col_tor + 2
+        else:
+            col_player = 3  # default kol D
+    
+    # Filtr: czy ta faza nas interesuje?
+    if target_phase and phase_full_name:
+        # target_phase np. "Pucharowa 1/32" lub "1/32 FINAŁU"
+        # Szukamy kluczowego fragmentu jak "1/32"
+        match = False
+        for key in PHASE_NAMES:
+            if key in target_phase.lower() and key in phase_full_name.lower():
+                match = True
+                break
+        if not match and target_phase.lower() not in (phase_full_name or '').lower():
+            return phase_full_name, phase_time, []
+    
+    # Czytamy pary wierszy
+    matches = []
+    data_rows = rows[header_idx + 1:]
+    
+    i = 0
+    match_num = 1
+    while i < len(data_rows):
+        row1 = data_rows[i]
+        # Pomijamy puste wiersze
+        if not any(c.strip() for c in row1):
+            i += 1
+            continue
+        
+        # Następny wiersz to drugi zawodnik
+        row2 = data_rows[i+1] if i+1 < len(data_rows) else []
+        
+        def g(row, c):
+            if c is None or c >= len(row): return ''
+            return row[c].strip()
+        
+        tor = g(row1, col_tor) or g(row2, col_tor)
+        z1 = g(row1, col_player)
+        z2 = g(row2, col_player)
+        
+        # Walidacja: oba imiona muszą być nie-puste i mieć sens
+        if z1 and z2 and len(z1) >= 3 and len(z2) >= 3:
+            # Imię/Nazwisko musi mieć choć jedną wielką literę
+            if any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
+                matches.append({
+                    'tor': tor,
+                    'godz': phase_time or '',
+                    'grupa': '',  # w drabince nie ma grupy
+                    'mecz': str(match_num),
+                    'z1': z1,
+                    'z2': z2,
+                })
+                match_num += 1
+        
+        i += 2  # przeskakujemy 2 wiersze (mecz)
+    
+    return phase_full_name, phase_time, matches
+
+
+def fetch_drabinka_phase(sheet_id, target_phase):
+    """
+    Pobiera mecze z zakładki "Drabinka" dla wybranej fazy.
+    
+    target_phase: np. "Pucharowa 1/32 (best of 3)" lub "1/32 FINAŁU"
+    
+    Zwraca: (phase_name, [matches]) lub (None, [])
+    """
+    gid_map = get_sheet_gids(sheet_id)
+    
+    # Próbujemy różne warianty nazwy zakładki
+    for tab_name in ('Drabinka', 'drabinka', 'DRABINKA'):
+        try:
+            rows = fetch_sheet(sheet_id, tab_name, gid_map)
+            if rows is None: continue
+            phase_name, phase_time, matches = parse_drabinka_rows(rows, target_phase)
+            if matches:
+                return phase_name, matches
+        except Exception:
+            continue
+    
+    return None, []
+
+
+# ─────────────────────────────────────────────────────────────────────
+
+
 def get_sheet_names_debug(sheet_id):
-    """Czytelny debug: liczba grup, liczba meczów per grupa, total. 
-    Pomija grupy bez meczów."""
+    """Czytelny debug: liczba grup, liczba meczów per grupa, total + info o Drabince."""
     info = []
     gid_map = get_sheet_gids(sheet_id)
     found_groups = []
@@ -157,15 +326,35 @@ def get_sheet_names_debug(sheet_id):
         found_groups.append((name, len(matches)))
         total_matches += len(matches)
 
-    if not found_groups:
-        info.append("❌ Nie znaleziono żadnych grup z meczami w arkuszu.")
-        info.append("   Sprawdź czy arkusz jest publiczny i czy zakładki nazywają się 'Gr. A', 'Gr. B' itd.")
+    # Sprawdź też zakładkę Drabinka
+    drabinka_phase = None
+    drabinka_count = 0
+    for tab_name in ('Drabinka', 'drabinka', 'DRABINKA'):
+        try:
+            rows = fetch_sheet(sheet_id, tab_name, gid_map)
+            if rows:
+                phase, _, m = parse_drabinka_rows(rows)
+                if m:
+                    drabinka_phase = phase
+                    drabinka_count = len(m)
+                    break
+        except Exception:
+            continue
+
+    if not found_groups and not drabinka_phase:
+        info.append("❌ Nie znaleziono żadnych grup z meczami ani zakładki Drabinka.")
+        info.append("   Sprawdź czy arkusz jest publiczny.")
         return info
 
-    info.append(f"✅ Znaleziono {len(found_groups)} grup, łącznie {total_matches} meczów:")
-    info.append("")
-    for name, count in found_groups:
-        info.append(f"  • {name}: {count} meczów")
+    if found_groups:
+        info.append(f"✅ Faza grupowa: {len(found_groups)} grup, {total_matches} meczów")
+        for name, count in found_groups:
+            info.append(f"  • {name}: {count} meczów")
+    
+    if drabinka_phase:
+        info.append("")
+        info.append(f"✅ Drabinka: faza {drabinka_phase}, {drabinka_count} meczów")
+    
     return info
 
 

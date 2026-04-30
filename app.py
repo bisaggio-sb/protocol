@@ -93,12 +93,13 @@ def compute_default_positions(active_keys, logos_aspect=None,
         qr_w = 2.4
         qr_x = (area_width_cm - qr_w) / 2
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
-        first_logo_y = 0.2 + qr_w + 0.5 + SPACING
-        # PFM = 80% wielkości QR (jeśli jest)
-        pfm_w_target = qr_w * 0.8  # 1.92 cm
+        # Pierwsza grafika niżej: QR + napis (0.5cm) + 0.5cm odstęp = bliżej QR
+        first_logo_y = 0.2 + qr_w + 0.5 + 0.5
+        # PFM ~109% szerokości QR (kompromis: większy niż 80%, mniejszy niż 4cm)
+        pfm_w_target = qr_w * 1.09  # 2.6 cm
     else:
         first_logo_y = 0.2
-        pfm_w_target = 2.0
+        pfm_w_target = 2.6
     
     if not other_keys:
         return positions
@@ -205,13 +206,27 @@ with col_form:
                 help="Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej"
             )
 
-    # Walidacja - obecnie tylko "Indywidualny + Grupowa + 2 sety"
-    is_supported = (tournament_type == "Indywidualny" 
-                    and tournament_phase == "Grupowa"
-                    and sets_format == "2 sety")
+    # Walidacja - obecnie obsługiwane:
+    # 1. Indywidualny + Grupowa + 2 sety
+    # 2. Indywidualny + faza pucharowa + 2 sety (z zakładki Drabinka)
+    is_individual = tournament_type == "Indywidualny"
+    is_2_sety = sets_format == "2 sety"
+    is_grupowa = tournament_phase == "Grupowa"
+    is_pucharowa = "Pucharowa" in tournament_phase or tournament_phase in (
+        "Mecz o 3. miejsce", "Finał")
+    
+    is_supported = is_individual and is_2_sety and (is_grupowa or is_pucharowa)
+    
     if not is_supported:
-        st.warning("⚠️ Obecnie zaimplementowana jest tylko **faza grupowa turnieju indywidualnego (2 sety)**. "
-                   "Pozostałe opcje będą dostępne w kolejnych wersjach.")
+        if not is_individual:
+            st.warning("⚠️ Obecnie zaimplementowany jest tylko **turniej indywidualny**. "
+                       "Drużynowy będzie dostępny w kolejnej wersji.")
+        elif not is_2_sety:
+            st.warning("⚠️ Obecnie zaimplementowane są tylko mecze na **2 sety**. "
+                       "Best of 3/5 będą dostępne w kolejnej wersji.")
+    
+    if is_pucharowa and is_2_sety:
+        st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
@@ -604,11 +619,27 @@ if gen_clicked:
     if not sid:
         st.error("Nieprawidłowy link."); st.stop()
 
-    with st.spinner("Pobieram dane z grup..."):
-        try:
-            sheets_data = generate_docx.fetch_all_group_sheets(sid)
-        except Exception as e:
-            st.error(f"Błąd pobierania: {e}"); st.stop()
+    # Wybierz źródło danych zależne od fazy:
+    # - Faza grupowa → zakładki Gr. A/B/C...
+    # - Faza pucharowa → zakładka Drabinka
+    if is_pucharowa:
+        with st.spinner(f"Pobieram mecze z zakładki Drabinka (faza {tournament_phase})..."):
+            try:
+                phase_name, matches = generate_docx.fetch_drabinka_phase(sid, tournament_phase)
+            except Exception as e:
+                st.error(f"Błąd pobierania zakładki Drabinka: {e}"); st.stop()
+        if not matches:
+            st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' w zakładce Drabinka. "
+                     "Upewnij się że arkusz ma zakładkę o nazwie 'Drabinka' i że nagłówek "
+                     f"kolumny zawiera nazwę fazy (np. '1/32 FINAŁU')."); st.stop()
+        # Format dla build_document: lista (group_name, matches)
+        sheets_data = [(phase_name or tournament_phase, matches)]
+    else:
+        with st.spinner("Pobieram dane z grup..."):
+            try:
+                sheets_data = generate_docx.fetch_all_group_sheets(sid)
+            except Exception as e:
+                st.error(f"Błąd pobierania: {e}"); st.stop()
 
     total = sum(len(m) for _,m in sheets_data)
     if total == 0:
@@ -626,6 +657,10 @@ if gen_clicked:
             image_order=image_order or None, image_positions=img_pos or None)
 
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
+    if is_pucharowa:
+        # Dodaj fazę do nazwy pliku, np. "GP2_2026_1_32"
+        phase_suffix = re.sub(r'[^\w]', '_', tournament_phase).strip('_').lower()
+        safe_name = f"{safe_name}_{phase_suffix}"
     
     pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:
@@ -640,6 +675,8 @@ if gen_clicked:
         'total': total,
         'groups': len(sheets_data),
         'kind': 'full',
+        'is_pucharowa': is_pucharowa,
+        'phase_name': tournament_phase,
     }
 
 if blank_clicked:
@@ -673,18 +710,37 @@ if blank_clicked:
 if 'last_gen' in st.session_state:
     gen = st.session_state['last_gen']
     if gen['kind'] == 'full':
-        st.success(f"✅ Gotowe! {gen['total']} protokołów w {gen['groups']} grupach.")
+        if gen.get('is_pucharowa'):
+            st.success(f"✅ Gotowe! {gen['total']} protokołów dla fazy {gen.get('phase_name','')}.")
+        else:
+            st.success(f"✅ Gotowe! {gen['total']} protokołów w {gen['groups']} grupach.")
     else:
         st.success("✅ Pusty formularz gotowy!")
 
-    cols_dl = st.columns(2)
-    if gen['docx']:
+    # Jeśli oba formaty - 2 kolumny side by side. Jeśli tylko jeden - wycentrowany.
+    has_docx = bool(gen['docx'])
+    has_pdf = bool(gen['pdf'])
+    if has_docx and has_pdf:
+        cols_dl = st.columns(2)
         with cols_dl[0]:
             st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
                 data=gen['docx'], file_name=f"{gen['name']}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True, key=f"dl_docx_{gen['name']}")
-    if gen['pdf']:
+        with cols_dl[1]:
+            st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
+                data=gen['pdf'], file_name=f"{gen['name']}.pdf",
+                mime="application/pdf",
+                use_container_width=True, key=f"dl_pdf_{gen['name']}")
+    elif has_docx:
+        cols_dl = st.columns([1, 2, 1])
+        with cols_dl[1]:
+            st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
+                data=gen['docx'], file_name=f"{gen['name']}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True, key=f"dl_docx_{gen['name']}")
+    elif has_pdf:
+        cols_dl = st.columns([1, 2, 1])
         with cols_dl[1]:
             st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
                 data=gen['pdf'], file_name=f"{gen['name']}.pdf",
