@@ -125,14 +125,14 @@ with col_form:
 
     cols_t2 = st.columns(2)
     with cols_t2[0]:
-        tournament_type = st.selectbox(
+        tournament_type = st.radio(
             "Rodzaj",
             ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
             index=0,
             help="Obecnie zaimplementowany tylko turniej indywidualny"
         )
     with cols_t2[1]:
-        tournament_phase = st.selectbox(
+        tournament_phase = st.radio(
             "Faza",
             ["Grupowa (2 sety)",
              "Pucharowa 1/64 (best of 3)",
@@ -499,7 +499,10 @@ def build_image_args():
     for key in image_order:
         if key in image_positions:
             p = image_positions[key]
-            img_pos_for_docx[key] = {'x': p['x'], 'y': p['y'], 'width': p['w']}
+            img_pos_for_docx[key] = {
+                'x': p['x'], 'y': p['y'],
+                'width': p['w'], 'height': p['h']
+            }
     return logos_bytes, image_order, img_pos_for_docx
 
 

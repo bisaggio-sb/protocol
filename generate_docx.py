@@ -612,14 +612,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     pos = image_positions[key]
                     x_cm = pos.get('x', (cell_w_cm - w_cm) / 2)
                     y_cm = pos.get('y', cur_y_cm)
+                    # Jeśli user podał konkretną szerokość i wysokość, użyj ich
+                    # bezpośrednio (bez wymuszania proporcji obrazu)
                     if 'width' in pos:
-                        new_w_cm = pos['width']
-                        # Dla QR (kwadratowy) zachowujemy proporcje 1:1
+                        w_cm = pos['width']
+                    if 'height' in pos:
+                        h_cm = pos['height']
+                    elif 'width' in pos:
+                        # Tylko width podana - dla QR zachowaj 1:1, inaczej zachowaj proporcje
                         if key == 'qr':
-                            h_cm = new_w_cm
+                            h_cm = w_cm
                         else:
-                            h_cm = new_w_cm / (w_cm / h_cm)
-                        w_cm = new_w_cm
+                            # Zachowaj proporcje obrazu z rid_info
+                            orig_w, orig_h = rid_info[1], rid_info[2]
+                            h_cm = w_cm * (orig_h / orig_w)
                 else:
                     # Domyślnie jedna pod drugą, wycentrowane
                     x_cm = (cell_w_cm - w_cm) / 2
