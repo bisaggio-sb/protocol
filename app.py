@@ -75,7 +75,10 @@ def extract_id(url):
 
 # Obszar "Wyniki turnieju" ma szerokość 5.24 cm
 LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowej (R1.tc[0] = 2970 dxa)
-TROJKA_LEFT_AREA_CM = 2.0  # Trójka: lewa kolumna jest dużo węższa (1186 dxa = 2.09 cm)
+# Trójka: lewa kolumna w tabeli wynikowej ma 1186 dxa = 2.09 cm. Nie używamy całej —
+# zostawiamy 0.5 cm odstępu od tabeli żeby grafiki nie przylegały do brzegu kolumny.
+# Grafiki centrowane są w obszarze 1.59 cm, lekko przesunięte w lewo.
+TROJKA_LEFT_AREA_CM = 1.59
 TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
 
 
@@ -98,12 +101,12 @@ def compute_default_positions(active_keys, logos_aspect=None,
     
     # Trójka ma węższy lewy pas - mniejsze rozmiary domyślne
     if is_trojka:
-        area_width_cm = TROJKA_LEFT_AREA_CM
+        area_width_cm = TROJKA_LEFT_AREA_CM  # 1.59 cm
         area_height_cm = TROJKA_AREA_HEIGHT_CM
-        QR_W = 1.6  # zamiast 2.4
-        PFM_TARGET_W = QR_W * 1.09  # ~1.74 cm
-        OTHER_MAX_W = 1.7   # bardzo wąsko
-        SPACE_AFTER_QR = 0.4
+        QR_W = 1.4  # mniejsze niż w v45 (1.6) bo zmniejszyliśmy szerokość obszaru
+        PFM_TARGET_W = QR_W * 1.09  # ~1.53 cm
+        OTHER_MAX_W = 1.5
+        SPACE_AFTER_QR = 0.3
     else:
         QR_W = 2.4
         PFM_TARGET_W = QR_W * 1.09  # ~2.6
@@ -211,15 +214,15 @@ with col_form:
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
 
     # 3 dropdowny w 3 kolumnach (kompaktowo)
-    # ✅ = w pełni zweryfikowane na danych z prawdziwych turniejów
+    # ✅ = w pełni zweryfikowane na danych z prawdziwych turniejów (Grupowa Indywidualna i Trójkowa)
     # 🟡 = zaimplementowane, ale nie zweryfikowane na realnych danych
-    # 🔴 = jeszcze nieobsługiwane (zostanie pominięte z błędem)
+    # 🔴 = jeszcze nieobsługiwane
     cols_t2 = st.columns(3)
     with cols_t2[0]:
         rodzaj_options = {
             "Indywidualny": "✅ Indywidualny",
             "Drużynowy 2-os.": "🔴 Drużynowy 2-os. (wkrótce)",
-            "Drużynowy 3-os.": "🟡 Drużynowy 3-os.",
+            "Drużynowy 3-os.": "✅ Drużynowy 3-os.",
             "Drużynowy 4-os.": "🔴 Drużynowy 4-os. (wkrótce)",
         }
         tournament_type = st.selectbox(
@@ -229,29 +232,44 @@ with col_form:
             index=0,
             help="✅ = w pełni zweryfikowane, 🟡 = zaimplementowane lecz niezweryfikowane, 🔴 = w trakcie przygotowywania"
         )
+    
+    is_trojka_pre = tournament_type == "Drużynowy 3-os."
+    
     with cols_t2[1]:
-        faza_options = {
-            "Grupowa": "✅ Grupowa",
-            "Pucharowa 1/64": "🟡 Pucharowa 1/64",
-            "Pucharowa 1/32": "✅ Pucharowa 1/32",
-            "Pucharowa 1/16": "🟡 Pucharowa 1/16",
-            "Pucharowa 1/8": "🟡 Pucharowa 1/8",
-            "Pucharowa 1/4": "🟡 Pucharowa 1/4",
-            "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
-            "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
-            "Finał": "🟡 Finał",
-        }
+        # Faza zależna od typu - trójka nie ma 1/64 ani 1/32 (zwykle za mało drużyn)
+        if is_trojka_pre:
+            faza_options = {
+                "Grupowa": "✅ Grupowa",
+                "Pucharowa 1/16": "🟡 Pucharowa 1/16",
+                "Pucharowa 1/8": "🟡 Pucharowa 1/8",
+                "Pucharowa 1/4": "🟡 Pucharowa 1/4",
+                "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
+                "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
+                "Finał": "🟡 Finał",
+            }
+        else:
+            faza_options = {
+                "Grupowa": "✅ Grupowa",
+                "Pucharowa 1/64": "🟡 Pucharowa 1/64",
+                "Pucharowa 1/32": "🟡 Pucharowa 1/32",
+                "Pucharowa 1/16": "🟡 Pucharowa 1/16",
+                "Pucharowa 1/8": "🟡 Pucharowa 1/8",
+                "Pucharowa 1/4": "🟡 Pucharowa 1/4",
+                "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
+                "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
+                "Finał": "🟡 Finał",
+            }
         tournament_phase = st.selectbox(
             "Faza",
             list(faza_options.keys()),
             format_func=lambda k: faza_options[k],
             index=0,
-            help="Zweryfikowane: Grupowa, Pucharowa 1/32"
+            help="Obecnie zweryfikowana faza grupowa. Pucharowe — w trakcie testów (wymagają best-of-3/5)."
         )
     with cols_t2[2]:
         # Format setów zależny od fazy:
-        # Grupowa → tylko "2 sety"
-        # Pucharowa → "best of 3" lub "best of 5"
+        # Grupowa → tylko "2 sety" (✅ zweryfikowane)
+        # Pucharowa → wymaga best of 3/5 (🔴 wkrótce)
         if tournament_phase == "Grupowa":
             sets_format = st.selectbox("Format", ["2 sety"],
                 format_func=lambda k: f"✅ {k}",
@@ -260,28 +278,32 @@ with col_form:
         else:
             bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
                          "Best of 5": "🔴 Best of 5 (wkrótce)",
-                         "2 sety": "✅ 2 sety"}
+                         "2 sety": "🟡 2 sety"}
+            # Default: Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej
+            default_idx = 0
+            if "1/4" in tournament_phase or "1/2" in tournament_phase or \
+               tournament_phase in ("Mecz o 3. miejsce", "Finał"):
+                default_idx = 1
             sets_format = st.selectbox("Format",
                 list(bo_options.keys()),
                 format_func=lambda k: bo_options[k],
-                index=2,  # 2 sety jako sprawdzone
-                help="Obecnie zweryfikowane: 2 sety. Best of 3/5 wkrótce."
+                index=default_idx,
+                help="Best of 3/5 jeszcze niegotowe. 2 sety pomocniczo dostępne."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
-    # 1. Indywidualny + Grupowa + 2 sety
-    # 2. Indywidualny + Pucharowa 1/32 + 2 sety (z zakładki Drabinka)
-    # Pozostałe fazy pucharowe (1/64, 1/16, 1/8, 1/4, 1/2, 3. miejsce, Finał) są
-    # zaimplementowane w kodzie ale nie zostały zweryfikowane na rzeczywistych
-    # danych — pokazujemy ostrzeżenie.
+    # 1. Indywidualny + Grupowa + 2 sety  → ✅
+    # 2. Drużynowy 3-os. + Grupowa + 2 sety  → ✅
+    # Wszystko inne — eksperymentalne lub w trakcie przygotowywania.
     is_individual = tournament_type == "Indywidualny"
+    is_trojka = tournament_type == "Drużynowy 3-os."
+    is_supported_type = is_individual or is_trojka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
-    is_132 = tournament_phase == "Pucharowa 1/32"
     is_pucharowa = "Pucharowa" in tournament_phase or tournament_phase in (
         "Mecz o 3. miejsce", "Finał")
     
-    is_fully_tested = is_individual and is_2_sety and (is_grupowa or is_132)
+    is_fully_tested = is_supported_type and is_2_sety and is_grupowa
     
     # Krótka etykieta fazy do wyświetlenia (komórka tc[5] = 1275 dxa = 2.25 cm).
     # Używana zarówno w preview HTML jak i w docx.
@@ -295,27 +317,22 @@ with col_form:
         elif tournament_phase == "Finał":
             phase_label_short = "Finał"
     
-    is_trojka = tournament_type == "Drużynowy 3-os."
-    is_supported_type = is_individual or is_trojka
-    
     if not is_supported_type:
         st.warning(f"⚠️ Format **{tournament_type}** nie jest jeszcze obsługiwany. "
                    "Obecnie dostępne: Indywidualny, Drużynowy 3-os.")
+    elif is_pucharowa:
+        # Pucharowa wymaga best-of-3/5 - jeszcze nie ma. Można użyć "2 sety" jako
+        # zastępstwo, ale nie jest to oficjalny format pucharowej.
+        st.warning(f"⚠️ Faza **{tournament_phase}** wymaga formatu **Best of 3/5** "
+                   "który jest jeszcze w przygotowaniu. Generator wczyta mecze z "
+                   "zakładki **Drabinka** używając formatu 2 sety jako tymczasowego "
+                   "rozwiązania — protokół może być nieoficjalny. **Zweryfikowana jest "
+                   "obecnie tylko faza grupowa.**")
     elif not is_2_sety:
         st.warning("⚠️ Obecnie zaimplementowane są tylko mecze na **2 sety**. "
                    "Best of 3/5 będą dostępne w kolejnej wersji.")
-    elif is_trojka and (is_pucharowa or not is_grupowa):
-        # Trójkowy zweryfikowany tylko dla grupowej
-        st.warning(f"⚠️ Drużynowy 3-os. obecnie zweryfikowany **tylko dla fazy grupowej**. "
-                   f"Faza **{tournament_phase}** może działać niepoprawnie.")
-    elif is_individual and is_pucharowa and not is_132:
-        # Indywidualny + 2 sety + faza pucharowa inna niż 1/32 → eksperymentalne
-        st.warning(f"⚠️ Faza **{tournament_phase}** nie została jeszcze zweryfikowana "
-                   "na rzeczywistych danych. Generator może działać poprawnie, ale "
-                   "zalecamy sprawdzenie wyniku. **Zweryfikowane są tylko: Grupowa, "
-                   "Pucharowa 1/32**.")
     
-    if is_pucharowa and is_2_sety and is_individual:
+    if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
@@ -348,96 +365,121 @@ with col_form:
     with cols_dom[1]:
         include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
-    # ─── 4. Dodatkowe grafiki (zwijane) ─────────────────────────────────
+    # ─── 4. Grafiki (zwijane) - łączy dodawanie + pozycjonowanie ─────────
     NUM_LOGOS = 4
     logo_files = []
     
     # Sprawdź ile grafik już dodanych żeby pokazać liczbę
-    n_uploaded = sum(1 for k in [f"logo_{i}" for i in range(NUM_LOGOS)] 
+    n_uploaded = sum(1 for k in [f"logo_{i}" for i in range(NUM_LOGOS)]
                      if k in st.session_state and st.session_state[k] is not None)
     
-    expander_label = "4. Dodatkowe grafiki"
+    grafiki_label = "4. Grafiki"
     if n_uploaded > 0:
-        expander_label += f" ({n_uploaded} dodano)"
-    else:
-        expander_label += " (max 4)"
+        grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
     
-    with st.expander(expander_label, expanded=(n_uploaded > 0)):
+    with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
+        st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
         cols_log = st.columns(2)
         for i in range(NUM_LOGOS):
             with cols_log[i % 2]:
                 f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
                                      key=f"logo_{i}", label_visibility="visible")
                 logo_files.append(f)
+        
+        # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
+        logos_aspect = {}
+        for i, f in enumerate(logo_files):
+            if f is not None:
+                try:
+                    f.seek(0)
+                    logos_aspect[f'logo{i+1}'] = get_image_aspect(f.read())
+                    f.seek(0)
+                except Exception:
+                    logos_aspect[f'logo{i+1}'] = 1.5
+        
+        # ─── Aktywne elementy ────────────────────────────────────────────
+        elements_active = []
+        if include_qr:
+            elements_active.append(('qr', 'Kod QR'))
+        if include_pfm_logo:
+            elements_active.append(('pfm', 'Logo PFM'))
+        for i, f in enumerate(logo_files):
+            if f is not None:
+                elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
+        
+        # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
+        default_pos = compute_default_positions([k for k, _ in elements_active],
+                                                logos_aspect=logos_aspect,
+                                                template_type=('TROJKA' if is_trojka else 'IND'))
+        active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
+        
+        image_positions = {}
+        for key in default_pos:
+            image_positions[key] = dict(default_pos[key])
+        
+        # ─── Pozycjonowanie ręczne (zwijane wewnątrz) ────────────────────
+        if elements_active:
+            st.markdown("---")
+            cols_h5 = st.columns([3, 1])
+            with cols_h5[0]:
+                st.markdown("**📍 Pozycje grafik**")
+                st.caption("Elementy są ułożone automatycznie. Rozwiń żeby dostosować ręcznie.")
+            with cols_h5[1]:
+                if st.button("↻ Rozmieść",
+                             help="Przywróć automatyczne rozmieszczenie",
+                             use_container_width=True):
+                    st.session_state['reset_nonce'] = st.session_state.get('reset_nonce', 0) + 1
+                    st.rerun()
 
-    # ─── Aktywne elementy ────────────────────────────────────────────────
-    elements_active = []
-    if include_qr:
-        elements_active.append(('qr', 'Kod QR'))
-    if include_pfm_logo:
-        elements_active.append(('pfm', 'Logo PFM'))
-    for i, f in enumerate(logo_files):
-        if f is not None:
-            elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
-
-    # Aspect ratios uploadowanych grafik
-    logos_aspect = {}
-    for i, f in enumerate(logo_files):
-        if f is not None:
-            try:
-                f.seek(0)
-                logos_aspect[f'logo{i+1}'] = get_image_aspect(f.read())
-                f.seek(0)
-            except Exception:
-                logos_aspect[f'logo{i+1}'] = 1.5
-
-    # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
-    default_pos = compute_default_positions([k for k, _ in elements_active],
-                                            logos_aspect=logos_aspect,
-                                            template_type=('TROJKA' if is_trojka else 'IND'))
-    active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
+            nonce = st.session_state.get('reset_nonce', 0)
+            # Maksymalne wartości X/W zależne od typu szablonu (trójka ma dużo węższy lewy pas)
+            max_x = TROJKA_LEFT_AREA_CM if is_trojka else 5.0
+            max_w = TROJKA_LEFT_AREA_CM if is_trojka else 5.0
+            for key, label in elements_active:
+                with st.expander(f"📍 {label}", expanded=False):
+                    cols = st.columns(4)
+                    pos = image_positions[key]
+                    slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
+                    with cols[0]:
+                        new_x = st.number_input("X (cm)", value=float(pos['x']),
+                                               min_value=0.0, max_value=max_x, step=0.1,
+                                               key=f"x_{slider_key_base}")
+                    with cols[1]:
+                        new_y = st.number_input("Y (cm)", value=float(pos['y']),
+                                               min_value=0.0, max_value=18.0, step=0.1,
+                                               key=f"y_{slider_key_base}")
+                    with cols[2]:
+                        new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
+                                               min_value=0.5, max_value=max_w, step=0.1,
+                                               key=f"w_{slider_key_base}")
+                    with cols[3]:
+                        new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
+                                               min_value=0.5, max_value=5.0, step=0.1,
+                                               key=f"h_{slider_key_base}")
+                    image_positions[key] = {
+                        'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
+                    }
     
-    image_positions = {}
-    for key in default_pos:
-        image_positions[key] = dict(default_pos[key])
-
-    if elements_active:
-        st.header("5. Pozycja i rozmiar elementów")
-        cols_h5 = st.columns([4, 1])
-        with cols_h5[0]:
-            st.caption("Elementy są ułożone automatycznie. "
-                       "Rozwiń element żeby dostosować pozycję ręcznie.")
-        with cols_h5[1]:
-            if st.button("↻ Rozmieść równomiernie",
-                         help="Przywróć automatyczne rozmieszczenie"):
-                st.session_state['reset_nonce'] = st.session_state.get('reset_nonce', 0) + 1
-                st.rerun()
-
-        nonce = st.session_state.get('reset_nonce', 0)
-        for key, label in elements_active:
-            with st.expander(f"📍 {label}", expanded=False):
-                cols = st.columns(4)
-                pos = image_positions[key]
-                slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
-                with cols[0]:
-                    new_x = st.number_input("X (cm)", value=float(pos['x']),
-                                           min_value=0.0, max_value=5.0, step=0.1,
-                                           key=f"x_{slider_key_base}")
-                with cols[1]:
-                    new_y = st.number_input("Y (cm)", value=float(pos['y']),
-                                           min_value=0.0, max_value=17.0, step=0.1,
-                                           key=f"y_{slider_key_base}")
-                with cols[2]:
-                    new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
-                                           min_value=0.5, max_value=5.0, step=0.1,
-                                           key=f"w_{slider_key_base}")
-                with cols[3]:
-                    new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
-                                           min_value=0.5, max_value=5.0, step=0.1,
-                                           key=f"h_{slider_key_base}")
-                image_positions[key] = {
-                    'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
-                }
+    # Po expanderze: jeśli grafiki nie były rozwinięte, musimy mimo to mieć logo_files,
+    # logos_aspect, elements_active, image_positions. Streamlit re-runs cały skrypt,
+    # więc widget logo_files NIE zostały zainicjalizowane gdy expander zwinięty?
+    # Aktualnie expander w streamlit RENDERUJE swoje contenty zawsze (tylko schowane wizualnie),
+    # więc logo_files i pozostałe są dostępne. Ale dla bezpieczeństwa - fallback.
+    if 'logo_files' not in dir():
+        logo_files = [None] * NUM_LOGOS
+    if 'logos_aspect' not in dir():
+        logos_aspect = {}
+    if 'elements_active' not in dir():
+        elements_active = []
+        if include_qr:
+            elements_active.append(('qr', 'Kod QR'))
+        if include_pfm_logo:
+            elements_active.append(('pfm', 'Logo PFM'))
+    if 'image_positions' not in dir():
+        image_positions = compute_default_positions(
+            [k for k, _ in elements_active],
+            logos_aspect=logos_aspect,
+            template_type=('TROJKA' if is_trojka else 'IND'))
 
 
 # ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
@@ -451,7 +493,11 @@ with col_preview:
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
     PAGE_H_PX = int(PAGE_H_CM * SCALE)
-    LEFT_AREA_PX = int(LEFT_AREA_CM * SCALE)
+    # Dla trójki lewa kolumna jest węższa (2.09 cm w docu, ~1.59 cm na grafiki + 0.5 cm gap)
+    LEFT_AREA_PX = int((TROJKA_LEFT_AREA_CM if is_trojka else LEFT_AREA_CM) * SCALE)
+    # Trójka ma większą tabelę wynikową (więcej kolumn) - widać że tabela zaczyna się
+    # zaraz po lewym pasku grafik (2.09 cm)
+    TBL2_LEFT_PX = int((2.09 if is_trojka else LEFT_AREA_CM) * SCALE)
 
     image_urls = {}
     if include_qr:
@@ -503,8 +549,152 @@ with col_preview:
     TBL1_OFFSET_PX = int(PAGE_W_PX * TBL1_OFFSET_FRAC)
     NAMES_FRAC = 3915 / 9090
     NAMES_PX = int((PAGE_W_PX - TBL1_OFFSET_PX) * NAMES_FRAC)
-
-    html = f"""
+    
+    if is_trojka:
+        # ─── Preview TRÓJKOWY ───
+        # Tabela 1 jest WĘŻSZA i ZACZYNA się od lewego brzegu (bez tblInd).
+        # Drużyny: szerokie pole tc[0]=3915 dxa, prawy brzeg tabeli = 9026 dxa = 15.91 cm.
+        # Tabela 2 jest szersza (16.31 cm) i ma 4 kolumny z SUMA.
+        TROJKA_TBL1_W_PX = int((9026 / 11000) * PAGE_W_PX)  # ~15.91 cm na 18.46 cm
+        TROJKA_NAMES_PX = int((3915 / 9026) * TROJKA_TBL1_W_PX)
+        TROJKA_HEADER_W_PX = TROJKA_TBL1_W_PX - TROJKA_NAMES_PX  # prawa część (Punkty/Wygrane/Podpis)
+        
+        html = f"""
+        <div style="background:white; border:1px solid #ccc;
+                    width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
+                    position:relative; font-family:Arial, sans-serif;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+          
+          <div style="position:absolute; right:8px; top:6px;
+                      font-size:9px; color:#666; font-style:italic;">
+            {header_text}
+          </div>
+          
+          <!-- Header: Tor / Godzina / Grupa / Mecz # -->
+          <div style="position:absolute; left:6px; top:30px; right:0; height:24px;
+                      display:flex; align-items:center;
+                      font-size:11px; gap:14px;">
+            <span>Tor <b>1</b></span>
+            <span>Godzina <b>09:00</b></span>
+            {f'<span>Faza <b>{phase_label_short}</b></span>' if is_pucharowa else '<span>Grupa <b>A</b></span>'}
+            {('' if is_pucharowa else '<span>Mecz # <b>1</b></span>')}
+          </div>
+          
+          <!-- Nagłówki Punkty/Wygrane/Podpis (prawa strona) -->
+          <div style="position:absolute; left:{TROJKA_NAMES_PX}px; top:62px;
+                      width:{TROJKA_HEADER_W_PX}px; height:34px;
+                      background:#f0f0f0; border:1px solid #999;
+                      display:flex; font-size:8px; font-weight:bold; text-align:center;
+                      align-items:center; justify-content:space-around;">
+            <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 1</div>
+            <div style="flex:1; border-right:1px solid #999;">Punkty<br>SET 2</div>
+            <div style="flex:1; border-right:1px solid #999;">Wygrane<br>sety</div>
+            <div style="flex:1.7;">Podpis</div>
+          </div>
+          
+          <!-- Drużyna A -->
+          <div style="position:absolute; left:0; top:96px;
+                      width:{TROJKA_TBL1_W_PX}px; height:24px;
+                      border:1px solid #999; display:flex; font-size:11px;">
+            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
+                        text-align:center; line-height:24px; font-weight:bold;
+                        border-right:1px solid #999;">
+              KARMI
+            </div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1.7;"></div>
+          </div>
+          <!-- Drużyna B -->
+          <div style="position:absolute; left:0; top:120px;
+                      width:{TROJKA_TBL1_W_PX}px; height:24px;
+                      border:1px solid #999; border-top:none; display:flex; font-size:11px;">
+            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
+                        text-align:center; line-height:24px; font-weight:bold;
+                        border-right:1px solid #999;">
+              Trzech Silnych Mężczyzn
+            </div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1; border-right:1px solid #999;"></div>
+            <div style="flex:1.7;"></div>
+          </div>
+          
+          <!-- Disclaimer -->
+          <div style="position:absolute; left:0; right:0; top:148px;
+                      text-align:center; font-size:8px; color:#555; font-style:italic;">
+            Każda drużyna zaczyna po jednym secie (w dowolnej kolejności)<br>
+            Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
+          </div>
+          
+          <!-- Tabela wynikowa (cała szerokość, wąski lewy pasek na grafiki) -->
+          <div style="position:absolute; left:0; top:180px; right:0; height:380px;
+                      border:1px solid #999;">
+            <!-- Lewy pasek na grafiki (1.59 cm + 0.5 cm gap = 2.09 cm) -->
+            <div style="position:absolute; left:0; top:0; bottom:0;
+                        width:{LEFT_AREA_PX}px; overflow:hidden;">
+              {elements_html}
+              {f'''<div style="position:absolute; left:0; right:0; top:{label_y_px}px;
+                          text-align:center; font-size:7px; font-weight:bold;">
+                Wyniki<br>turnieju
+              </div>''' if include_qr else ''}
+            </div>
+            <!-- Prawa część - tabela wyników (4 grupy SUMA) -->
+            <div style="position:absolute; left:{TBL2_LEFT_PX}px; top:0; right:0; bottom:0;
+                        border-left:1px solid #999;">
+              <!-- SET 1 / SET 2 nagłówki (4 grupy = 2 sety × 2 drużyny lub odwrotnie) -->
+              <div style="position:absolute; left:0; top:0; right:0; height:22px;
+                          background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
+                          align-items:center; text-align:center; border-bottom:1px solid #999;">
+                <div style="flex:0.5; border-right:1px solid #999;"></div>
+                <div style="flex:4; border-right:1px solid #999;">SET 1</div>
+                <div style="flex:4;">SET 2</div>
+              </div>
+              <!-- 4 SUMA nagłówki -->
+              <div style="position:absolute; left:0; top:22px; right:0; height:50px;
+                          background:#f8f8f8; display:flex; font-size:7px; font-weight:bold;
+                          align-items:center; text-align:center;
+                          border-bottom:1px solid #999;">
+                <div style="flex:0.5; border-right:1px solid #999;"></div>
+                <div style="flex:1.5; border-right:1px solid #999;"></div>
+                <div style="flex:0.5; border-right:1px solid #999;
+                            writing-mode:vertical-rl; transform:rotate(180deg);
+                            line-height:1.2;">SUMA</div>
+                <div style="flex:1.5; border-right:1px solid #999;"></div>
+                <div style="flex:0.5; border-right:1px solid #999;
+                            writing-mode:vertical-rl; transform:rotate(180deg);
+                            line-height:1.2;">SUMA</div>
+                <div style="flex:1.5; border-right:1px solid #999;"></div>
+                <div style="flex:0.5; border-right:1px solid #999;
+                            writing-mode:vertical-rl; transform:rotate(180deg);
+                            line-height:1.2;">SUMA</div>
+                <div style="flex:1.5; border-right:1px solid #999;"></div>
+                <div style="flex:0.5;
+                            writing-mode:vertical-rl; transform:rotate(180deg);
+                            line-height:1.2;">SUMA</div>
+              </div>
+              <!-- Wiersze 1-18 -->
+              <div style="position:absolute; left:0; top:72px; right:0; bottom:24px;
+                          background:repeating-linear-gradient(
+                            to bottom, transparent 0, transparent 14px,
+                            #ccc 14px, #ccc 15px);"></div>
+              <!-- Wiersz PKT na dole -->
+              <div style="position:absolute; left:0; right:0; bottom:0; height:24px;
+                          border-top:1px solid #999;
+                          background:#f0f0f0; display:flex;
+                          font-size:10px; font-weight:bold; text-align:center;
+                          align-items:center;">
+                <div style="flex:0.5; border-right:1px solid #999; line-height:24px;">PKT</div>
+                <div style="flex:8;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """
+    else:
+        # ─── Preview INDYWIDUALNY (oryginalny) ───
+        html = f"""
     <div style="background:white; border:1px solid #ccc; 
                 width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                 position:relative; font-family:Arial, sans-serif;
@@ -681,7 +871,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("6. Generuj")
+st.header("5. Generuj")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:

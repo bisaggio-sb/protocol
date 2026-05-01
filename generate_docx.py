@@ -715,12 +715,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     body = doc_root.find(wt('body'))
 
     # ── Marginesy
+    # Indywidualny: 720 dxa = 1.27 cm wszędzie (oryginał ma więcej, ścieśnimy żeby zostało
+    # więcej miejsca dla obrazów po lewej).
+    # Trójka: 567 dxa = 1.0 cm (jeszcze ciaśniej) bo szablon trójki jest większy
+    # i trzeba zmieścić na 1 stronie.
+    margin_dxa = '567' if template_type == 'TROJKA' else '720'
     sectPr_check = body.find(wt('sectPr'))
     if sectPr_check is not None:
         pgMar = sectPr_check.find(wt('pgMar'))
         if pgMar is not None:
             for side in ('top','bottom','left','right'):
-                pgMar.set(f'{{{W}}}{side}', '720')
+                pgMar.set(f'{{{W}}}{side}', margin_dxa)
 
     # ── Fonty etykiet: pomniejsz zbyt duże (24→20 dla głównych etykiet,
     # zachowaj 24 dla nagłówków SET 1/SET 2/Wyniki turnieju w tabeli wyników).
@@ -728,6 +733,44 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Punkty SET 1/SET 2/Wygrane sety/Podpis (sz=24) → sz=20
     LABELS_BIGGER = {'Tor','Godzina','Grupa','Mecz','#'}
     LABELS_HEADER = {'Punkty','SET 1','SET 2','Wygrane','sety','Podpis'}
+    # ── Operacje SPECYFICZNE DLA TRÓJKOWEGO szablonu:
+    # Wymuszenie Calibri jako fontu etykiet (Tor/Godzina/Grupa/Mecz#/Punkty SET 1/2/
+    # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
+    # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
+    # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
+    if template_type == 'TROJKA':
+        TROJKA_LABELS = {'Tor','Godzina','Grupa','Mecz','#',
+                         'Punkty','SET 1','SET 2','Wygrane','sety','Podpis',
+                         'PunktySET 1','PunktySET 2','Wygranesety',
+                         'Wyniki turnieju','Wyniki turnieju:'}
+        for r in body.iter(wt('r')):
+            ts = r.findall(wt('t'))
+            if not ts: continue
+            text_content = ''.join((t.text or '') for t in ts).strip()
+            if text_content in TROJKA_LABELS:
+                rPr = r.find(wt('rPr'))
+                if rPr is None:
+                    rPr = etree.Element(wt('rPr'))
+                    r.insert(0, rPr)
+                fonts = rPr.find(wt('rFonts'))
+                if fonts is None:
+                    fonts = etree.SubElement(rPr, wt('rFonts'))
+                for a in ('ascii','hAnsi','eastAsia','cs'):
+                    fonts.set(f'{{{W}}}{a}', 'Calibri')
+        
+        # Zmniejszenie odstępów po tabeli wynikowej żeby mieściło się na 1 stronie.
+        # Ostatni paragraf przed sectPr ma duży before - usuwamy.
+        for p in body.iter(wt('p')):
+            pPr = p.find(wt('pPr'))
+            if pPr is not None:
+                spacing = pPr.find(wt('spacing'))
+                if spacing is not None:
+                    # Zmniejsz before/after do 0
+                    for attr in ('before','after','beforeLines','afterLines'):
+                        a = f'{{{W}}}{attr}'
+                        if a in spacing.attrib:
+                            spacing.set(a, '0')
+
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)
     # 2) Przesunięcie tabeli 1 w prawo (tblInd=600 dxa)
