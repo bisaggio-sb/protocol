@@ -715,17 +715,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     body = doc_root.find(wt('body'))
 
     # ── Marginesy
-    # Indywidualny: 720 dxa = 1.27 cm wszędzie (oryginał ma więcej, ścieśnimy żeby zostało
-    # więcej miejsca dla obrazów po lewej).
-    # Trójka: 567 dxa = 1.0 cm (jeszcze ciaśniej) bo szablon trójki jest większy
-    # i trzeba zmieścić na 1 stronie.
-    margin_dxa = '567' if template_type == 'TROJKA' else '720'
+    # Indywidualny: 720 dxa = 1.27 cm wszędzie.
+    # Trójka: 720 dxa (1.27 cm) + zsynchronizowanie tabeli 1 z tabelą 2 (oba 9251 dxa
+    # od lewego brzegu marginesu) — bez tego tabela 1 'auto' rozciąga się na całą
+    # użyteczną szerokość a tabela 2 zostaje fixed 9251 → rozjazd.
     sectPr_check = body.find(wt('sectPr'))
     if sectPr_check is not None:
         pgMar = sectPr_check.find(wt('pgMar'))
         if pgMar is not None:
             for side in ('top','bottom','left','right'):
-                pgMar.set(f'{{{W}}}{side}', margin_dxa)
+                pgMar.set(f'{{{W}}}{side}', '720')
 
     # ── Fonty etykiet: pomniejsz zbyt duże (24→20 dla głównych etykiet,
     # zachowaj 24 dla nagłówków SET 1/SET 2/Wyniki turnieju w tabeli wyników).
@@ -770,6 +769,45 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         a = f'{{{W}}}{attr}'
                         if a in spacing.attrib:
                             spacing.set(a, '0')
+        
+        # Wyrównanie tabel 1 i 2 — ten sam tblInd=0 i ta sama szerokość.
+        # Tabela 1 ma w szablonie tblW=auto co przy zmienionych marginesach ją rozciąga.
+        # Wymuszamy fixed width = szerokość tabeli 2 (9251 dxa = 16.31 cm).
+        # Sumę szerokości kolumn też skalujemy proporcjonalnie żeby się zmieściła.
+        first_tbl = body.find(wt('tbl'))
+        if first_tbl is not None:
+            tblPr_t1 = first_tbl.find(wt('tblPr'))
+            if tblPr_t1 is not None:
+                # Ustaw fixed width
+                tblW = tblPr_t1.find(wt('tblW'))
+                if tblW is None:
+                    tblW = etree.SubElement(tblPr_t1, wt('tblW'))
+                tblW.set(f'{{{W}}}w', '9251')
+                tblW.set(f'{{{W}}}type', 'dxa')
+                # tblInd = 0
+                tblInd = tblPr_t1.find(wt('tblInd'))
+                if tblInd is None:
+                    tblInd = etree.SubElement(tblPr_t1, wt('tblInd'))
+                tblInd.set(f'{{{W}}}w', '0')
+                tblInd.set(f'{{{W}}}type', 'dxa')
+            
+            # Skaluj wszystkie tcW i gridCol z 9026 do 9251 (faktor ~1.025)
+            scale = 9251 / 9026
+            tblGrid = first_tbl.find(wt('tblGrid'))
+            if tblGrid is not None:
+                for gc in tblGrid.findall(wt('gridCol')):
+                    w = gc.get(f'{{{W}}}w')
+                    if w:
+                        gc.set(f'{{{W}}}w', str(int(int(w) * scale)))
+            for tr in first_tbl.findall(wt('tr')):
+                for tc in tr.findall(wt('tc')):
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is not None:
+                        tcW = tcPr.find(wt('tcW'))
+                        if tcW is not None:
+                            w = tcW.get(f'{{{W}}}w')
+                            if w:
+                                tcW.set(f'{{{W}}}w', str(int(int(w) * scale)))
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)

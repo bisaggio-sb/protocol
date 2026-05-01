@@ -75,10 +75,11 @@ def extract_id(url):
 
 # Obszar "Wyniki turnieju" ma szerokość 5.24 cm
 LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowej (R1.tc[0] = 2970 dxa)
-# Trójka: lewa kolumna w tabeli wynikowej ma 1186 dxa = 2.09 cm. Nie używamy całej —
-# zostawiamy 0.5 cm odstępu od tabeli żeby grafiki nie przylegały do brzegu kolumny.
-# Grafiki centrowane są w obszarze 1.59 cm, lekko przesunięte w lewo.
+# Trójka: anchor cell R1.tc[0] = 1186 dxa = 2.09 cm. User chce żeby grafiki były WYPCHNIĘTE
+# W LEWO + 0.5 cm odstępu od tabeli. Czyli obrazy w obszarze 0 do 1.59 cm szer.
+# Max szerokość obrazu 1.5 cm, X = 0 (lewy brzeg).
 TROJKA_LEFT_AREA_CM = 1.59
+TROJKA_GRAPHIC_W_CM = 1.5  # max szerokość obrazu w trójce
 TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
 
 
@@ -103,9 +104,9 @@ def compute_default_positions(active_keys, logos_aspect=None,
     if is_trojka:
         area_width_cm = TROJKA_LEFT_AREA_CM  # 1.59 cm
         area_height_cm = TROJKA_AREA_HEIGHT_CM
-        QR_W = 1.4  # mniejsze niż w v45 (1.6) bo zmniejszyliśmy szerokość obszaru
-        PFM_TARGET_W = QR_W * 1.09  # ~1.53 cm
-        OTHER_MAX_W = 1.5
+        QR_W = TROJKA_GRAPHIC_W_CM  # 1.5 cm — max obraz w trójce
+        PFM_TARGET_W = QR_W  # PFM też max 1.5 cm
+        OTHER_MAX_W = TROJKA_GRAPHIC_W_CM
         SPACE_AFTER_QR = 0.3
     else:
         QR_W = 2.4
@@ -373,7 +374,7 @@ with col_form:
     n_uploaded = sum(1 for k in [f"logo_{i}" for i in range(NUM_LOGOS)]
                      if k in st.session_state and st.session_state[k] is not None)
     
-    grafiki_label = "4. Grafiki"
+    grafiki_label = "Grafiki"
     if n_uploaded > 0:
         grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
     
@@ -552,12 +553,14 @@ with col_preview:
     
     if is_trojka:
         # ─── Preview TRÓJKOWY ───
-        # Tabela 1 jest WĘŻSZA i ZACZYNA się od lewego brzegu (bez tblInd).
-        # Drużyny: szerokie pole tc[0]=3915 dxa, prawy brzeg tabeli = 9026 dxa = 15.91 cm.
-        # Tabela 2 jest szersza (16.31 cm) i ma 4 kolumny z SUMA.
-        TROJKA_TBL1_W_PX = int((9026 / 11000) * PAGE_W_PX)  # ~15.91 cm na 18.46 cm
-        TROJKA_NAMES_PX = int((3915 / 9026) * TROJKA_TBL1_W_PX)
-        TROJKA_HEADER_W_PX = TROJKA_TBL1_W_PX - TROJKA_NAMES_PX  # prawa część (Punkty/Wygrane/Podpis)
+        # PAGE_W_CM = 18.46 (useable area).
+        # Po naszych modyfikacjach docx: tabela 1 i 2 mają tę samą szerokość 9251 dxa = 16.31 cm.
+        # Obie zaczynają się od tblInd=0, czyli od lewego brzegu marginesu (0 px w preview).
+        TROJKA_TBL_W_PX = int((16.31 / PAGE_W_CM) * PAGE_W_PX)  # 16.31 cm
+        TROJKA_NAMES_PX = int((3915 / 9026) * TROJKA_TBL_W_PX)  # ~43% szerokości tabeli
+        TROJKA_HEADER_W_PX = TROJKA_TBL_W_PX - TROJKA_NAMES_PX  # prawa część (Punkty/Wygrane/Podpis)
+        # Lewa kolumna tabeli wynikowej (R1.tc[0] = 1186 dxa = 2.09 cm)
+        TROJKA_R1_W_PX = int((2.09 / PAGE_W_CM) * PAGE_W_PX)
         
         html = f"""
         <div style="background:white; border:1px solid #ccc;
@@ -573,14 +576,14 @@ with col_preview:
           <!-- Header: Tor / Godzina / Grupa / Mecz # -->
           <div style="position:absolute; left:6px; top:30px; right:0; height:24px;
                       display:flex; align-items:center;
-                      font-size:11px; gap:14px;">
+                      font-size:11px; gap:18px;">
             <span>Tor <b>1</b></span>
             <span>Godzina <b>09:00</b></span>
             {f'<span>Faza <b>{phase_label_short}</b></span>' if is_pucharowa else '<span>Grupa <b>A</b></span>'}
             {('' if is_pucharowa else '<span>Mecz # <b>1</b></span>')}
           </div>
           
-          <!-- Nagłówki Punkty/Wygrane/Podpis (prawa strona) -->
+          <!-- Nagłówki Punkty/Wygrane/Podpis (prawa strona, nad drużynami) -->
           <div style="position:absolute; left:{TROJKA_NAMES_PX}px; top:62px;
                       width:{TROJKA_HEADER_W_PX}px; height:34px;
                       background:#f0f0f0; border:1px solid #999;
@@ -594,7 +597,7 @@ with col_preview:
           
           <!-- Drużyna A -->
           <div style="position:absolute; left:0; top:96px;
-                      width:{TROJKA_TBL1_W_PX}px; height:24px;
+                      width:{TROJKA_TBL_W_PX}px; height:24px;
                       border:1px solid #999; display:flex; font-size:11px;">
             <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
                         text-align:center; line-height:24px; font-weight:bold;
@@ -608,7 +611,7 @@ with col_preview:
           </div>
           <!-- Drużyna B -->
           <div style="position:absolute; left:0; top:120px;
-                      width:{TROJKA_TBL1_W_PX}px; height:24px;
+                      width:{TROJKA_TBL_W_PX}px; height:24px;
                       border:1px solid #999; border-top:none; display:flex; font-size:11px;">
             <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
                         text-align:center; line-height:24px; font-weight:bold;
@@ -628,22 +631,23 @@ with col_preview:
             Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
           </div>
           
-          <!-- Tabela wynikowa (cała szerokość, wąski lewy pasek na grafiki) -->
-          <div style="position:absolute; left:0; top:180px; right:0; height:380px;
+          <!-- Tabela wynikowa (od lewego brzegu, szer. 16.31 cm) -->
+          <div style="position:absolute; left:0; top:180px;
+                      width:{TROJKA_TBL_W_PX}px; height:380px;
                       border:1px solid #999;">
-            <!-- Lewy pasek na grafiki (1.59 cm + 0.5 cm gap = 2.09 cm) -->
+            <!-- Lewa kolumna R1.tc[0] na grafiki (2.09 cm) -->
             <div style="position:absolute; left:0; top:0; bottom:0;
-                        width:{LEFT_AREA_PX}px; overflow:hidden;">
+                        width:{TROJKA_R1_W_PX}px; overflow:hidden;
+                        border-right:1px solid #999;">
               {elements_html}
               {f'''<div style="position:absolute; left:0; right:0; top:{label_y_px}px;
                           text-align:center; font-size:7px; font-weight:bold;">
                 Wyniki<br>turnieju
               </div>''' if include_qr else ''}
             </div>
-            <!-- Prawa część - tabela wyników (4 grupy SUMA) -->
-            <div style="position:absolute; left:{TBL2_LEFT_PX}px; top:0; right:0; bottom:0;
-                        border-left:1px solid #999;">
-              <!-- SET 1 / SET 2 nagłówki (4 grupy = 2 sety × 2 drużyny lub odwrotnie) -->
+            <!-- Prawa część tabeli wyników (kolumna numerków + 4 grupy SUMA) -->
+            <div style="position:absolute; left:{TROJKA_R1_W_PX}px; top:0; right:0; bottom:0;">
+              <!-- SET 1 / SET 2 nagłówki -->
               <div style="position:absolute; left:0; top:0; right:0; height:22px;
                           background:#f0f0f0; display:flex; font-size:10px; font-weight:bold;
                           align-items:center; text-align:center; border-bottom:1px solid #999;">
@@ -677,8 +681,8 @@ with col_preview:
               <!-- Wiersze 1-18 -->
               <div style="position:absolute; left:0; top:72px; right:0; bottom:24px;
                           background:repeating-linear-gradient(
-                            to bottom, transparent 0, transparent 14px,
-                            #ccc 14px, #ccc 15px);"></div>
+                            to bottom, transparent 0, transparent 13px,
+                            #ddd 13px, #ddd 14px);"></div>
               <!-- Wiersz PKT na dole -->
               <div style="position:absolute; left:0; right:0; bottom:0; height:24px;
                           border-top:1px solid #999;
@@ -871,7 +875,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("5. Generuj")
+st.header("4. Generuj")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
