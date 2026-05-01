@@ -270,6 +270,7 @@ def parse_drabinka_rows(rows, target_phase=None):
     i = 0
     match_num = 1
     empty_streak = 0
+    last_known_tor = ''  # cache dla scalonych komórek tora
     while i < len(data_rows):
         row1 = data_rows[i]
         # Pomijamy puste wiersze
@@ -293,7 +294,24 @@ def parse_drabinka_rows(rows, target_phase=None):
             if c is None or c >= len(row): return ''
             return row[c].strip()
         
-        tor = g(row1, col_tor) or g(row2, col_tor)
+        # Tor: hierarchia źródeł
+        # 1) row1.col_tor (najczęściej tu jest gdy pierwsza komórka scalona)
+        # 2) row2.col_tor (gdy Google export zwraca tor w drugim wierszu)
+        # 3) ostatni znany tor + 1 (gdy scalona obejmuje wiele wierszy a CSV zwraca tylko w 1.)
+        # 4) numer meczu (fallback)
+        tor_raw = g(row1, col_tor) or g(row2, col_tor)
+        if tor_raw and tor_raw.strip().isdigit():
+            tor = tor_raw.strip()
+            last_known_tor = tor
+        elif last_known_tor and last_known_tor.isdigit():
+            # Inkrementuj ostatni znany — typowy wzorzec dla drabinki gdzie tory rosną
+            tor = str(int(last_known_tor) + 1)
+            last_known_tor = tor
+        else:
+            # Fallback na numer meczu (drabinka zwykle ma tory 1,2,3,... wg kolejności)
+            tor = str(match_num)
+            last_known_tor = tor
+        
         z1 = g(row1, col_player)
         z2 = g(row2, col_player)
         
@@ -446,12 +464,12 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
         if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
         if len(tcs) > 3: _set_cell_value(tcs[3], match.get('godz',''), size=28)
         if hide_grupa_mecz:
-            # Faza pucharowa: zamiast "Grupa A / Mecz # 1" pokazujemy nazwę fazy
-            # w polu wartości grupy. Etykiety "Grupa" i "Mecz #" zostają puste.
-            if len(tcs) > 4: _set_cell_value(tcs[4], '', size=20)  # etykieta "Grupa"
-            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=22)
-            if len(tcs) > 6: _set_cell_value(tcs[6], '', size=20)  # etykieta "Mecz #"
-            if len(tcs) > 7: _set_cell_value(tcs[7], '', size=28)
+            # Faza pucharowa: zamiast etykiety "Grupa" pokazujemy "Faza",
+            # a w polu wartości grupy wpisujemy nazwę fazy (np. "1/32 finału").
+            # Etykieta "Mecz #" i jego numer zostają — numerujemy mecze w fazie.
+            if len(tcs) > 4: _set_cell_value(tcs[4], 'Faza', size=20)
+            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=20)
+            if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
         else:
             if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
             if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
@@ -487,8 +505,9 @@ def _next_uid():
 
 
 def _make_anchored_image_drawing(rel_id, cx_emu, cy_emu, posY_emu, posX_emu=0):
-    """Pływający obraz z behindDoc=0, wrapNone, layoutInCell=1.
-    Używa wzorca XML z wzorca Oławy (z wp14 attrybutami)."""
+    """Pływający obraz z layoutInCell=0 — KLUCZOWE: pozwala obrazom wystawać
+    poza komórkę kotwicy (w dół, do końca tabeli wynikowej). Bez tego obrazy
+    byłyby ucinane na granicy komórki R1 'Wyniki turnieju' (wysokość ~2.14 cm)."""
     uid = _next_uid()
     return etree.fromstring(f'''<w:drawing xmlns:w="{W}"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -498,7 +517,7 @@ def _make_anchored_image_drawing(rel_id, cx_emu, cy_emu, posY_emu, posX_emu=0):
   xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <wp:anchor distT="0" distB="0" distL="114300" distR="114300"
              simplePos="0" relativeHeight="{251659264 + uid}"
-             behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"
+             behindDoc="0" locked="0" layoutInCell="0" allowOverlap="1"
              wp14:anchorId="0000{uid:04X}" wp14:editId="0000{uid:04X}">
     <wp:simplePos x="0" y="0"/>
     <wp:positionH relativeFrom="column">
@@ -712,8 +731,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
     # ── Tabela 2: ZOSTAWIAMY ORYGINAŁ (9690 DXA z szablonu, IMIONA=840 DXA, WYNIK=840 DXA).
     # Komórka WYNIK używa fontu Aptos Narrow size 20 z szablonu — który nie jest
-    # zawsze dostępny. Zmieniamy na Calibri (węższy + standardowo dostępny w Wordzie)
-    # żeby "WYNIK" zawsze mieściło się w 1 linii w 1.48 cm.
+    # zawsze dostępny. Wymuszamy Calibri size 18 (9pt) + zmniejszony padding (50 dxa).
+    # Test w sandboxie z Carlito (zamiennik Calibri w LibreOffice) potwierdza że
+    # Calibri 18 mieści się w 1 wierszu z dużym zapasem (vs Aptos Narrow 20 = WYNI/K).
     tbls = body.findall(wt('tbl'))
     if len(tbls) >= 2:
         score_tbl = tbls[1]
@@ -724,15 +744,41 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 txts = tc.findall(f'.//{wt("t")}')
                 txt = ''.join((t.text or '') for t in txts).strip()
                 if txt == 'WYNIK':
-                    # Zmień font na Calibri
+                    # 1) Wymuś font Calibri + size 18 dla KAŻDEGO 'r' (także bez rPr)
                     for r in tc.iter(wt('r')):
                         rPr = r.find(wt('rPr'))
-                        if rPr is None: continue
+                        if rPr is None:
+                            rPr = etree.Element(wt('rPr'))
+                            r.insert(0, rPr)
+                        # font
                         fonts = rPr.find(wt('rFonts'))
                         if fonts is None:
                             fonts = etree.SubElement(rPr, wt('rFonts'))
                         for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                             fonts.set(f'{{{W}}}{a}', 'Calibri')
+                        # size 18 (9pt)
+                        sz = rPr.find(wt('sz'))
+                        if sz is None:
+                            sz = etree.SubElement(rPr, wt('sz'))
+                        sz.set(f'{{{W}}}val', '18')
+                        szCs = rPr.find(wt('szCs'))
+                        if szCs is None:
+                            szCs = etree.SubElement(rPr, wt('szCs'))
+                        szCs.set(f'{{{W}}}val', '18')
+                        # bold
+                        b = rPr.find(wt('b'))
+                        if b is None:
+                            b = etree.SubElement(rPr, wt('b'))
+                        b.set(f'{{{W}}}val', '1')
+                    # 2) Zmniejsz padding komórki (105 → 50 dxa po obu stronach)
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is not None:
+                        tcMar = tcPr.find(wt('tcMar'))
+                        if tcMar is not None:
+                            for side in ('left', 'right'):
+                                m = tcMar.find(wt(side))
+                                if m is not None:
+                                    m.set(f'{{{W}}}w', '50')
                     break
 
     # ── Sectpr i template
