@@ -74,34 +74,58 @@ def extract_id(url):
 
 
 # Obszar "Wyniki turnieju" ma szerokość 5.24 cm
-LEFT_AREA_CM = 5.24
+LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowej (R1.tc[0] = 2970 dxa)
+TROJKA_LEFT_AREA_CM = 2.0  # Trójka: lewa kolumna jest dużo węższa (1186 dxa = 2.09 cm)
+TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
 
 
 def compute_default_positions(active_keys, logos_aspect=None,
-                              area_height_cm=17.0, area_width_cm=LEFT_AREA_CM):
+                              area_height_cm=17.0, area_width_cm=LEFT_AREA_CM,
+                              template_type='IND'):
     """Rozkłada elementy w lewym obszarze równomiernie z odstępami.
     QR (jeśli jest) na górze. PFM ~109% szerokości QR. Pozostałe grafiki
     równomiernie rozłożone z zachowaniem proporcji obrazu.
     
-    area_height_cm=17.0 to faktyczna wysokość lewej strony tabeli wynikowej
-    (R1 'Wyniki turnieju' 1215 dxa + R2..R19 18*450 + R20 'WYNIK' 525 = 9840 dxa
-    = ~17.36 cm). Z layoutInCell=0 obrazy mogą wystawać poza komórkę kotwicy
-    R1 (która ma tylko 2.14 cm) i ciągnąć się aż do dołu tabeli."""
+    Indywidualny:
+      area_height_cm=17.0, area_width_cm=5.24 - duży obszar po lewej.
+    Trójka:
+      area_width_cm=2.0 (znacznie węższy lewy pasek), area_height_cm=17.5.
+      Wszystkie obrazy są dużo mniejsze (QR ~1.6 cm zamiast 2.4 cm).
+    
+    Z layoutInCell=0 obrazy mogą wystawać poza komórkę kotwicy R1
+    i ciągnąć się aż do dołu tabeli."""
+    is_trojka = (template_type == 'TROJKA')
+    
+    # Trójka ma węższy lewy pas - mniejsze rozmiary domyślne
+    if is_trojka:
+        area_width_cm = TROJKA_LEFT_AREA_CM
+        area_height_cm = TROJKA_AREA_HEIGHT_CM
+        QR_W = 1.6  # zamiast 2.4
+        PFM_TARGET_W = QR_W * 1.09  # ~1.74 cm
+        OTHER_MAX_W = 1.7   # bardzo wąsko
+        SPACE_AFTER_QR = 0.4
+    else:
+        QR_W = 2.4
+        PFM_TARGET_W = QR_W * 1.09  # ~2.6
+        OTHER_MAX_W = 4.0
+        SPACE_AFTER_QR = 0.5
+
     positions = {}
     
     other_keys = [k for k in active_keys if k != 'qr']
     
     # ── QR na górze (jeśli aktywny)
     if 'qr' in active_keys:
-        qr_w = 2.4
-        qr_x = (area_width_cm - qr_w) / 2
-        positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': qr_w, 'h': qr_w}
-        # Po QR: napis "Wyniki turnieju" 0.5cm + 0.5cm odstęp
-        first_logo_y = 0.2 + qr_w + 0.5 + 0.5
-        pfm_w_target = qr_w * 1.09  # ~2.6 cm
+        qr_x = (area_width_cm - QR_W) / 2
+        positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': QR_W, 'h': QR_W}
+        # Po QR: napis "Wyniki turnieju" + odstęp
+        # W trójce napis jest mniejszy, więc krótszy odstęp
+        text_h = 0.4 if is_trojka else 0.5
+        first_logo_y = 0.2 + QR_W + text_h + SPACE_AFTER_QR
+        pfm_w_target = PFM_TARGET_W
     else:
         first_logo_y = 0.2
-        pfm_w_target = 2.6
+        pfm_w_target = PFM_TARGET_W
     
     if not other_keys:
         return positions
@@ -109,23 +133,33 @@ def compute_default_positions(active_keys, logos_aspect=None,
     n = len(other_keys)
     available = area_height_cm - first_logo_y
     
-    # Adaptacyjny SPACING (mamy ~17 cm wysokości):
-    # - 1-2 elementy → SPACING=1.5 (dużo powietrza)
-    # - 3-4 elementy → SPACING=1.0
-    # - 5+ elementów → SPACING=0.6
-    if n <= 2:
-        SPACING = 1.5
-    elif n <= 4:
-        SPACING = 1.0
+    # Adaptacyjny SPACING — w trójce mniejszy bo wszystkie elementy są mniejsze
+    if is_trojka:
+        # Trójka: wąski pas, więc mniejsze odstępy
+        if n <= 2:
+            SPACING = 1.0
+        elif n <= 4:
+            SPACING = 0.6
+        else:
+            SPACING = 0.4
+        max_slot_h_default_max = 2.2
+        max_slot_h_default_min = 1.0
     else:
-        SPACING = 0.6
+        # Indywidualny: duży obszar
+        if n <= 2:
+            SPACING = 1.5
+        elif n <= 4:
+            SPACING = 1.0
+        else:
+            SPACING = 0.6
+        max_slot_h_default_max = 3.5
+        max_slot_h_default_min = 1.5
     
-    # Wysokość każdego elementu — większa bo mamy 17 cm zamiast 10.5
     if n == 1:
-        max_slot_h = min(4.0, available)
+        max_slot_h = min(max_slot_h_default_max + 0.5, available)
     else:
         max_slot_h = (available - (n - 1) * SPACING) / n
-        max_slot_h = max(1.5, min(3.5, max_slot_h))
+        max_slot_h = max(max_slot_h_default_min, min(max_slot_h_default_max, max_slot_h))
     
     cur_y = first_logo_y
     for key in other_keys:
@@ -135,18 +169,18 @@ def compute_default_positions(active_keys, logos_aspect=None,
             target_w = pfm_w_target
         elif logos_aspect and key in logos_aspect:
             aspect = logos_aspect[key]
-            target_w = min(4.0, area_width_cm - 0.6)
+            target_w = min(OTHER_MAX_W, area_width_cm - 0.2)
         else:
             aspect = 1.5
-            target_w = min(3.5, area_width_cm - 0.6)
+            target_w = min(OTHER_MAX_W - 0.5, area_width_cm - 0.2)
         
         target_h = target_w / aspect
         
         if target_h > max_slot_h:
             target_h = max_slot_h
             target_w = target_h * aspect
-            if target_w > area_width_cm - 0.4:
-                target_w = area_width_cm - 0.4
+            if target_w > area_width_cm - 0.2:
+                target_w = area_width_cm - 0.2
                 target_h = target_w / aspect
         
         slot_top = cur_y
@@ -177,42 +211,61 @@ with col_form:
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
 
     # 3 dropdowny w 3 kolumnach (kompaktowo)
+    # ✅ = w pełni zweryfikowane na danych z prawdziwych turniejów
+    # 🟡 = zaimplementowane, ale nie zweryfikowane na realnych danych
+    # 🔴 = jeszcze nieobsługiwane (zostanie pominięte z błędem)
     cols_t2 = st.columns(3)
     with cols_t2[0]:
+        rodzaj_options = {
+            "Indywidualny": "✅ Indywidualny",
+            "Drużynowy 2-os.": "🔴 Drużynowy 2-os. (wkrótce)",
+            "Drużynowy 3-os.": "🟡 Drużynowy 3-os.",
+            "Drużynowy 4-os.": "🔴 Drużynowy 4-os. (wkrótce)",
+        }
         tournament_type = st.selectbox(
             "Rodzaj",
-            ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
+            list(rodzaj_options.keys()),
+            format_func=lambda k: rodzaj_options[k],
             index=0,
-            help="Obecnie zaimplementowany tylko turniej indywidualny"
+            help="✅ = w pełni zweryfikowane, 🟡 = zaimplementowane lecz niezweryfikowane, 🔴 = w trakcie przygotowywania"
         )
     with cols_t2[1]:
+        faza_options = {
+            "Grupowa": "✅ Grupowa",
+            "Pucharowa 1/64": "🟡 Pucharowa 1/64",
+            "Pucharowa 1/32": "✅ Pucharowa 1/32",
+            "Pucharowa 1/16": "🟡 Pucharowa 1/16",
+            "Pucharowa 1/8": "🟡 Pucharowa 1/8",
+            "Pucharowa 1/4": "🟡 Pucharowa 1/4",
+            "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
+            "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
+            "Finał": "🟡 Finał",
+        }
         tournament_phase = st.selectbox(
             "Faza",
-            ["Grupowa",
-             "Pucharowa 1/64",
-             "Pucharowa 1/32",
-             "Pucharowa 1/16",
-             "Pucharowa 1/8",
-             "Pucharowa 1/4",
-             "Pucharowa 1/2",
-             "Mecz o 3. miejsce",
-             "Finał"],
+            list(faza_options.keys()),
+            format_func=lambda k: faza_options[k],
             index=0,
-            help="Obecnie zaimplementowana tylko faza grupowa indywidualna"
+            help="Zweryfikowane: Grupowa, Pucharowa 1/32"
         )
     with cols_t2[2]:
         # Format setów zależny od fazy:
         # Grupowa → tylko "2 sety"
         # Pucharowa → "best of 3" lub "best of 5"
         if tournament_phase == "Grupowa":
-            sets_format = st.selectbox("Format", ["2 sety"], index=0,
+            sets_format = st.selectbox("Format", ["2 sety"],
+                format_func=lambda k: f"✅ {k}",
+                index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
+            bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
+                         "Best of 5": "🔴 Best of 5 (wkrótce)",
+                         "2 sety": "✅ 2 sety"}
             sets_format = st.selectbox("Format",
-                ["Best of 3", "Best of 5"],
-                index=0 if "1/" in tournament_phase and "1/4" not in tournament_phase
-                       and "1/2" not in tournament_phase else 1,
-                help="Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej"
+                list(bo_options.keys()),
+                format_func=lambda k: bo_options[k],
+                index=2,  # 2 sety jako sprawdzone
+                help="Obecnie zweryfikowane: 2 sety. Best of 3/5 wkrótce."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -242,13 +295,20 @@ with col_form:
         elif tournament_phase == "Finał":
             phase_label_short = "Finał"
     
-    if not is_individual:
-        st.warning("⚠️ Obecnie zaimplementowany jest tylko **turniej indywidualny**. "
-                   "Drużynowy będzie dostępny w kolejnej wersji.")
+    is_trojka = tournament_type == "Drużynowy 3-os."
+    is_supported_type = is_individual or is_trojka
+    
+    if not is_supported_type:
+        st.warning(f"⚠️ Format **{tournament_type}** nie jest jeszcze obsługiwany. "
+                   "Obecnie dostępne: Indywidualny, Drużynowy 3-os.")
     elif not is_2_sety:
         st.warning("⚠️ Obecnie zaimplementowane są tylko mecze na **2 sety**. "
                    "Best of 3/5 będą dostępne w kolejnej wersji.")
-    elif is_pucharowa and not is_132:
+    elif is_trojka and (is_pucharowa or not is_grupowa):
+        # Trójkowy zweryfikowany tylko dla grupowej
+        st.warning(f"⚠️ Drużynowy 3-os. obecnie zweryfikowany **tylko dla fazy grupowej**. "
+                   f"Faza **{tournament_phase}** może działać niepoprawnie.")
+    elif is_individual and is_pucharowa and not is_132:
         # Indywidualny + 2 sety + faza pucharowa inna niż 1/32 → eksperymentalne
         st.warning(f"⚠️ Faza **{tournament_phase}** nie została jeszcze zweryfikowana "
                    "na rzeczywistych danych. Generator może działać poprawnie, ale "
@@ -331,9 +391,10 @@ with col_form:
             except Exception:
                 logos_aspect[f'logo{i+1}'] = 1.5
 
-    # Pozycje
+    # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
     default_pos = compute_default_positions([k for k, _ in elements_active],
-                                            logos_aspect=logos_aspect)
+                                            logos_aspect=logos_aspect,
+                                            template_type=('TROJKA' if is_trojka else 'IND'))
     active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
     
     image_positions = {}
@@ -679,13 +740,16 @@ if gen_clicked:
         logos_bytes, image_order, img_pos = build_image_args()
         show_name = tournament_name.strip() if show_header_on_protocol else ""
         show_date = tournament_date if show_header_on_protocol else ""
+        # Mapowanie typu turnieju → szablon docx
+        template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
             tournament_name=show_name, tournament_date=show_date,
             include_qr=include_qr, include_pfm_logo=include_pfm_logo,
             image_order=image_order or None, image_positions=img_pos or None,
-            hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short)
+            hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short,
+            template_type=template_type)
 
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
     if is_pucharowa:
@@ -717,12 +781,14 @@ if blank_clicked:
         logos_bytes, image_order, img_pos = build_image_args()
         show_name = tournament_name.strip() if show_header_on_protocol else ""
         show_date = tournament_date if show_header_on_protocol else ""
+        template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_blank_document(
             num_pages=1, logos=logos_bytes or None,
             tournament_name=show_name, tournament_date=show_date,
             sheets_url=sheets_url.strip(),
             include_qr=include_qr, include_pfm_logo=include_pfm_logo,
-            image_order=image_order or None, image_positions=img_pos or None)
+            image_order=image_order or None, image_positions=img_pos or None,
+            template_type=template_type)
 
     safe_name = "pusty_formularz"
     pdf_bytes, pdf_err = (None, None)

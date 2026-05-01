@@ -444,6 +444,42 @@ def _set_cell_value(tc, text, *, bold=True, size=28, align='center'):
     t.text = text
 
 
+def _set_cell_label(tc, text):
+    """Zmień TEKST etykiety w komórce, ZACHOWUJĄC oryginalne formatowanie
+    (font, size, bold) z szablonu. Używane do podmiany 'Grupa' → 'Faza'
+    żeby etykieta wyglądała identycznie jak 'Tor', 'Godzina', 'Mecz #'."""
+    # Znajdź pierwszy run z tekstem
+    for p in tc.findall(wt('p')):
+        for r in p.findall(wt('r')):
+            ts = r.findall(wt('t'))
+            if ts:
+                # Wyczyść wszystkie t i ustaw nowy tekst w pierwszym
+                for i, t in enumerate(ts):
+                    if i == 0:
+                        t.text = text
+                    else:
+                        r.remove(t)
+                # Pozostałe runs w tym paragrafie mogą zawierać dodatkowy tekst
+                # (np. spację między 'Mecz' a '#') - usuwamy je
+                runs_to_remove = []
+                found_first = False
+                for r2 in p.findall(wt('r')):
+                    if r2 is r:
+                        found_first = True
+                        continue
+                    if found_first:
+                        # Usuwamy wszystko po pierwszym runie z tekstem
+                        ts2 = r2.findall(wt('t'))
+                        if ts2:
+                            runs_to_remove.append(r2)
+                for r2 in runs_to_remove:
+                    p.remove(r2)
+                return
+    # Fallback: komórka nie miała żadnego tekstu - dodaj nowy paragraf jak _set_cell_value
+    # ale BEZ bold (etykiety z szablonu mają b=0)
+    _set_cell_value(tc, text, bold=False, size=24)
+
+
 def _make_page_break_para():
     p = etree.Element(wt('p'))
     pPr = etree.SubElement(p, wt('pPr'))
@@ -464,12 +500,14 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
         if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
         if len(tcs) > 3: _set_cell_value(tcs[3], match.get('godz',''), size=28)
         if hide_grupa_mecz:
-            # Faza pucharowa: zamiast etykiety "Grupa" pokazujemy "Faza",
-            # a w polu wartości grupy wpisujemy nazwę fazy (np. "1/32 finału").
-            # Etykieta "Mecz #" i jego numer zostają — numerujemy mecze w fazie.
-            if len(tcs) > 4: _set_cell_value(tcs[4], 'Faza', size=20)
-            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=20)
-            if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
+            # Faza pucharowa: zamień etykietę "Grupa" → "Faza" zachowując format,
+            # wartość fazy (np. "1/32") wstaw jak inne wartości (Aptos size 28 bold).
+            # Numer meczu # nie jest dostępny w arkuszu Drabinka — ukrywamy
+            # zarówno etykietę "Mecz #" jak i wartość.
+            if len(tcs) > 4: _set_cell_label(tcs[4], 'Faza')
+            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=28)
+            if len(tcs) > 6: _set_cell_label(tcs[6], '')  # ukryj etykietę 'Mecz #'
+            if len(tcs) > 7: _set_cell_value(tcs[7], '', size=28)  # ukryj numer
         else:
             if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
             if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
@@ -621,7 +659,8 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
 def build_blank_document(num_pages=1, logos=None, tournament_name=None,
                          tournament_date=None, include_qr=False,
                          include_pfm_logo=True, sheets_url='',
-                         image_order=None, image_positions=None):
+                         image_order=None, image_positions=None,
+                         template_type='IND'):
     """
     Generuje pusty formularz protokołu (bez wypełnionych danych z arkusza).
     Tworzy `num_pages` identycznych pustych protokołów.
@@ -635,7 +674,8 @@ def build_blank_document(num_pages=1, logos=None, tournament_name=None,
         tournament_name=tournament_name, tournament_date=tournament_date,
         include_qr=include_qr and bool(sheets_url),  # QR tylko jeśli jest URL
         include_pfm_logo=include_pfm_logo,
-        image_order=image_order, image_positions=image_positions
+        image_order=image_order, image_positions=image_positions,
+        template_type=template_type
     )
 
 
@@ -643,7 +683,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                    tournament_name=None, tournament_date=None,
                    include_qr=True, include_pfm_logo=True,
                    image_order=None, image_positions=None,
-                   hide_grupa_mecz=False, phase_label=None):
+                   hide_grupa_mecz=False, phase_label=None,
+                   template_type='IND'):
     """
     `tournament_date`: string (np. "10.05.2026") wyświetlany w nagłówku obok nazwy.
     `include_pfm_logo`: czy dodać domyślne logo PFM.
@@ -652,11 +693,19 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     hide_grupa_mecz: True dla fazy pucharowej - ukrywa pola "Grupa" i "Mecz #",
                     zamiast tego pokazuje fazę (np. "1/32 finału").
     phase_label: nazwa fazy do wyświetlenia gdy hide_grupa_mecz=True.
+    template_type: 'IND' (indywidualny) | 'TROJKA' (3-osobowy) | 'CZWORKA' (4-osobowy)
+                   | 'DRUZYNA' (2-osobowy). Wybiera odpowiedni szablon docx.
     """
     import os
     _anchor_uid[0] = 1000
 
-    tpl_path = os.path.join(os.path.dirname(__file__), 'Grupa_IND.docx')
+    template_files = {
+        'IND': 'Grupa_IND.docx',
+        'TROJKA': 'Grupa_TROJKA.docx',
+        # CZWORKA, DRUZYNA - nie zaimplementowane jeszcze (czeka na szablony)
+    }
+    tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')
+    tpl_path = os.path.join(os.path.dirname(__file__), tpl_filename)
     with open(tpl_path, 'rb') as f:
         tpl_bytes = f.read()
 
@@ -679,61 +728,64 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Punkty SET 1/SET 2/Wygrane sety/Podpis (sz=24) → sz=20
     LABELS_BIGGER = {'Tor','Godzina','Grupa','Mecz','#'}
     LABELS_HEADER = {'Punkty','SET 1','SET 2','Wygrane','sety','Podpis'}
-    for r in body.iter(wt('r')):
-        ts = r.findall(wt('t'))
-        if not ts: continue
-        text_content = ''.join((t.text or '') for t in ts).strip()
-        sz_el  = r.find(f'{wt("rPr")}/{wt("sz")}')
-        szCs_el = r.find(f'{wt("rPr")}/{wt("szCs")}')
-        if sz_el is not None and sz_el.get(f'{{{W}}}val') == '24':
-            new_size = None
-            if text_content in LABELS_BIGGER:
-                new_size = '20'   # 10pt — Tor/Godzina/Mecz #
-            elif text_content in LABELS_HEADER:
-                new_size = '18'   # 9pt — Punkty SET 1, Wygrane sety, Podpis
-            if new_size:
-                sz_el.set(f'{{{W}}}val', new_size)
-                if szCs_el is not None:
-                    szCs_el.set(f'{{{W}}}val', new_size)
+    # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
+    # 1) Pomniejszenie fontów etykiet (24→20)
+    # 2) Przesunięcie tabeli 1 w prawo (tblInd=600 dxa)
+    # Trójkowy szablon ma inną strukturę i nie wymaga tych poprawek.
+    if template_type == 'IND':
+        for r in body.iter(wt('r')):
+            ts = r.findall(wt('t'))
+            if not ts: continue
+            text_content = ''.join((t.text or '') for t in ts).strip()
+            sz_el  = r.find(f'{wt("rPr")}/{wt("sz")}')
+            szCs_el = r.find(f'{wt("rPr")}/{wt("szCs")}')
+            if sz_el is not None and sz_el.get(f'{{{W}}}val') == '24':
+                new_size = None
+                if text_content in LABELS_BIGGER:
+                    new_size = '20'   # 10pt — Tor/Godzina/Mecz #
+                elif text_content in LABELS_HEADER:
+                    new_size = '18'   # 9pt — Punkty SET 1, Wygrane sety, Podpis
+                if new_size:
+                    sz_el.set(f'{{{W}}}val', new_size)
+                    if szCs_el is not None:
+                        szCs_el.set(f'{{{W}}}val', new_size)
 
-    # ── Wyrównanie tabeli 1 z tabelą 2 (jak we wzorcu z gridlinami):
-    # Tabela 1 ma być WĘŻSZA (9090 DXA z oryginału - bez zmian) ale PRZESUNIĘTA W PRAWO
-    # przez tblInd=600 DXA. Wtedy:
-    #   - lewy brzeg tabeli 1 = 600 DXA (= ~1.06 cm)
-    #   - prawy brzeg tabeli 1 = 600 + 9090 = 9690 DXA = prawy brzeg tabeli 2 ✓
-    # Pierwsza pusta komórka tabeli 1 (z nazwiskami) zaczyna się od pozycji 600 DXA,
-    # czyli mniej więcej tam gdzie kolumna IMIONA w tabeli 2.
-    first_tbl = body.find(wt('tbl'))
-    if first_tbl is not None:
-        # Dodaj tblInd = 600 DXA (przesunięcie w prawo)
-        tblPr = first_tbl.find(wt('tblPr'))
-        if tblPr is not None:
-            tblInd = tblPr.find(wt('tblInd'))
-            if tblInd is None:
-                tblInd = etree.SubElement(tblPr, wt('tblInd'))
-            tblInd.set(f'{{{W}}}w', '600')
-            tblInd.set(f'{{{W}}}type', 'dxa')
-        # Szerokości gridCols i komórek - bez zmian (oryginalne 9090 DXA)
-        # Wyrównaj "Tor" do lewej
-        first_row = first_tbl.find(wt('tr'))
-        if first_row is not None:
-            tcs = first_row.findall(wt('tc'))
-            if tcs:
-                for p in tcs[0].findall(wt('p')):
-                    pPr = p.find(wt('pPr'))
-                    if pPr is None:
-                        pPr = etree.Element(wt('pPr'))
-                        p.insert(0, pPr)
-                    jc = pPr.find(wt('jc'))
-                    if jc is None:
-                        jc = etree.SubElement(pPr, wt('jc'))
-                    jc.set(f'{{{W}}}val', 'left')
+        # ── Wyrównanie tabeli 1 z tabelą 2 (jak we wzorcu z gridlinami):
+        # Tabela 1 ma być WĘŻSZA (9090 DXA z oryginału - bez zmian) ale PRZESUNIĘTA W PRAWO
+        # przez tblInd=600 DXA. Wtedy:
+        #   - lewy brzeg tabeli 1 = 600 DXA (= ~1.06 cm)
+        #   - prawy brzeg tabeli 1 = 600 + 9090 = 9690 DXA = prawy brzeg tabeli 2 ✓
+        # Pierwsza pusta komórka tabeli 1 (z nazwiskami) zaczyna się od pozycji 600 DXA,
+        # czyli mniej więcej tam gdzie kolumna IMIONA w tabeli 2.
+        first_tbl = body.find(wt('tbl'))
+        if first_tbl is not None:
+            # Dodaj tblInd = 600 DXA (przesunięcie w prawo)
+            tblPr = first_tbl.find(wt('tblPr'))
+            if tblPr is not None:
+                tblInd = tblPr.find(wt('tblInd'))
+                if tblInd is None:
+                    tblInd = etree.SubElement(tblPr, wt('tblInd'))
+                tblInd.set(f'{{{W}}}w', '600')
+                tblInd.set(f'{{{W}}}type', 'dxa')
+            # Szerokości gridCols i komórek - bez zmian (oryginalne 9090 DXA)
+            # Wyrównaj "Tor" do lewej
+            first_row = first_tbl.find(wt('tr'))
+            if first_row is not None:
+                tcs = first_row.findall(wt('tc'))
+                if tcs:
+                    for p in tcs[0].findall(wt('p')):
+                        pPr = p.find(wt('pPr'))
+                        if pPr is None:
+                            pPr = etree.Element(wt('pPr'))
+                            p.insert(0, pPr)
+                        jc = pPr.find(wt('jc'))
+                        if jc is None:
+                            jc = etree.SubElement(pPr, wt('jc'))
+                        jc.set(f'{{{W}}}val', 'left')
 
     # ── Tabela 2: ZOSTAWIAMY ORYGINAŁ (9690 DXA z szablonu, IMIONA=840 DXA, WYNIK=840 DXA).
-    # Komórka WYNIK używa fontu Aptos Narrow size 20 z szablonu — który nie jest
-    # zawsze dostępny. Wymuszamy Calibri size 18 (9pt) + zmniejszony padding (50 dxa).
-    # Test w sandboxie z Carlito (zamiennik Calibri w LibreOffice) potwierdza że
-    # Calibri 18 mieści się w 1 wierszu z dużym zapasem (vs Aptos Narrow 20 = WYNI/K).
+    # Komórka WYNIK (Indywidualny) lub PKT (Trójkowy) używa fontu Aptos Narrow size 20.
+    # Wymuszamy Calibri size 18 (9pt) + zmniejszony padding (50 dxa) żeby się zawsze mieściło.
     tbls = body.findall(wt('tbl'))
     if len(tbls) >= 2:
         score_tbl = tbls[1]
@@ -743,7 +795,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             for tc in last_row.findall(wt('tc')):
                 txts = tc.findall(f'.//{wt("t")}')
                 txt = ''.join((t.text or '') for t in txts).strip()
-                if txt == 'WYNIK':
+                if txt in ('WYNIK', 'PKT'):
                     # 1) Wymuś font Calibri + size 18 dla KAŻDEGO 'r' (także bez rPr)
                     for r in tc.iter(wt('r')):
                         rPr = r.find(wt('rPr'))
