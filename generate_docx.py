@@ -770,36 +770,42 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if a in spacing.attrib:
                             spacing.set(a, '0')
         
-        # Wyrównanie tabel 1 i 2 — ten sam tblInd=0 i ta sama szerokość.
-        # Tabela 1 ma w szablonie tblW=auto co przy zmienionych marginesach ją rozciąga.
-        # Wymuszamy fixed width = szerokość tabeli 2 (9251 dxa = 16.31 cm).
-        # Sumę szerokości kolumn też skalujemy proporcjonalnie żeby się zmieściła.
-        first_tbl = body.find(wt('tbl'))
-        if first_tbl is not None:
-            tblPr_t1 = first_tbl.find(wt('tblPr'))
+        # ── Rozszerzenie obu tabel do PEŁNEJ szerokości użytecznej strony ──
+        # Marginesy 720 dxa po obu stronach → useable area = 11906 - 1440 = 10466 dxa = 18.46 cm.
+        # Po wcześniejszych iteracjach tabele miały 9026 (t1) i 9251 (t2) co zostawiało
+        # ~3 cm pustej przestrzeni po prawej. Rozszerzamy obie do TARGET_WIDTH = 10466.
+        # 
+        # Dla tabeli 2 (wynikowej): zwiększenie idzie GŁÓWNIE do lewej kolumny R1.tc[0]
+        # (z 1186 → 2700 dxa = 4.76 cm) — zyskujemy DUŻO więcej miejsca na grafiki.
+        # Pozostałe kolumny zostają proporcjonalnie zwiększone.
+        #
+        # Dla tabeli 1 (etykiety): wszystkie kolumny skalowane proporcjonalnie.
+        TARGET_WIDTH = 10466
+        tbls = body.findall(wt('tbl'))
+        if len(tbls) >= 2:
+            t1, t2 = tbls[0], tbls[1]
+            
+            # Tabela 1: skaluj wszystkie kolumny proporcjonalnie (9026 → 10466)
+            scale_t1 = TARGET_WIDTH / 9026
+            tblPr_t1 = t1.find(wt('tblPr'))
             if tblPr_t1 is not None:
-                # Ustaw fixed width
                 tblW = tblPr_t1.find(wt('tblW'))
                 if tblW is None:
                     tblW = etree.SubElement(tblPr_t1, wt('tblW'))
-                tblW.set(f'{{{W}}}w', '9251')
+                tblW.set(f'{{{W}}}w', str(TARGET_WIDTH))
                 tblW.set(f'{{{W}}}type', 'dxa')
-                # tblInd = 0
                 tblInd = tblPr_t1.find(wt('tblInd'))
                 if tblInd is None:
                     tblInd = etree.SubElement(tblPr_t1, wt('tblInd'))
                 tblInd.set(f'{{{W}}}w', '0')
                 tblInd.set(f'{{{W}}}type', 'dxa')
-            
-            # Skaluj wszystkie tcW i gridCol z 9026 do 9251 (faktor ~1.025)
-            scale = 9251 / 9026
-            tblGrid = first_tbl.find(wt('tblGrid'))
-            if tblGrid is not None:
-                for gc in tblGrid.findall(wt('gridCol')):
+            tblGrid_t1 = t1.find(wt('tblGrid'))
+            if tblGrid_t1 is not None:
+                for gc in tblGrid_t1.findall(wt('gridCol')):
                     w = gc.get(f'{{{W}}}w')
                     if w:
-                        gc.set(f'{{{W}}}w', str(int(int(w) * scale)))
-            for tr in first_tbl.findall(wt('tr')):
+                        gc.set(f'{{{W}}}w', str(int(int(w) * scale_t1)))
+            for tr in t1.findall(wt('tr')):
                 for tc in tr.findall(wt('tc')):
                     tcPr = tc.find(wt('tcPr'))
                     if tcPr is not None:
@@ -807,7 +813,58 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if tcW is not None:
                             w = tcW.get(f'{{{W}}}w')
                             if w:
-                                tcW.set(f'{{{W}}}w', str(int(int(w) * scale)))
+                                tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t1)))
+            
+            # Tabela 2: lewa kolumna powiększona, reszta proporcjonalnie
+            # Oryginał: col 0=1186, suma reszty = 9251-1186 = 8065
+            # Nowa: col 0 = NEW_LEFT_COL_DXA, reszta proporcjonalnie do TARGET_WIDTH - NEW_LEFT_COL
+            NEW_LEFT_COL_DXA = 2700  # 4.76 cm — większy obszar na grafiki
+            ORIG_LEFT_COL_DXA = 1186
+            NEW_REST_TOTAL = TARGET_WIDTH - NEW_LEFT_COL_DXA  # 7766
+            ORIG_REST_TOTAL = 9251 - ORIG_LEFT_COL_DXA        # 8065
+            scale_rest = NEW_REST_TOTAL / ORIG_REST_TOTAL      # ~0.963
+            
+            tblPr_t2 = t2.find(wt('tblPr'))
+            if tblPr_t2 is not None:
+                tblW = tblPr_t2.find(wt('tblW'))
+                if tblW is None:
+                    tblW = etree.SubElement(tblPr_t2, wt('tblW'))
+                tblW.set(f'{{{W}}}w', str(TARGET_WIDTH))
+                tblW.set(f'{{{W}}}type', 'dxa')
+                tblInd = tblPr_t2.find(wt('tblInd'))
+                if tblInd is None:
+                    tblInd = etree.SubElement(tblPr_t2, wt('tblInd'))
+                tblInd.set(f'{{{W}}}w', '0')
+                tblInd.set(f'{{{W}}}type', 'dxa')
+            
+            # tblGrid: col 0 → NEW_LEFT_COL_DXA, reszta × scale_rest
+            tblGrid_t2 = t2.find(wt('tblGrid'))
+            if tblGrid_t2 is not None:
+                cols = tblGrid_t2.findall(wt('gridCol'))
+                for i, gc in enumerate(cols):
+                    w = gc.get(f'{{{W}}}w')
+                    if w:
+                        if i == 0:
+                            gc.set(f'{{{W}}}w', str(NEW_LEFT_COL_DXA))
+                        else:
+                            gc.set(f'{{{W}}}w', str(int(int(w) * scale_rest)))
+            
+            # Każdy wiersz: tc[0] → NEW_LEFT_COL_DXA, reszta × scale_rest
+            for tr in t2.findall(wt('tr')):
+                cells = tr.findall(wt('tc'))
+                for i, tc in enumerate(cells):
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is not None:
+                        tcW = tcPr.find(wt('tcW'))
+                        if tcW is not None:
+                            w = tcW.get(f'{{{W}}}w')
+                            if w:
+                                w_int = int(w)
+                                if i == 0 and w_int == ORIG_LEFT_COL_DXA:
+                                    # To jest komórka lewa (R1.tc[0] etc) — daj nową szer.
+                                    tcW.set(f'{{{W}}}w', str(NEW_LEFT_COL_DXA))
+                                else:
+                                    tcW.set(f'{{{W}}}w', str(int(w_int * scale_rest)))
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)
@@ -1053,23 +1110,25 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     continue
                 rid, w_cm, h_cm = rid_info
 
-                # Pozycja własna z image_positions, jeśli jest
+                # Pozycja własna z image_positions, jeśli jest.
+                # Akceptujemy oba zestawy kluczy: 'w'/'h' (z app.py) lub 'width'/'height' (legacy).
                 if image_positions and key in image_positions:
                     pos = image_positions[key]
                     x_cm = pos.get('x', (cell_w_cm - w_cm) / 2)
                     y_cm = pos.get('y', cur_y_cm)
-                    # Jeśli user podał konkretną szerokość i wysokość, użyj ich
-                    # bezpośrednio (bez wymuszania proporcji obrazu)
-                    if 'width' in pos:
-                        w_cm = pos['width']
-                    if 'height' in pos:
-                        h_cm = pos['height']
-                    elif 'width' in pos:
-                        # Tylko width podana - dla QR zachowaj 1:1, inaczej zachowaj proporcje
+                    # User podał szerokość — przyjmujemy ją 1:1 (bez wymuszania aspect ratio
+                    # obrazu, bo user może chcieć skalować nieproporcjonalnie).
+                    new_w = pos.get('w', pos.get('width'))
+                    new_h = pos.get('h', pos.get('height'))
+                    if new_w is not None:
+                        w_cm = new_w
+                    if new_h is not None:
+                        h_cm = new_h
+                    elif new_w is not None:
+                        # Tylko width — zachowaj proporcje (dla QR zachowaj 1:1)
                         if key == 'qr':
                             h_cm = w_cm
                         else:
-                            # Zachowaj proporcje obrazu z rid_info
                             orig_w, orig_h = rid_info[1], rid_info[2]
                             h_cm = w_cm * (orig_h / orig_w)
                 else:
@@ -1099,8 +1158,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if image_positions and 'qr' in image_positions:
                     qr_pos = image_positions['qr']
                     qr_y = qr_pos.get('y', 0.2)
-                    qr_w_cm = qr_pos.get('width', 2.4)
-                    label_y_cm = qr_y + qr_w_cm + 0.1
+                    # Akceptuj oba klucze (app.py używa 'h')
+                    qr_h_cm = qr_pos.get('h', qr_pos.get('height',
+                                qr_pos.get('w', qr_pos.get('width', 2.4))))
+                    label_y_cm = qr_y + qr_h_cm + 0.1
                 else:
                     label_y_cm = 0.2 + 2.4 + 0.1
                 _populate_left_area(cloned, anchored, 'Wyniki turnieju', label_y_cm)

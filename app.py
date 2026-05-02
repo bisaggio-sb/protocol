@@ -14,6 +14,18 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PFM_PATH = os.path.join(APP_DIR, 'assets_pfm_logo.png')
 
 
+@st.cache_data(show_spinner=False)
+def _bytes_to_data_url(img_bytes: bytes) -> str:
+    """Cache'owana wersja konwersji bajtów obrazu na data URL.
+    Cache'owanie po hashu bytes — różne pliki dadzą różny cache."""
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+    buf = io.BytesIO()
+    img.thumbnail((400, 400))
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{b64}"
+
+
 def img_to_data_url(file_or_bytes):
     if hasattr(file_or_bytes, 'seek'):
         file_or_bytes.seek(0)
@@ -21,12 +33,13 @@ def img_to_data_url(file_or_bytes):
         file_or_bytes.seek(0)
     else:
         img_bytes = file_or_bytes
-    img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-    buf = io.BytesIO()
-    img.thumbnail((400, 400))
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:image/png;base64,{b64}"
+    return _bytes_to_data_url(img_bytes)
+
+
+@st.cache_data(show_spinner=False)
+def _bytes_to_aspect(img_bytes: bytes) -> float:
+    img = Image.open(io.BytesIO(img_bytes))
+    return img.width / img.height
 
 
 def get_image_aspect(file_or_bytes):
@@ -37,19 +50,21 @@ def get_image_aspect(file_or_bytes):
         file_or_bytes.seek(0)
     else:
         img_bytes = file_or_bytes
-    img = Image.open(io.BytesIO(img_bytes))
-    return img.width / img.height
+    return _bytes_to_aspect(img_bytes)
 
 
-# Header z logo PFM
-if os.path.exists(PFM_PATH):
-    with open(PFM_PATH, 'rb') as fp:
-        pfm_data_url = img_to_data_url(fp.read())
-        # Aspect dla PFM logo (562x509 ≈ 1.10)
-    pfm_aspect = get_image_aspect(open(PFM_PATH, 'rb').read())
-else:
-    pfm_data_url = ""
-    pfm_aspect = 1.10
+@st.cache_data(show_spinner=False)
+def _load_pfm_assets():
+    """Wczytuje PFM logo raz i cache'uje data url + aspect."""
+    if os.path.exists(PFM_PATH):
+        with open(PFM_PATH, 'rb') as fp:
+            data = fp.read()
+        return _bytes_to_data_url(data), _bytes_to_aspect(data)
+    return "", 1.10
+
+
+# Header z logo PFM (cache'owany)
+pfm_data_url, pfm_aspect = _load_pfm_assets()
 
 st.markdown(f"""
 <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
@@ -75,11 +90,11 @@ def extract_id(url):
 
 # Obszar "Wyniki turnieju" ma szerokość 5.24 cm
 LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowej (R1.tc[0] = 2970 dxa)
-# Trójka: anchor cell R1.tc[0] = 1186 dxa = 2.09 cm. User chce żeby grafiki były WYPCHNIĘTE
-# W LEWO + 0.5 cm odstępu od tabeli. Czyli obrazy w obszarze 0 do 1.59 cm szer.
-# Max szerokość obrazu 1.5 cm, X = 0 (lewy brzeg).
-TROJKA_LEFT_AREA_CM = 1.59
-TROJKA_GRAPHIC_W_CM = 1.5  # max szerokość obrazu w trójce
+# Trójka: po rozszerzeniu tabeli 2, lewa kolumna R1.tc[0] = 2700 dxa = 4.76 cm.
+# To sporo miejsca na grafiki - wystarczy żeby grafiki były czytelnie widoczne.
+# Zostawiamy 0.3 cm marginesu od prawej (kolumny numerków 1-18).
+TROJKA_LEFT_AREA_CM = 4.46    # area dla obrazów (4.76 - 0.3 marginesu)
+TROJKA_GRAPHIC_W_CM = 4.0     # max szerokość obrazu w trójce
 TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
 
 
@@ -100,14 +115,15 @@ def compute_default_positions(active_keys, logos_aspect=None,
     i ciągnąć się aż do dołu tabeli."""
     is_trojka = (template_type == 'TROJKA')
     
-    # Trójka ma węższy lewy pas - mniejsze rozmiary domyślne
+    # Trójka ma węższy lewy pas niż indywidualny - mniejsze rozmiary domyślne
+    # ale po rozszerzeniu tabeli 2 (4.76 cm) jest dość miejsca dla grafik
     if is_trojka:
-        area_width_cm = TROJKA_LEFT_AREA_CM  # 1.59 cm
+        area_width_cm = TROJKA_LEFT_AREA_CM  # 4.46 cm
         area_height_cm = TROJKA_AREA_HEIGHT_CM
-        QR_W = TROJKA_GRAPHIC_W_CM  # 1.5 cm — max obraz w trójce
-        PFM_TARGET_W = QR_W  # PFM też max 1.5 cm
-        OTHER_MAX_W = TROJKA_GRAPHIC_W_CM
-        SPACE_AFTER_QR = 0.3
+        QR_W = 2.0  # mniej niż w IND (2.4) ale wystarczająco czytelne
+        PFM_TARGET_W = QR_W * 1.09  # ~2.18 cm
+        OTHER_MAX_W = TROJKA_GRAPHIC_W_CM  # 4.0
+        SPACE_AFTER_QR = 0.4
     else:
         QR_W = 2.4
         PFM_TARGET_W = QR_W * 1.09  # ~2.6
@@ -198,7 +214,7 @@ def compute_default_positions(active_keys, logos_aspect=None,
 
 
 # ════════════════════════════════════════════════════════════════════════
-col_form, col_preview = st.columns([3, 2])
+col_form, col_preview = st.columns([5, 3])
 # ════════════════════════════════════════════════════════════════════════
 
 with col_form:
@@ -485,11 +501,10 @@ with col_form:
 
 # ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
 with col_preview:
-    st.markdown("<div style='height:80px;'></div>", unsafe_allow_html=True)
-    st.header("📄 Podgląd strony")
-    st.caption("Schemat dokumentu w skali")
+    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
+    st.markdown("##### 📄 Podgląd")
 
-    SCALE = 22
+    SCALE = 18
     PAGE_W_CM = 18.46
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
@@ -553,14 +568,15 @@ with col_preview:
     
     if is_trojka:
         # ─── Preview TRÓJKOWY ───
-        # PAGE_W_CM = 18.46 (useable area).
-        # Po naszych modyfikacjach docx: tabela 1 i 2 mają tę samą szerokość 9251 dxa = 16.31 cm.
-        # Obie zaczynają się od tblInd=0, czyli od lewego brzegu marginesu (0 px w preview).
-        TROJKA_TBL_W_PX = int((16.31 / PAGE_W_CM) * PAGE_W_PX)  # 16.31 cm
-        TROJKA_NAMES_PX = int((3915 / 9026) * TROJKA_TBL_W_PX)  # ~43% szerokości tabeli
-        TROJKA_HEADER_W_PX = TROJKA_TBL_W_PX - TROJKA_NAMES_PX  # prawa część (Punkty/Wygrane/Podpis)
-        # Lewa kolumna tabeli wynikowej (R1.tc[0] = 1186 dxa = 2.09 cm)
-        TROJKA_R1_W_PX = int((2.09 / PAGE_W_CM) * PAGE_W_PX)
+        # Po naszych modyfikacjach docx: obie tabele rozszerzone do 10466 dxa = 18.46 cm
+        # (cała useable area). Lewa kolumna R1.tc[0] = 2700 dxa = 4.76 cm na grafiki.
+        TROJKA_TBL_W_PX = int((18.46 / PAGE_W_CM) * PAGE_W_PX)  # 18.46 cm = pełna szerokość
+        # W tabeli 1 nazwy drużyn zajmują tc[0] gridSpan=4 czyli sumę col 0-3 oryginału.
+        # Po skalowaniu × scale_t1 = 10466/9026 ≈ 1.16: tc[0] = 3915×1.16 ≈ 4541 dxa
+        TROJKA_NAMES_PX = int((4541 / 10466) * TROJKA_TBL_W_PX)
+        TROJKA_HEADER_W_PX = TROJKA_TBL_W_PX - TROJKA_NAMES_PX
+        # Lewa kolumna tabeli wynikowej (R1.tc[0] = 2700 dxa = 4.76 cm)
+        TROJKA_R1_W_PX = int((4.76 / PAGE_W_CM) * PAGE_W_PX)
         
         html = f"""
         <div style="background:white; border:1px solid #ccc;
@@ -819,7 +835,7 @@ with col_preview:
     </div>
     """
     st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=True)
-    st.caption("📝 Podgląd schematyczny. Dokładny wygląd w pobranym pliku.")
+    st.caption("📝 Schemat. Dokładny wygląd w pobranym pliku.")
 
 
 # ─── Helper: konwersja docx → pdf ───────────────────────────────────────
