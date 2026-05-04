@@ -407,9 +407,32 @@ def get_sheet_names_debug(sheet_id):
         return info
 
     if found_groups:
-        info.append(f"✅ Faza grupowa: {len(found_groups)} grup, {total_matches} meczów")
+        n = len(found_groups)
+        # Polski plural dla "grupa": 1 grupa, 2-4 grupy, 5+ grup, 22-24 grupy itd.
+        last = n % 10
+        last2 = n % 100
+        if n == 1:
+            grupa_word = "grupa"
+        elif last in (2, 3, 4) and last2 not in (12, 13, 14):
+            grupa_word = "grupy"
+        else:
+            grupa_word = "grup"
+        # Polski plural dla "mecz": 1 mecz, 2-4 mecze, 5+ meczów
+        m = total_matches
+        m_last = m % 10
+        m_last2 = m % 100
+        if m == 1:
+            mecz_word = "mecz"
+        elif m_last in (2, 3, 4) and m_last2 not in (12, 13, 14):
+            mecz_word = "mecze"
+        else:
+            mecz_word = "meczów"
+        info.append(f"✅ Faza grupowa: {n} {grupa_word}, {m} {mecz_word}")
         for name, count in found_groups:
-            info.append(f"  • {name}: {count} meczów")
+            count_word = "mecz" if count == 1 else (
+                "mecze" if (count % 10) in (2, 3, 4) and (count % 100) not in (12, 13, 14)
+                else "meczów")
+            info.append(f"  • {name}: {count} {count_word}")
     
     if drabinka_phase:
         info.append("")
@@ -492,6 +515,9 @@ def _make_page_break_para():
 
 
 def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
+    """`hide_grupa_mecz` to historyczna nazwa — obecnie kontroluje tylko czy etykieta
+    'Grupa' i jej wartość są ukrywane (dla pucharowej). 'Mecz #' i jego numer
+    są ZAWSZE pokazywane (też w pucharowej — numerujemy mecze sekwencyjnie)."""
     tbls = [el for el in elements if el.tag == wt('tbl')]
     if not tbls: return
     rows = tbls[0].findall(wt('tr'))
@@ -499,18 +525,15 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
         tcs = rows[0].findall(wt('tc'))
         if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
         if len(tcs) > 3: _set_cell_value(tcs[3], match.get('godz',''), size=28)
+        # Mecz # ZAWSZE
+        if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
         if hide_grupa_mecz:
-            # Faza pucharowa: zamień etykietę "Grupa" → "Faza" zachowując format,
-            # wartość fazy (np. "1/32") wstaw jak inne wartości (Aptos size 28 bold).
-            # Numer meczu # nie jest dostępny w arkuszu Drabinka — ukrywamy
-            # zarówno etykietę "Mecz #" jak i wartość.
-            if len(tcs) > 4: _set_cell_label(tcs[4], 'Faza')
-            if len(tcs) > 5: _set_cell_value(tcs[5], phase_label or '', size=28)
-            if len(tcs) > 6: _set_cell_label(tcs[6], '')  # ukryj etykietę 'Mecz #'
-            if len(tcs) > 7: _set_cell_value(tcs[7], '', size=28)  # ukryj numer
+            # Faza pucharowa: ukryj etykietę "Grupa" i jej wartość
+            # (faza jest pokazywana w prawym górnym rogu obok nazwy/daty turnieju)
+            if len(tcs) > 4: _set_cell_label(tcs[4], '')
+            if len(tcs) > 5: _set_cell_value(tcs[5], '', size=28)
         else:
             if len(tcs) > 5: _set_cell_value(tcs[5], match.get('grupa',''),size=28)
-            if len(tcs) > 7: _set_cell_value(tcs[7], match.get('mecz',''), size=28)
     if len(rows) > 3:
         tcs = rows[3].findall(wt('tc'))
         if tcs: _set_cell_value(tcs[0], match.get('z1',''), size=24, align='right')
@@ -657,7 +680,8 @@ def _populate_left_area(elements, anchored_drawings, with_label, label_y_cm=0):
 # ─── Build document ───────────────────────────────────────────────────────────
 
 def build_blank_document(num_pages=1, logos=None, tournament_name=None,
-                         tournament_date=None, include_qr=False,
+                         tournament_date=None, tournament_phase_text=None,
+                         include_qr=False,
                          include_pfm_logo=True, sheets_url='',
                          image_order=None, image_positions=None,
                          template_type='IND'):
@@ -672,6 +696,7 @@ def build_blank_document(num_pages=1, logos=None, tournament_name=None,
         sheet_id='', sheets_url=sheets_url, sheets_data=blank_data,
         logos=logos,
         tournament_name=tournament_name, tournament_date=tournament_date,
+        tournament_phase_text=tournament_phase_text,
         include_qr=include_qr and bool(sheets_url),  # QR tylko jeśli jest URL
         include_pfm_logo=include_pfm_logo,
         image_order=image_order, image_positions=image_positions,
@@ -681,12 +706,15 @@ def build_blank_document(num_pages=1, logos=None, tournament_name=None,
 
 def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                    tournament_name=None, tournament_date=None,
+                   tournament_phase_text=None,
                    include_qr=True, include_pfm_logo=True,
                    image_order=None, image_positions=None,
                    hide_grupa_mecz=False, phase_label=None,
                    template_type='IND'):
     """
     `tournament_date`: string (np. "10.05.2026") wyświetlany w nagłówku obok nazwy.
+    `tournament_phase_text`: tekst fazy turnieju (np. "Grupowa", "1/16 finału") -
+                             dodawany w prawym górnym rogu obok nazwy i daty.
     `include_pfm_logo`: czy dodać domyślne logo PFM.
     image_positions: dict {key: (x_cm, y_cm, width_cm)} dla każdej grafiki/QR.
     Jeśli None, używamy domyślnego ułożenia jedna pod drugą.
@@ -1052,14 +1080,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
             cloned = [copy.deepcopy(el) for el in template_elements]
 
-            # Wstaw nazwę turnieju + datę jako paragraf w prawym górnym rogu
+            # Wstaw nazwę turnieju + datę + fazę jako paragraf w prawym górnym rogu
             # (przed pierwszą tabelą, wyrównany do prawej, małą czcionką)
-            if tournament_name or tournament_date:
+            if tournament_name or tournament_date or tournament_phase_text:
                 header_parts = []
                 if tournament_name:
                     header_parts.append(tournament_name.strip())
                 if tournament_date:
                     header_parts.append(tournament_date.strip())
+                if tournament_phase_text:
+                    header_parts.append(tournament_phase_text.strip())
                 header_text = ' · '.join(header_parts)
 
                 hp = etree.Element(wt('p'))
