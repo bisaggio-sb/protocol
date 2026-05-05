@@ -94,7 +94,7 @@ LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowe
 # To sporo miejsca na grafiki - wystarczy żeby grafiki były czytelnie widoczne.
 # Zostawiamy 0.3 cm marginesu od prawej (kolumny numerków 1-18).
 TROJKA_LEFT_AREA_CM = 4.76    # pełna szerokość komórki R1.tc[0] - obrazy idealnie wyśrodkowane
-TROJKA_GRAPHIC_W_CM = 4.0     # max szerokość obrazu w trójce
+TROJKA_GRAPHIC_W_CM = 3.5     # max szerokość grafik (komórka 4.76 cm minus ~0.6 cm buforu po obu stronach)
 TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
 
 
@@ -137,6 +137,9 @@ def compute_default_positions(active_keys, logos_aspect=None,
     # ── QR na górze (jeśli aktywny)
     if 'qr' in active_keys:
         qr_x = (area_width_cm - QR_W) / 2
+        # Trójka: kompensacja cellMargin (0.185 cm) - patrz komentarz przy logo poniżej
+        if is_trojka:
+            qr_x -= 0.185
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': QR_W, 'h': QR_W}
         # Po QR: napis "Wyniki turnieju" + WYRAŹNY odstęp do pierwszego logo.
         # text_h to wysokość napisu, SPACE_AFTER_QR to odstęp od napisu do logo.
@@ -209,6 +212,11 @@ def compute_default_positions(active_keys, logos_aspect=None,
         # Centrujemy obraz w slocie pionowo (gdy slot wyższy niż obraz)
         img_y = cur_y + (max_slot_h - target_h) / 2
         img_x = (area_width_cm - target_w) / 2
+        # Trójka: kompensacja cellMargin (105 dxa = 0.185 cm) przesuwającego paragraf
+        # w prawo wewnątrz komórki R1.tc[0]. Bez tego grafiki są subtelnie offset w prawo
+        # względem geometrycznego środka przestrzeni "margines lewy → widoczna krawędź tabeli".
+        if is_trojka:
+            img_x -= 0.185
         
         positions[key] = {'x': img_x, 'y': img_y, 'w': target_w, 'h': target_h}
         cur_y += max_slot_h + SPACING
