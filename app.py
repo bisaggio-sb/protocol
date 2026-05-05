@@ -36,6 +36,28 @@ def img_to_data_url(file_or_bytes):
     return _bytes_to_data_url(img_bytes)
 
 
+class _CachedUpload:
+    """Wrapper na cache'owane bajty pliku - emuluje interfejs UploadedFile.
+    Używany żeby zachować pliki między rerunami Streamlita gdy file_uploader
+    traci stan (np. po download_button)."""
+    def __init__(self, name, raw_bytes):
+        self.name = name
+        self._bytes = raw_bytes
+        self._pos = 0
+    def seek(self, pos):
+        self._pos = pos
+    def read(self, n=-1):
+        if n < 0:
+            data = self._bytes[self._pos:]
+            self._pos = len(self._bytes)
+        else:
+            data = self._bytes[self._pos:self._pos+n]
+            self._pos += len(data)
+        return data
+    def getvalue(self):
+        return self._bytes
+
+
 @st.cache_data(show_spinner=False)
 def _bytes_to_aspect(img_bytes: bytes) -> float:
     img = Image.open(io.BytesIO(img_bytes))
@@ -94,8 +116,8 @@ LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowe
 # To sporo miejsca na grafiki - wystarczy żeby grafiki były czytelnie widoczne.
 # Zostawiamy 0.3 cm marginesu od prawej (kolumny numerków 1-18).
 TROJKA_LEFT_AREA_CM = 4.76    # pełna szerokość komórki R1.tc[0] - obrazy idealnie wyśrodkowane
-TROJKA_GRAPHIC_W_CM = 3.5     # max szerokość grafik (komórka 4.76 cm minus ~0.6 cm buforu po obu stronach)
-TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 do R21
+TROJKA_GRAPHIC_W_CM = 2.7     # max szer logo w trójce (zbliżona do PFM domyślnego ~2.18 - spójność wizualna)
+TROJKA_AREA_HEIGHT_CM = 18.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 aż do dolnej krawędzi (PKT)
 
 
 def compute_default_positions(active_keys, logos_aspect=None,
@@ -164,7 +186,7 @@ def compute_default_positions(active_keys, logos_aspect=None,
             SPACING = 0.8
         else:
             SPACING = 0.5
-        max_slot_h_default_max = 2.5
+        max_slot_h_default_max = 2.7
         max_slot_h_default_min = 1.4
     else:
         if n <= 2:
@@ -225,7 +247,7 @@ def compute_default_positions(active_keys, logos_aspect=None,
 
 
 # ════════════════════════════════════════════════════════════════════════
-col_form, col_preview = st.columns([5, 3])
+col_form, col_preview = st.columns([3, 2])
 # ════════════════════════════════════════════════════════════════════════
 
 with col_form:
@@ -397,9 +419,16 @@ with col_form:
     NUM_LOGOS = 4
     logo_files = []
     
-    # Sprawdź ile grafik już dodanych żeby pokazać liczbę
-    n_uploaded = sum(1 for k in [f"logo_{i}" for i in range(NUM_LOGOS)]
-                     if k in st.session_state and st.session_state[k] is not None)
+    # Cache uploadowanych bajtów w session_state. Dzięki temu pliki "pamiętają się"
+    # nawet gdy expander zostanie zwinięty albo widget straci state po download_button.
+    # Klucze: 'logo_bytes_0' ... 'logo_bytes_3' przechowują (filename, bytes).
+    
+    # Sprawdź ile grafik już dodanych żeby pokazać liczbę (z widget LUB cache bajtów)
+    n_uploaded = sum(
+        1 for i in range(NUM_LOGOS)
+        if (st.session_state.get(f'logo_{i}') is not None) or
+           (st.session_state.get(f'logo_bytes_{i}') is not None)
+    )
     
     grafiki_label = "Grafiki"
     if n_uploaded > 0:
@@ -408,11 +437,25 @@ with col_form:
     with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
         st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
         cols_log = st.columns(2)
+        # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
+        # Korzystamy z prostego wrappera _CachedUpload.
         for i in range(NUM_LOGOS):
             with cols_log[i % 2]:
                 f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
                                      key=f"logo_{i}", label_visibility="visible")
-                logo_files.append(f)
+                if f is not None:
+                    # Świeży upload — cache bajtów do session_state
+                    f.seek(0)
+                    raw_bytes = f.read()
+                    f.seek(0)
+                    st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                    logo_files.append(_CachedUpload(f.name, raw_bytes))
+                elif st.session_state.get(f'logo_bytes_{i}') is not None:
+                    # Widget zwrócił None (np. po download_button rerun), ale mamy cache
+                    name, raw_bytes = st.session_state[f'logo_bytes_{i}']
+                    logo_files.append(_CachedUpload(name, raw_bytes))
+                else:
+                    logo_files.append(None)
         
         # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
         logos_aspect = {}
@@ -473,7 +516,7 @@ with col_preview:
     st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
     st.markdown("##### 📄 Podgląd")
 
-    SCALE = 12   # Mały podgląd - mieści się bez scrollbara nawet z expanderami pozycji pod nim
+    SCALE = 16   # Większy podgląd dla lepszej czytelności (kolumna prawa 2/5 szerokości)
     PAGE_W_CM = 18.46
     PAGE_H_CM = 27.16
     PAGE_W_PX = int(PAGE_W_CM * SCALE)
