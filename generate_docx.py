@@ -556,34 +556,30 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
     # Wartości Tor/Godz/Runda doklejamy do etykiet (np. "Tor  1", "Godz. 09:00").
     # 'mecz' (numer) ZAWSZE w 'Runda' obok nazwy fazy.
     if template_type == 'TROJKA_Bo3':
-        # Bo3 template R1 cells:
-        #   tc[0] "Tor" 5.74 cm — label + value w jednej komórce mieszczą się luzem
-        #   tc[1] "Godz." 1.74 cm — TYLKO label, za wąska na "Godz. 13:00"
-        #   tc[2] pusta 1.74 cm — TU wpisujemy wartość godziny
-        #   tc[3] pusta 1.74 cm
-        #   tc[4] pusta 2.25 cm
-        #   tc[5] "Runda" 3.28 cm — label + krótka wartość (np. "1/8 finału, Mecz 3")
+        # Bo3 template R1 cells (nowa wersja, prawdziwa trójka):
+        #   tc[0] "Tor" 5.24 cm — label + value w jednej komórce
+        #   tc[1] "Godz." 1.87 cm — TYLKO label (za wąska na "Godz. 13:00")
+        #   tc[2] pusta 1.87 cm — wartość godziny
+        #   tc[3] pusta 1.87 cm — pozostawiamy pustą (spacing)
+        #   tc[4] pusta 2.20 cm — pozostawiamy pustą (spacing)
+        #   tc[5] "Runda" 3.24 cm — USUWAMY label "Runda" (faza już w nagłówku
+        #         strony w prawym górnym rogu) i wstawiamy tu numer meczu "Mecz X"
         if len(rows) >= 1:
             tcs = rows[0].findall(wt('tc'))
             tor_val = match.get('tor', '').strip()
             if len(tcs) > 0 and tor_val:
-                # "Tor" → "Tor  2" — tu mamy 5.74 cm, mieści się
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             godz_val = match.get('godz', '').strip()
             if len(tcs) > 2 and godz_val:
-                # tc[1] = "Godz." (zostaje); tc[2] = wartość czasu
                 _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+            mecz_val = match.get('mecz', '').strip()
             if len(tcs) > 5:
-                # "Runda" → "Runda  1/8 finału, Mecz 3" — krótszy separator (przecinek
-                # zamiast " · ") + bez podwójnej spacji = mieści się w 3.28 cm
-                runda_parts = []
-                if phase_label:
-                    runda_parts.append(phase_label.strip())
-                mecz_val = match.get('mecz', '').strip()
                 if mecz_val:
-                    runda_parts.append(f'Mecz {mecz_val}')
-                runda_text = ', '.join(runda_parts) if runda_parts else ''
-                _set_cell_label(tcs[5], f'Runda {runda_text}' if runda_text else 'Runda')
+                    # Podmieniamy "Runda" na "Mecz X"
+                    _set_cell_label(tcs[5], f'Mecz  {mecz_val}')
+                else:
+                    # Bez numeru meczu - czyścimy całkowicie (faza w nagłówku)
+                    _set_cell_label(tcs[5], '')
         # Team A → R3.tc[0] (rows[2]), Team B → R4.tc[0] (rows[3])
         if len(rows) > 2:
             tcs = rows[2].findall(wt('tc'))
@@ -840,13 +836,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
     if template_type in ('TROJKA', 'TROJKA_Bo3'):
-        # Bo3 ma 3 sety, więc dochodzi 'PunktySET 3', 'SET 3', '(SET 3)'.
-        # 'Runda' jest etykietą fazy w pucharowej (Bo3 to zawsze pucharowa).
-        TROJKA_LABELS = {'Tor','Godzina','Godz.','Grupa','Mecz','#','Runda',
-                         'Punkty','SET 1','SET 2','SET 3','(SET 3)',
-                         'Wygrane','sety','Podpis',
-                         'PunktySET 1','PunktySET 2','PunktySET 3','Wygranesety',
-                         'Wyniki turnieju','Wyniki turnieju:'}
+        # Bo2 i Bo3 mają wspólny zestaw etykiet, ale Bo3 NIE potrzebuje
+        # normalizacji fontu dla 'SET 1/2/3' bo w nowym szablonie te 3 etykiety
+        # są inaczej zbudowane (różne run-e) i normalizacja powoduje
+        # niespójność (SET 2 robi się grubsze niż SET 1/(SET 3)).
+        if template_type == 'TROJKA_Bo3':
+            TROJKA_LABELS = {'Tor','Godz.','Godzina','Mecz','Runda',
+                             'PunktySET 1','PunktySET 2','PunktySET 3',
+                             'Punkty','Wygrane','sety','Podpis','Wygranesety'}
+        else:
+            TROJKA_LABELS = {'Tor','Godzina','Godz.','Grupa','Mecz','#','Runda',
+                             'Punkty','SET 1','SET 2','SET 3','(SET 3)',
+                             'Wygrane','sety','Podpis',
+                             'PunktySET 1','PunktySET 2','PunktySET 3','Wygranesety',
+                             'Wyniki turnieju','Wyniki turnieju:'}
         for r in body.iter(wt('r')):
             ts = r.findall(wt('t'))
             if not ts: continue
@@ -885,10 +888,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         
         # Parametry zależne od szablonu
         if template_type == 'TROJKA_Bo3':
-            # Bo3_TROJKA.docx: tabela 1 = 9360 dxa (6 kol), tabela 2 = 9675 dxa (13 kol, col0=855)
-            ORIG_T1_TOTAL = 9360
-            ORIG_T2_TOTAL = 9675
-            ORIG_LEFT_COL_DXA = 855
+            # Bo3_TROJKA.docx (nowa wersja): tabela 1 = 9239 dxa (6 kol),
+            # tabela 2 = 9439 dxa (25 kol, col0=391). Struktura trójkowa
+            # (wiersze 1-18 + WYNIK), 3 sety, SUMA per zawodnik per set.
+            ORIG_T1_TOTAL = 9239
+            ORIG_T2_TOTAL = 9439
+            ORIG_LEFT_COL_DXA = 391
         else:
             # Grupa_TROJKA.docx: tabela 1 = 9026 dxa, tabela 2 = 9251 dxa, col0=1186
             ORIG_T1_TOTAL = 9026
@@ -982,6 +987,31 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                     tcW.set(f'{{{W}}}w', str(NEW_LEFT_COL_DXA))
                                 else:
                                     tcW.set(f'{{{W}}}w', str(int(w_int * scale_rest)))
+            
+            # ── Normalizacja ramek w ostatniej kolumnie tabeli wyników ──────────
+            # PROBLEM: w obu szablonach trójki ostatnia kolumna SUMA miała pełne
+            # ramki (top+bottom+left+right), podczas gdy inne kolumny SUMA mają
+            # tylko left+right. Efekt: w ostatniej kolumnie widać poziome linie
+            # między wierszami (wygląda na "pogrubione"), w innych nie.
+            # FIX: w wierszach DANYCH (od R4 do przedostatniego) usuń top/bottom
+            # ramki w OSTATNIEJ komórce, żeby kolumna była "czysta" jak inne SUMA.
+            t2_rows = t2.findall(wt('tr'))
+            for r_idx, tr in enumerate(t2_rows):
+                # Pomijamy: R1 (SET headers), R2 (SUMA labels), R3 (continuation
+                # vMerge), oraz ostatni wiersz (PKT/WYNIK).
+                if r_idx < 3 or r_idx == len(t2_rows) - 1:
+                    continue
+                cells = tr.findall(wt('tc'))
+                if not cells: continue
+                last_tc = cells[-1]
+                tcPr = last_tc.find(wt('tcPr'))
+                if tcPr is None: continue
+                tcBorders = tcPr.find(wt('tcBorders'))
+                if tcBorders is None: continue
+                for side in ('top', 'bottom'):
+                    b = tcBorders.find(wt(side))
+                    if b is not None:
+                        tcBorders.remove(b)
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)
