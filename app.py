@@ -636,9 +636,10 @@ with col_preview:
           <!-- Drużyna A -->
           <div style="position:absolute; left:0; top:96px;
                       width:{TROJKA_TBL_W_PX}px; height:24px;
-                      border:1px solid #999; display:flex; font-size:11px;">
-            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
-                        text-align:center; line-height:24px; font-weight:bold;
+                      border:1px solid #999; display:flex; font-size:9px;">
+            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:2px;
+                        text-align:right; line-height:24px; font-weight:bold;
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
                         border-right:1px solid #999;">
               KARMI
             </div>
@@ -650,9 +651,10 @@ with col_preview:
           <!-- Drużyna B -->
           <div style="position:absolute; left:0; top:120px;
                       width:{TROJKA_TBL_W_PX}px; height:24px;
-                      border:1px solid #999; border-top:none; display:flex; font-size:11px;">
-            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:8px;
-                        text-align:center; line-height:24px; font-weight:bold;
+                      border:1px solid #999; border-top:none; display:flex; font-size:9px;">
+            <div style="flex:0 0 {TROJKA_NAMES_PX}px; padding-right:2px;
+                        text-align:right; line-height:24px; font-weight:bold;
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
                         border-right:1px solid #999;">
               Trzech Silnych Mężczyzn
             </div>
@@ -767,9 +769,10 @@ with col_preview:
       </div>
       
       <div style="position:absolute; left:{TBL1_OFFSET_PX}px; top:97px; right:0; height:24px;
-                  border:1px solid #999; display:flex; font-size:11px;">
-        <div style="flex:0 0 {NAMES_PX}px; padding-right:8px; 
+                  border:1px solid #999; display:flex; font-size:9px;">
+        <div style="flex:0 0 {NAMES_PX}px; padding-right:2px; 
                     text-align:right; line-height:24px; font-weight:bold;
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
                     border-right:1px solid #999;">
           Łukasz Szulc
         </div>
@@ -779,9 +782,10 @@ with col_preview:
         <div style="flex:1.95;"></div>
       </div>
       <div style="position:absolute; left:{TBL1_OFFSET_PX}px; top:121px; right:0; height:24px;
-                  border:1px solid #999; border-top:none; display:flex; font-size:11px;">
-        <div style="flex:0 0 {NAMES_PX}px; padding-right:8px;
+                  border:1px solid #999; border-top:none; display:flex; font-size:9px;">
+        <div style="flex:0 0 {NAMES_PX}px; padding-right:2px;
                     text-align:right; line-height:24px; font-weight:bold;
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
                     border-right:1px solid #999;">
           Anna Ściepuro
         </div>
@@ -875,28 +879,48 @@ with col_preview:
                 st.rerun()
         
         nonce = st.session_state.get('reset_nonce', 0)
-        max_x = TROJKA_LEFT_AREA_CM if is_trojka else 5.0
-        max_w = TROJKA_LEFT_AREA_CM if is_trojka else 5.0
+        # Lewa kolumna lub cały lewy obszar (granica do której obraz może sięgać).
+        # Trójka: kolumna R1.tc[0] = 4.76 cm (TROJKA_LEFT_AREA_CM).
+        # IND: lewy obszar 5.24 cm.
+        # Z bezpiecznym marginesem 0.1 cm żeby obraz nie dotykał krawędzi kolumny.
+        col_width = TROJKA_LEFT_AREA_CM if is_trojka else 5.24
+        SAFE_MARGIN = 0.1
+        max_x_abs = col_width - 0.5  # zostaw min. 0.5 cm na obraz
+        max_h_abs = 5.0
         for key, label in elements_active:
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
                 slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
+                # Aktualne wartości (z możliwymi już zmodyfikowanymi w session_state)
+                cur_x = float(pos['x'])
+                cur_w = float(pos['w'])
+                # Dynamiczne ograniczenia: x + w nie może przekroczyć szer. kolumny.
+                # max_x ogranicza X tak, żeby przy obecnym W nadal się zmieścił.
+                # max_w ogranicza W tak, żeby przy obecnym X nadal się zmieścił.
+                max_x_dyn = max(0.0, col_width - max(0.5, cur_w) - SAFE_MARGIN)
+                max_w_dyn = max(0.5, col_width - max(0.0, cur_x) - SAFE_MARGIN)
+                # Clamp aktualnych wartości na wypadek gdyby były spoza zakresu
+                # (np. zapisane z poprzedniej wersji z innymi stałymi).
+                cur_x = min(cur_x, max_x_dyn)
+                cur_w = min(cur_w, max_w_dyn)
                 with cols[0]:
-                    new_x = st.number_input("X (cm)", value=float(pos['x']),
-                                           min_value=0.0, max_value=max_x, step=0.1,
+                    new_x = st.number_input("X (cm)", value=cur_x,
+                                           min_value=0.0, max_value=max_x_dyn, step=0.1,
                                            key=f"x_{slider_key_base}")
                 with cols[1]:
                     new_y = st.number_input("Y (cm)", value=float(pos['y']),
                                            min_value=0.0, max_value=18.0, step=0.1,
                                            key=f"y_{slider_key_base}")
                 with cols[2]:
-                    new_w = st.number_input("Szer. (cm)", value=float(pos['w']),
-                                           min_value=0.5, max_value=max_w, step=0.1,
+                    # max_w przeliczone na podstawie świeżego new_x z tej samej tury renderu
+                    max_w_for_input = max(0.5, col_width - max(0.0, new_x) - SAFE_MARGIN)
+                    new_w = st.number_input("Szer. (cm)", value=min(cur_w, max_w_for_input),
+                                           min_value=0.5, max_value=max_w_for_input, step=0.1,
                                            key=f"w_{slider_key_base}")
                 with cols[3]:
                     new_h = st.number_input("Wys. (cm)", value=float(pos['h']),
-                                           min_value=0.5, max_value=5.0, step=0.1,
+                                           min_value=0.5, max_value=max_h_abs, step=0.1,
                                            key=f"h_{slider_key_base}")
                 image_positions[key] = {
                     'x': new_x, 'y': new_y, 'w': new_w, 'h': new_h
