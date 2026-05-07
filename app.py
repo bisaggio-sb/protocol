@@ -326,9 +326,17 @@ with col_form:
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
-                         "Best of 5": "🔴 Best of 5 (wkrótce)",
-                         "2 sety": "🟡 2 sety"}
+            # Best of 3 jest TERAZ dostępny dla trójki pucharowej (Bo3_TROJKA.docx).
+            # Best of 5 i 2 sety są fallbackiem.
+            is_trojka_now = tournament_type == "Drużynowy 3-os."
+            if is_trojka_now:
+                bo_options = {"Best of 3": "🟡 Best of 3 (eksperymentalne)",
+                             "Best of 5": "🔴 Best of 5 (wkrótce)",
+                             "2 sety": "🟡 2 sety"}
+            else:
+                bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
+                             "Best of 5": "🔴 Best of 5 (wkrótce)",
+                             "2 sety": "🟡 2 sety"}
             # Default: Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej
             default_idx = 0
             if "1/4" in tournament_phase or "1/2" in tournament_phase or \
@@ -338,7 +346,7 @@ with col_form:
                 list(bo_options.keys()),
                 format_func=lambda k: bo_options[k],
                 index=default_idx,
-                help="Best of 3/5 jeszcze niegotowe. 2 sety pomocniczo dostępne."
+                help="Best of 3 dla trójki pucharowej zaimplementowane. Reszta wkrótce."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -671,9 +679,10 @@ with col_preview:
             Set przegrany przez 3 kolejne chybienia oznacza wynik 0:50
           </div>
           
-          <!-- Tabela wynikowa (od lewego brzegu, szer. 16.31 cm) -->
+          <!-- Tabela wynikowa (od lewego brzegu) — wysokość dopasowana
+               żeby nie wystawała poza stronę: PAGE_H_PX - top(180px) - margines 4px -->
           <div style="position:absolute; left:0; top:180px;
-                      width:{TROJKA_TBL_W_PX}px; height:380px;
+                      width:{TROJKA_TBL_W_PX}px; height:{PAGE_H_PX - 184}px;
                       border:1px solid #999;">
             <!-- Lewa kolumna R1.tc[0] na grafiki (2.09 cm) -->
             <div style="position:absolute; left:0; top:0; bottom:0;
@@ -1052,7 +1061,11 @@ if gen_clicked:
         else:
             show_phase = ""
         # Mapowanie typu turnieju → szablon docx
-        template_type = 'TROJKA' if is_trojka else 'IND'
+        # Trójka pucharowa + Best of 3 → Bo3_TROJKA.docx (3 sety zamiast 2)
+        if is_trojka and is_pucharowa and sets_format == "Best of 3":
+            template_type = 'TROJKA_Bo3'
+        else:
+            template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_document(
             sid, sheets_url.strip(), sheets_data,
             logos=logos_bytes or None,
@@ -1103,7 +1116,10 @@ if blank_clicked:
                 show_phase = "Faza grupowa"
         else:
             show_phase = ""
-        template_type = 'TROJKA' if is_trojka else 'IND'
+        if is_trojka and is_pucharowa and sets_format == "Best of 3":
+            template_type = 'TROJKA_Bo3'
+        else:
+            template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_blank_document(
             num_pages=1, logos=logos_bytes or None,
             tournament_name=show_name, tournament_date=show_date,

@@ -335,6 +335,30 @@ def parse_drabinka_rows(rows, target_phase=None):
         
         i += 2  # przeskakujemy 2 wiersze (mecz)
     
+    # ── HARD CAP ── parser czasem łapie więcej meczów niż powinno (np. brak
+    # nagłówka "MECZE O MIEJSCA" oddzielającego 1/8 finału od meczów o miejsca
+    # 17-32). Liczba meczów w rundzie pucharowej jest deterministyczna:
+    # 1/64=32, 1/32=16, 1/16=8 wait sorry, recalc:
+    #   1/N finału = N/2 meczów (1/2 = 1 mecz... ale ćwierćfinał = 1/4 ma 4...)
+    # Poprawnie: 1/64 finału = 32 mecze (64 zawodników/par), 1/32 = 16, 1/16 = 8,
+    # 1/8 finału = 4 mecze... NIE — to brzmi źle.
+    # Tradycyjne nazewnictwo: "1/8 finału" = ósemka finałowa = 8 par = 8 meczów
+    # → 1/8 = 8, 1/4 = 4, 1/2 = 2, finał = 1, mecz o 3. = 1
+    #   1/16 = 16, 1/32 = 32, 1/64 = 64
+    PHASE_MATCH_COUNT = {
+        '1/64': 64, '1/32': 32, '1/16': 16,
+        '1/8':   8, '1/4':   4, '1/2':   2,
+        'finał': 1, 'mecz o 3': 1,
+    }
+    expected = None
+    src = (target_phase or phase_full_name or '').lower()
+    for key, cnt in PHASE_MATCH_COUNT.items():
+        if key in src:
+            expected = cnt
+            break
+    if expected is not None and len(matches) > expected:
+        matches = matches[:expected]
+    
     return phase_full_name, phase_time, matches
 
 
@@ -514,13 +538,62 @@ def _make_page_break_para():
     return p
 
 
-def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None):
+def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
+                   template_type='IND'):
     """`hide_grupa_mecz` to historyczna nazwa — obecnie kontroluje tylko czy etykieta
     'Grupa' i jej wartość są ukrywane (dla pucharowej). 'Mecz #' i jego numer
     są ZAWSZE pokazywane (też w pucharowej — numerujemy mecze sekwencyjnie)."""
     tbls = [el for el in elements if el.tag == wt('tbl')]
     if not tbls: return
     rows = tbls[0].findall(wt('tr'))
+    
+    # ── Bo3 trójka: inna struktura tabeli 1 ──────────────────────────────
+    # Bo3 ma 4 wiersze w tabeli 1:
+    #   R1: [Tor] [Godz.] [empty] [empty] [empty] [Runda]   ← etykiety
+    #   R2: [empty] [PunktySET 1] [PunktySET 2] [PunktySET 3] [Wygrane sety] [Podpis]
+    #   R3: [team A name] [score] [score] [score] [sets won] [signature]
+    #   R4: [team B name] [score] [score] [score] [sets won] [signature]
+    # Wartości Tor/Godz/Runda doklejamy do etykiet (np. "Tor  1", "Godz. 09:00").
+    # 'mecz' (numer) ZAWSZE w 'Runda' obok nazwy fazy.
+    if template_type == 'TROJKA_Bo3':
+        # Bo3 template R1 cells:
+        #   tc[0] "Tor" 5.74 cm — label + value w jednej komórce mieszczą się luzem
+        #   tc[1] "Godz." 1.74 cm — TYLKO label, za wąska na "Godz. 13:00"
+        #   tc[2] pusta 1.74 cm — TU wpisujemy wartość godziny
+        #   tc[3] pusta 1.74 cm
+        #   tc[4] pusta 2.25 cm
+        #   tc[5] "Runda" 3.28 cm — label + krótka wartość (np. "1/8 finału, Mecz 3")
+        if len(rows) >= 1:
+            tcs = rows[0].findall(wt('tc'))
+            tor_val = match.get('tor', '').strip()
+            if len(tcs) > 0 and tor_val:
+                # "Tor" → "Tor  2" — tu mamy 5.74 cm, mieści się
+                _set_cell_label(tcs[0], f'Tor  {tor_val}')
+            godz_val = match.get('godz', '').strip()
+            if len(tcs) > 2 and godz_val:
+                # tc[1] = "Godz." (zostaje); tc[2] = wartość czasu
+                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+            if len(tcs) > 5:
+                # "Runda" → "Runda  1/8 finału, Mecz 3" — krótszy separator (przecinek
+                # zamiast " · ") + bez podwójnej spacji = mieści się w 3.28 cm
+                runda_parts = []
+                if phase_label:
+                    runda_parts.append(phase_label.strip())
+                mecz_val = match.get('mecz', '').strip()
+                if mecz_val:
+                    runda_parts.append(f'Mecz {mecz_val}')
+                runda_text = ', '.join(runda_parts) if runda_parts else ''
+                _set_cell_label(tcs[5], f'Runda {runda_text}' if runda_text else 'Runda')
+        # Team A → R3.tc[0] (rows[2]), Team B → R4.tc[0] (rows[3])
+        if len(rows) > 2:
+            tcs = rows[2].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], match.get('z1', ''), size=24, align='right')
+        if len(rows) > 3:
+            tcs = rows[3].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], match.get('z2', ''), size=24, align='right')
+        return  # Bo3 ma własną logikę, nie kontynuujemy ze standardową
+    
+    # ── Standard (IND, TROJKA Bo2): zachowane bez zmian ───────────────────
     if len(rows) > 0:
         tcs = rows[0].findall(wt('tc'))
         if len(tcs) > 1: _set_cell_value(tcs[1], match.get('tor',''),  size=28)
@@ -730,6 +803,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     template_files = {
         'IND': 'Grupa_IND.docx',
         'TROJKA': 'Grupa_TROJKA.docx',
+        'TROJKA_Bo3': 'Bo3_TROJKA.docx',
         # CZWORKA, DRUZYNA - nie zaimplementowane jeszcze (czeka na szablony)
     }
     tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')
@@ -765,10 +839,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
-    if template_type == 'TROJKA':
-        TROJKA_LABELS = {'Tor','Godzina','Grupa','Mecz','#',
-                         'Punkty','SET 1','SET 2','Wygrane','sety','Podpis',
-                         'PunktySET 1','PunktySET 2','Wygranesety',
+    if template_type in ('TROJKA', 'TROJKA_Bo3'):
+        # Bo3 ma 3 sety, więc dochodzi 'PunktySET 3', 'SET 3', '(SET 3)'.
+        # 'Runda' jest etykietą fazy w pucharowej (Bo3 to zawsze pucharowa).
+        TROJKA_LABELS = {'Tor','Godzina','Godz.','Grupa','Mecz','#','Runda',
+                         'Punkty','SET 1','SET 2','SET 3','(SET 3)',
+                         'Wygrane','sety','Podpis',
+                         'PunktySET 1','PunktySET 2','PunktySET 3','Wygranesety',
                          'Wyniki turnieju','Wyniki turnieju:'}
         for r in body.iter(wt('r')):
             ts = r.findall(wt('t'))
@@ -800,21 +877,30 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         
         # ── Rozszerzenie obu tabel do PEŁNEJ szerokości użytecznej strony ──
         # Marginesy 720 dxa po obu stronach → useable area = 11906 - 1440 = 10466 dxa = 18.46 cm.
-        # Po wcześniejszych iteracjach tabele miały 9026 (t1) i 9251 (t2) co zostawiało
-        # ~3 cm pustej przestrzeni po prawej. Rozszerzamy obie do TARGET_WIDTH = 10466.
         # 
-        # Dla tabeli 2 (wynikowej): zwiększenie idzie GŁÓWNIE do lewej kolumny R1.tc[0]
-        # (z 1186 → 2700 dxa = 4.76 cm) — zyskujemy DUŻO więcej miejsca na grafiki.
-        # Pozostałe kolumny zostają proporcjonalnie zwiększone.
-        #
-        # Dla tabeli 1 (etykiety): wszystkie kolumny skalowane proporcjonalnie.
+        # Dla tabeli 2 (wynikowej): zwiększenie idzie GŁÓWNIE do lewej kolumny (R1.tc[0])
+        # z oryginalnej szerokości (różne dla TROJKA vs Bo3) → 2700 dxa = 4.76 cm.
+        # Daje to obszar na grafiki (QR + loga). Pozostałe kolumny dostają to co zostanie.
         TARGET_WIDTH = 10466
+        
+        # Parametry zależne od szablonu
+        if template_type == 'TROJKA_Bo3':
+            # Bo3_TROJKA.docx: tabela 1 = 9360 dxa (6 kol), tabela 2 = 9675 dxa (13 kol, col0=855)
+            ORIG_T1_TOTAL = 9360
+            ORIG_T2_TOTAL = 9675
+            ORIG_LEFT_COL_DXA = 855
+        else:
+            # Grupa_TROJKA.docx: tabela 1 = 9026 dxa, tabela 2 = 9251 dxa, col0=1186
+            ORIG_T1_TOTAL = 9026
+            ORIG_T2_TOTAL = 9251
+            ORIG_LEFT_COL_DXA = 1186
+        
         tbls = body.findall(wt('tbl'))
         if len(tbls) >= 2:
             t1, t2 = tbls[0], tbls[1]
             
-            # Tabela 1: skaluj wszystkie kolumny proporcjonalnie (9026 → 10466)
-            scale_t1 = TARGET_WIDTH / 9026
+            # Tabela 1: skaluj wszystkie kolumny proporcjonalnie
+            scale_t1 = TARGET_WIDTH / ORIG_T1_TOTAL
             tblPr_t1 = t1.find(wt('tblPr'))
             if tblPr_t1 is not None:
                 tblW = tblPr_t1.find(wt('tblW'))
@@ -843,14 +929,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             if w:
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t1)))
             
-            # Tabela 2: lewa kolumna powiększona, reszta proporcjonalnie
-            # Oryginał: col 0=1186, suma reszty = 9251-1186 = 8065
-            # Nowa: col 0 = NEW_LEFT_COL_DXA, reszta proporcjonalnie do TARGET_WIDTH - NEW_LEFT_COL
-            NEW_LEFT_COL_DXA = 2700  # 4.76 cm — większy obszar na grafiki
-            ORIG_LEFT_COL_DXA = 1186
-            NEW_REST_TOTAL = TARGET_WIDTH - NEW_LEFT_COL_DXA  # 7766
-            ORIG_REST_TOTAL = 9251 - ORIG_LEFT_COL_DXA        # 8065
-            scale_rest = NEW_REST_TOTAL / ORIG_REST_TOTAL      # ~0.963
+            # Tabela 2: ZALEŻNIE OD WARIANTU
+            # - TROJKA (Bo2): lewa kolumna powiększona do 2700 dxa (na grafiki)
+            # - TROJKA_Bo3: jednorodne skalowanie (Bo3 nie ma grafik — col0 zostaje
+            #   wąska kolumna IMIONA, nie poszerzamy)
+            if template_type == 'TROJKA_Bo3':
+                NEW_LEFT_COL_DXA = ORIG_LEFT_COL_DXA  # zostaje 855 dxa = 1.51 cm
+            else:
+                NEW_LEFT_COL_DXA = 2700  # 4.76 cm — większy obszar na grafiki
+            NEW_REST_TOTAL = TARGET_WIDTH - NEW_LEFT_COL_DXA
+            ORIG_REST_TOTAL = ORIG_T2_TOTAL - ORIG_LEFT_COL_DXA
+            scale_rest = NEW_REST_TOTAL / ORIG_REST_TOTAL
             
             tblPr_t2 = t2.find(wt('tblPr'))
             if tblPr_t2 is not None:
@@ -1115,13 +1204,18 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 cloned.insert(0, hp)
             _fill_protocol(cloned, match,
                            hide_grupa_mecz=hide_grupa_mecz,
-                           phase_label=phase_label)
+                           phase_label=phase_label,
+                           template_type=template_type)
 
             # Lista elementów do wstawienia w lewym obszarze
-            order = image_order if image_order else (
-                (['qr'] if qr_rid_info else []) +
-                sorted(logo_rids.keys())
-            )
+            # Bo3 nie używa grafik (lewa kolumna IMIONA jest za wąska, ~1.5 cm).
+            if template_type == 'TROJKA_Bo3':
+                order = []
+            else:
+                order = image_order if image_order else (
+                    (['qr'] if qr_rid_info else []) +
+                    sorted(logo_rids.keys())
+                )
 
             anchored = []
             cell_w_cm = 5.24      # szerokość kolumny "Wyniki turnieju"
@@ -1179,7 +1273,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Trójka: kolumna 4.76 cm. IND: kolumna 5.24 cm. Kompensacja
                 # cellMargin (-0.185 cm) ze strony app.py oznacza że dopuszczalny
                 # zakres X to ok. -0.2…(col_width - w).
-                col_width_cm = 4.76 if template_type == 'TROJKA' else 5.24
+                col_width_cm = 4.76 if template_type in ('TROJKA', 'TROJKA_Bo3') else 5.24
                 # Effective right edge (z kompensacją cellMargin po lewej)
                 # Image left edge może być nawet -0.2 (kompensacja), wtedy max w to col_width.
                 # Ale clampujemy x do >= -0.25 żeby nie wszedł za daleko w lewo.
@@ -1207,8 +1301,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     cur_y_cm += 0.4  # miejsce na napis "Wyniki turnieju"
 
             # Napis "Wyniki turnieju" - tylko gdy jest QR.
-            # Bez QR napis nie ma sensu (jest tylko dla podpisania QR).
-            if qr_rid_info and include_qr:
+            # Bo3 nie używa lewej kolumny na grafiki (zostaje oryginalna IMIONA),
+            # więc całkowicie pomijamy populate_left_area.
+            if template_type == 'TROJKA_Bo3':
+                pass  # nie ruszamy lewej kolumny IMIONA
+            elif qr_rid_info and include_qr:
                 # Wyciągnij faktyczną pozycję i wysokość QR z image_positions
                 if image_positions and 'qr' in image_positions:
                     qr_pos = image_positions['qr']
