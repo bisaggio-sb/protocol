@@ -1171,6 +1171,31 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 px_emu = int(x_cm * 360000)
                 py_emu = int(y_cm * 360000)
 
+                # ── DEFENSE IN DEPTH: clamp tak, żeby obraz nie wyszedł poza
+                # kolumnę kotwicy (R1.tc[0]). Bez tego stare zapisane pozycje
+                # albo wartości spoza zakresu w UI mogłyby przelać obraz na
+                # tabelę wyników po prawej. Skalujemy proporcjonalnie żeby
+                # nie zniekształcić obrazu.
+                # Trójka: kolumna 4.76 cm. IND: kolumna 5.24 cm. Kompensacja
+                # cellMargin (-0.185 cm) ze strony app.py oznacza że dopuszczalny
+                # zakres X to ok. -0.2…(col_width - w).
+                col_width_cm = 4.76 if template_type == 'TROJKA' else 5.24
+                # Effective right edge (z kompensacją cellMargin po lewej)
+                # Image left edge może być nawet -0.2 (kompensacja), wtedy max w to col_width.
+                # Ale clampujemy x do >= -0.25 żeby nie wszedł za daleko w lewo.
+                if x_cm < -0.25:
+                    x_cm = -0.25
+                    px_emu = int(x_cm * 360000)
+                # Maks. szerokość przy aktualnym X tak, żeby right edge <= col_width
+                max_w_at_x = col_width_cm - x_cm
+                if w_cm > max_w_at_x and max_w_at_x > 0.3:
+                    # Skalowanie zachowujące aspect ratio
+                    scale = max_w_at_x / w_cm
+                    w_cm = max_w_at_x
+                    h_cm = h_cm * scale
+                    cx_emu = int(w_cm * 360000)
+                    cy_emu = int(h_cm * 360000)
+
                 anchored.append(_make_anchored_image_drawing(
                     rid, cx_emu, cy_emu, py_emu, px_emu))
 
