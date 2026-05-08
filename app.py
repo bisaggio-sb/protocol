@@ -254,7 +254,9 @@ with col_form:
 
     # ─── 1. Turniej ──────────────────────────────────────────────────────
     st.header("1. Turniej")
-    cols_t1 = st.columns([2, 1])
+    
+    # ─── Wiersz 1: Nazwa | Data | Rodzaj ──────────────────────────────
+    cols_t1 = st.columns([5, 3, 4])
     with cols_t1[0]:
         tournament_name = st.text_input("Nazwa", value="TDT 2026",
                                         placeholder="np. GP2 2026")
@@ -262,18 +264,12 @@ with col_form:
         next_sat = date.today() + timedelta(days=(5 - date.today().weekday()) % 7)
         tournament_date_d = st.date_input("Data", value=next_sat, format="DD.MM.YYYY")
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
-
-    # 3 dropdowny w 3 kolumnach (kompaktowo)
-    # ✅ = w pełni zweryfikowane na danych z prawdziwych turniejów (Grupowa Indywidualna i Trójkowa)
-    # 🟡 = zaimplementowane, ale nie zweryfikowane na realnych danych
-    # 🔴 = jeszcze nieobsługiwane
-    cols_t2 = st.columns(3)
-    with cols_t2[0]:
+    with cols_t1[2]:
         rodzaj_options = {
-            "Indywidualny": "✅ Indywidualny",
-            "Drużynowy 2-os.": "🔴 Drużynowy 2-os. (wkrótce)",
-            "Drużynowy 3-os.": "✅ Drużynowy 3-os.",
-            "Drużynowy 4-os.": "🔴 Drużynowy 4-os. (wkrótce)",
+            "Indywidualny":     "✅ Indywidualny",
+            "Drużynowy 2-os.":  "🔴 Drużynowy 2-os. (wkrótce)",
+            "Drużynowy 3-os.":  "✅ Drużynowy 3-os.",
+            "Drużynowy 4-os.":  "🔴 Drużynowy 4-os. (wkrótce)",
         }
         tournament_type = st.selectbox(
             "Rodzaj",
@@ -285,75 +281,149 @@ with col_form:
     
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
     
-    with cols_t2[1]:
-        # Faza zależna od typu. Restrukturyzacja w 3 sekcje wizualne:
-        # • Grupowa
-        # • Drabinka główna (ścieżka prowadząca do finału)
-        # • Drabinka B (mecze o miejsca - dla zespołów które odpadły)
+    # ─── Wiersz 2: Drabinka | Faza | Format ────────────────────────────
+    # Dwupoziomowy wybór: najpierw drabinka (Grupowa / Główna / Turniej odpadów),
+    # potem konkretna faza w obrębie tej drabinki.
+    cols_t2 = st.columns([3, 4, 3])
+    with cols_t2[0]:
         if is_trojka_pre:
-            faza_options = {
-                "Grupowa": "✅ Grupowa",
-                # ── Drabinka główna ──
-                "Pucharowa 1/16": "🔴 Główna · 1/16 finału (niedostępne dla trójek)",
-                "Pucharowa 1/8":  "✅ Główna · 1/8 finału",
-                "Pucharowa 1/4":  "✅ Główna · 1/4 finału (Ćwierćfinał)",
-                "Pucharowa 1/2":  "✅ Główna · 1/2 finału (Półfinał)",
-                "Finał":          "✅ Główna · Finał",
-                # ── Drabinka B (mecze o miejsca, grane równolegle z drabinką główną) ──
-                "Mecz o 3. miejsce": "✅ Drabinka B · Mecz o 3. miejsce  (∥ Finał)",
-                "Miejsca 5-8":       "🟡 Drabinka B · Miejsca 5-8  (∥ Półfinał)",
-                "Miejsca 9-16":      "🟡 Drabinka B · Miejsca 9-16  (∥ 1/4 finału)",
+            drabinka_options = {
+                "Grupowa": "✅ Faza grupowa",
+                "Główna":  "✅ Drabinka główna",
+                "Odpadów": "🟡 Turniej odpadów",
             }
         else:
-            faza_options = {
-                "Grupowa": "✅ Grupowa",
-                # ── Drabinka główna ──
-                "Pucharowa 1/64": "🔴 Główna · 1/64 finału",
-                "Pucharowa 1/32": "🔴 Główna · 1/32 finału",
-                "Pucharowa 1/16": "🔴 Główna · 1/16 finału",
-                "Pucharowa 1/8":  "🔴 Główna · 1/8 finału",
-                "Pucharowa 1/4":  "🔴 Główna · 1/4 finału (Ćwierćfinał)",
-                "Pucharowa 1/2":  "🔴 Główna · 1/2 finału (Półfinał)",
-                "Finał":          "🔴 Główna · Finał",
-                # ── Drabinka B ──
-                "Mecz o 3. miejsce": "🔴 Drabinka B · Mecz o 3. miejsce  (∥ Finał)",
-                "Miejsca 5-8":       "🔴 Drabinka B · Miejsca 5-8  (∥ Półfinał)",
-                "Miejsca 9-16":      "🔴 Drabinka B · Miejsca 9-16  (∥ 1/4 finału)",
-                "Miejsca 17-32":     "🔴 Drabinka B · Miejsca 17-32  (∥ 1/8 finału)",
+            drabinka_options = {
+                "Grupowa": "✅ Faza grupowa",
+                "Główna":  "🔴 Drabinka główna (wkrótce)",
+                "Odpadów": "🔴 Turniej odpadów (wkrótce)",
             }
-        tournament_phase = st.selectbox(
-            "Faza",
-            list(faza_options.keys()),
-            format_func=lambda k: faza_options[k],
+        drabinka = st.selectbox(
+            "Drabinka",
+            list(drabinka_options.keys()),
+            format_func=lambda k: drabinka_options[k],
             index=0,
-            help=("Drabinka główna prowadzi do finału. Drabinka B — mecze o miejsca "
-                  "dla drużyn które odpadły wcześniej (grane równolegle z głównymi).")
+            help=("Drabinka główna prowadzi do finału (1/8, 1/4, 1/2, Finał). "
+                  "Turniej odpadów — mecze o miejsca dla zespołów które odpadły "
+                  "(grane równolegle z drabinką główną).")
         )
+    
+    with cols_t2[1]:
+        # Faza zależna od wybranej drabinki
+        if drabinka == "Grupowa":
+            tournament_phase = "Grupowa"
+            st.selectbox("Faza", ["Faza grupowa"],
+                         format_func=lambda k: f"✅ {k}",
+                         index=0, disabled=True,
+                         help="Wybrano fazę grupową — nie ma podfaz.")
+        elif drabinka == "Główna":
+            if is_trojka_pre:
+                faza_options = {
+                    "Pucharowa 1/16": "🔴 1/16 finału (niedostępne dla trójek)",
+                    "Pucharowa 1/8":  "✅ 1/8 finału",
+                    "Pucharowa 1/4":  "✅ 1/4 finału (Ćwierćfinał)",
+                    "Pucharowa 1/2":  "✅ Półfinał",
+                    "Finał":          "✅ Finał",
+                }
+                default_idx = 1  # 1/8 finału
+            else:
+                faza_options = {
+                    "Pucharowa 1/64": "🔴 1/64 finału",
+                    "Pucharowa 1/32": "🔴 1/32 finału",
+                    "Pucharowa 1/16": "🔴 1/16 finału",
+                    "Pucharowa 1/8":  "🔴 1/8 finału",
+                    "Pucharowa 1/4":  "🔴 1/4 finału (Ćwierćfinał)",
+                    "Pucharowa 1/2":  "🔴 Półfinał",
+                    "Finał":          "🔴 Finał",
+                }
+                default_idx = 0
+            tournament_phase = st.selectbox(
+                "Faza",
+                list(faza_options.keys()),
+                format_func=lambda k: faza_options[k],
+                index=default_idx,
+            )
+        else:  # Odpadów
+            # Pełna lista możliwych meczów drabinki przegranych:
+            # • Mecze o pojedyncze miejsce (3, 5, 7, ..., 31)
+            # • Mini-turnieje (Miejsca X-Y)
+            if is_trojka_pre:
+                # Mecz o N (single match) — typowo 3, 5, 7, 9, 11, 13, 15
+                # Miejsca X-Y (mini-bracket) — typowo 5-8, 9-12, 9-16, 13-16
+                faza_options = {
+                    "Mecz o 3. miejsce":  "✅ Mecz o 3. miejsce",
+                    "Mecz o 5. miejsce":  "🟡 Mecz o 5. miejsce",
+                    "Mecz o 7. miejsce":  "🟡 Mecz o 7. miejsce",
+                    "Mecz o 9. miejsce":  "🟡 Mecz o 9. miejsce",
+                    "Mecz o 11. miejsce": "🟡 Mecz o 11. miejsce",
+                    "Mecz o 13. miejsce": "🟡 Mecz o 13. miejsce",
+                    "Mecz o 15. miejsce": "🟡 Mecz o 15. miejsce",
+                    "Miejsca 5-8":   "🟡 Miejsca 5-8",
+                    "Miejsca 9-12":  "🟡 Miejsca 9-12",
+                    "Miejsca 9-16":  "🟡 Miejsca 9-16",
+                    "Miejsca 13-16": "🟡 Miejsca 13-16",
+                }
+            else:
+                faza_options = {
+                    "Mecz o 3. miejsce":  "🔴 Mecz o 3. miejsce",
+                    "Mecz o 5. miejsce":  "🔴 Mecz o 5. miejsce",
+                    "Mecz o 7. miejsce":  "🔴 Mecz o 7. miejsce",
+                    "Mecz o 9. miejsce":  "🔴 Mecz o 9. miejsce",
+                    "Mecz o 11. miejsce": "🔴 Mecz o 11. miejsce",
+                    "Mecz o 13. miejsce": "🔴 Mecz o 13. miejsce",
+                    "Mecz o 15. miejsce": "🔴 Mecz o 15. miejsce",
+                    "Mecz o 17. miejsce": "🔴 Mecz o 17. miejsce",
+                    "Mecz o 19. miejsce": "🔴 Mecz o 19. miejsce",
+                    "Mecz o 21. miejsce": "🔴 Mecz o 21. miejsce",
+                    "Mecz o 23. miejsce": "🔴 Mecz o 23. miejsce",
+                    "Mecz o 25. miejsce": "🔴 Mecz o 25. miejsce",
+                    "Mecz o 27. miejsce": "🔴 Mecz o 27. miejsce",
+                    "Mecz o 29. miejsce": "🔴 Mecz o 29. miejsce",
+                    "Mecz o 31. miejsce": "🔴 Mecz o 31. miejsce",
+                    "Miejsca 5-8":   "🔴 Miejsca 5-8",
+                    "Miejsca 9-12":  "🔴 Miejsca 9-12",
+                    "Miejsca 9-16":  "🔴 Miejsca 9-16",
+                    "Miejsca 13-16": "🔴 Miejsca 13-16",
+                    "Miejsca 17-20": "🔴 Miejsca 17-20",
+                    "Miejsca 17-24": "🔴 Miejsca 17-24",
+                    "Miejsca 17-32": "🔴 Miejsca 17-32",
+                    "Miejsca 21-24": "🔴 Miejsca 21-24",
+                    "Miejsca 25-28": "🔴 Miejsca 25-28",
+                    "Miejsca 25-32": "🔴 Miejsca 25-32",
+                    "Miejsca 29-32": "🔴 Miejsca 29-32",
+                }
+            tournament_phase = st.selectbox(
+                "Faza",
+                list(faza_options.keys()),
+                format_func=lambda k: faza_options[k],
+                index=0,
+            )
+    
     with cols_t2[2]:
-        # Format setów zależny od fazy:
-        # Grupowa → tylko "2 sety" (✅ zweryfikowane)
-        # Pucharowa → wymaga best of 3/5 (🔴 wkrótce)
-        if tournament_phase == "Grupowa":
+        # Format setów zależny od drabinki:
+        # Grupowa → tylko "2 sety"
+        # Główna / Odpadów (pucharowe) → tylko Bo3 / Bo5 (2 sety NIE jest opcją)
+        if drabinka == "Grupowa":
             sets_format = st.selectbox("Format", ["2 sety"],
                 format_func=lambda k: f"✅ {k}",
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            # Pucharowa: Bo3/Bo5 dla trójki dostępne. "2 sety" w pucharowej
-            # nie jest stosowane (zawsze Bo3 lub Bo5 w fazie pucharowej) — 🔴.
             is_trojka_now = tournament_type == "Drużynowy 3-os."
             if is_trojka_now:
-                bo_options = {"Best of 3": "🟡 Best of 3 (eksperymentalne)",
-                             "Best of 5": "🟡 Best of 5 (eksperymentalne)",
-                             "2 sety": "🔴 2 sety (niedostępne w pucharowej)"}
+                bo_options = {
+                    "Best of 3": "✅ Best of 3",
+                    "Best of 5": "✅ Best of 5",
+                }
             else:
-                bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
-                             "Best of 5": "🔴 Best of 5 (wkrótce)",
-                             "2 sety": "🔴 2 sety (niedostępne w pucharowej)"}
-            # Default: Best of 3 dla 1/8, Best of 5 dla 1/4 i wyżej
+                bo_options = {
+                    "Best of 3": "🔴 Best of 3 (wkrótce)",
+                    "Best of 5": "🔴 Best of 5 (wkrótce)",
+                }
+            # Default: Bo3 dla 1/8, Bo5 dla 1/4 i wyżej (zgodnie z FAQ)
             default_idx = 0
             if "1/4" in tournament_phase or "1/2" in tournament_phase or \
-               tournament_phase in ("Mecz o 3. miejsce", "Finał"):
+               tournament_phase == "Finał" or tournament_phase == "Mecz o 3. miejsce":
                 default_idx = 1
             sets_format = st.selectbox("Format",
                 list(bo_options.keys()),
@@ -385,20 +455,29 @@ with col_form:
     
     is_fully_tested = is_supported_type and is_2_sety and is_grupowa
     
-    # Krótka etykieta fazy do wyświetlenia (komórka tc[5] = 1275 dxa = 2.25 cm).
-    # Używana zarówno w preview HTML jak i w docx.
+    # Pełna czytelna etykieta fazy do wyświetlenia w prawym górnym rogu protokołu.
+    # • "Pucharowa 1/8" → "1/8 finału"
+    # • "Pucharowa 1/2" → "Półfinał"
+    # • "Mecz o 9. miejsce" → "Mecz o 9. miejsce"
+    # • "Miejsca 5-8" → "Miejsca 5-8" (NIE "5-8 finału" ani podobne)
     phase_label_short = ""
     if is_pucharowa:
-        m = re.search(r'(\d+/\d+)', tournament_phase)
+        # "Mecz o N miejsce" — zachowaj pełną nazwę
+        m = re.search(r'[Mm]ecz\s+o\s+(\d+)\.?\s*miejsc', tournament_phase)
         if m:
-            phase_label_short = "Półfinał" if m.group(1) == "1/2" else m.group(1)
-        elif "3. miejsce" in tournament_phase:
-            phase_label_short = "3. miejsce"
+            phase_label_short = f"Mecz o {m.group(1)}. miejsce"
+        # "Miejsca X-Y" — zachowaj pełną nazwę
+        elif "Miejsca" in tournament_phase:
+            phase_label_short = tournament_phase
+        # "1/N finału" — z regex, ALE tylko gdy ma slash (nie zmatchuje "5-8")
+        elif re.search(r'\b1/\d+\b', tournament_phase):
+            m = re.search(r'(1/(\d+))', tournament_phase)
+            if m.group(2) == '2':
+                phase_label_short = "Półfinał"
+            else:
+                phase_label_short = f"{m.group(1)} finału"
         elif tournament_phase == "Finał":
             phase_label_short = "Finał"
-        elif "Miejsca" in tournament_phase:
-            # "Miejsca 9-16" → "Miejsca 9-16"
-            phase_label_short = tournament_phase
     
     if not is_supported_type:
         st.warning(f"⚠️ Format **{tournament_type}** nie jest jeszcze obsługiwany. "
@@ -623,12 +702,10 @@ with col_preview:
         parts = []
         if tournament_name: parts.append(tournament_name)
         if tournament_date: parts.append(tournament_date)
-        # Faza w prawym górnym rogu
+        # Faza w prawym górnym rogu — phase_label_short zawiera już pełną
+        # czytelną nazwę ("1/8 finału", "Półfinał", "Miejsca 5-8", "Mecz o 9. miejsce" itd.)
         if is_pucharowa:
-            if phase_label_short in ("Półfinał", "3. miejsce", "Finał"):
-                parts.append(phase_label_short)
-            else:
-                parts.append(f"{phase_label_short} finału")
+            parts.append(phase_label_short)
         else:
             parts.append("Faza grupowa")
         header_text = " · ".join(parts)
@@ -1054,11 +1131,42 @@ with cols_main[1]:
     gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
                             type="primary", use_container_width=True)
 
-with st.expander("➕ Dodatkowe opcje"):
+with st.expander("➕ Pobierz pusty formularz"):
     st.caption("Pusty formularz przyda się gdy chcesz wydrukować protokół do ręcznego wypełnienia "
-               "(bez pobierania danych z arkusza).")
+               "(bez pobierania danych z arkusza). Wybierz typ + format setów.")
+    
+    cols_blank = st.columns([2, 2, 3])
+    with cols_blank[0]:
+        blank_type = st.selectbox(
+            "Typ protokołu",
+            ["Indywidualny", "Drużynowy 3-os."],
+            index=0, key="blank_type",
+            help="Określa szablon docx (Grupa_IND.docx / Grupa_TROJKA.docx itd.)."
+        )
+    with cols_blank[1]:
+        if blank_type == "Drużynowy 3-os.":
+            blank_format = st.selectbox(
+                "Format setów",
+                ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)"],
+                index=0, key="blank_format"
+            )
+        else:
+            blank_format = st.selectbox(
+                "Format setów",
+                ["2 sety (grupowa)"],
+                index=0, key="blank_format",
+                help="Best of 3/5 dla typu Indywidualny — wkrótce."
+            )
+    with cols_blank[2]:
+        blank_prefill = st.checkbox(
+            "Wypełnij nagłówek z ustawień powyżej",
+            value=False, key="blank_prefill",
+            help="Jeśli zaznaczone — formularz dostanie nazwę turnieju, datę i fazę z sekcji 1. "
+                 "Jeśli nie — totalnie czysty (do ręcznego wpisania)."
+        )
+    
     blank_clicked = st.button("📝 Pobierz pusty formularz",
-                              use_container_width=False)
+                              use_container_width=False, key="blank_btn")
 
 # ─── Akcje ──────────────────────────────────────────────────────────────
 if gen_clicked:
@@ -1100,16 +1208,10 @@ if gen_clicked:
         logos_bytes, image_order, img_pos = build_image_args()
         show_name = tournament_name.strip() if show_header_on_protocol else ""
         show_date = tournament_date if show_header_on_protocol else ""
-        # Tekst fazy w prawym górnym rogu (obok nazwy/daty turnieju):
-        # Grupowa → "Faza grupowa", pucharowe → "1/32 finału", "Półfinał", "Finał" itp.
+        # Tekst fazy w prawym górnym rogu — phase_label_short zawiera już pełną
+        # czytelną nazwę ("1/8 finału", "Półfinał", "Miejsca 5-8", "Mecz o 9. miejsce").
         if show_header_on_protocol:
-            if is_pucharowa:
-                if phase_label_short in ("Półfinał", "3. miejsce", "Finał"):
-                    show_phase = phase_label_short
-                else:
-                    show_phase = f"{phase_label_short} finału"
-            else:
-                show_phase = "Faza grupowa"
+            show_phase = phase_label_short if is_pucharowa else "Faza grupowa"
         else:
             show_phase = ""
         # Mapowanie typu turnieju → szablon docx
@@ -1164,35 +1266,55 @@ if blank_clicked:
     if not fmt_docx and not fmt_pdf:
         st.error("Wybierz co najmniej jeden format pliku."); st.stop()
     with st.spinner("Generuję pusty formularz..."):
-        logos_bytes, image_order, img_pos = build_image_args()
-        show_name = tournament_name.strip() if show_header_on_protocol else ""
-        show_date = tournament_date if show_header_on_protocol else ""
-        if show_header_on_protocol:
-            if is_pucharowa:
-                if phase_label_short in ("Półfinał", "3. miejsce", "Finał"):
-                    show_phase = phase_label_short
-                else:
-                    show_phase = f"{phase_label_short} finału"
+        # Mapowanie blank_type + blank_format → template_type
+        if blank_type == "Drużynowy 3-os.":
+            if "Best of 3" in blank_format:
+                blank_template = 'TROJKA_Bo3'
+            elif "Best of 5" in blank_format:
+                blank_template = 'TROJKA_Bo5'
             else:
-                show_phase = "Faza grupowa"
+                blank_template = 'TROJKA'
         else:
-            show_phase = ""
-        if is_trojka and is_pucharowa and sets_format == "Best of 3":
-            template_type = 'TROJKA_Bo3'
-        elif is_trojka and is_pucharowa and sets_format == "Best of 5":
-            template_type = 'TROJKA_Bo5'
+            blank_template = 'IND'
+        
+        # Pre-fill: jeśli zaznaczone, użyj wartości z sekcji 1 (nazwa, data, faza).
+        # Inaczej totalnie czysty (wszystko puste).
+        if blank_prefill:
+            blank_show_name = tournament_name.strip()
+            blank_show_date = tournament_date
+            blank_show_phase = phase_label_short if is_pucharowa else "Faza grupowa"
+            logos_bytes, image_order, img_pos = build_image_args()
+            blank_include_qr = include_qr
+            blank_include_pfm = include_pfm_logo
         else:
-            template_type = 'TROJKA' if is_trojka else 'IND'
+            blank_show_name = ""
+            blank_show_date = ""
+            blank_show_phase = ""
+            logos_bytes, image_order, img_pos = ([], None, {})
+            blank_include_qr = False
+            blank_include_pfm = False
+        
         docx_bytes = generate_docx.build_blank_document(
             num_pages=1, logos=logos_bytes or None,
-            tournament_name=show_name, tournament_date=show_date,
-            tournament_phase_text=show_phase,
-            sheets_url=sheets_url.strip(),
-            include_qr=include_qr, include_pfm_logo=include_pfm_logo,
+            tournament_name=blank_show_name, tournament_date=blank_show_date,
+            tournament_phase_text=blank_show_phase,
+            sheets_url=sheets_url.strip() if blank_prefill else "",
+            include_qr=blank_include_qr, include_pfm_logo=blank_include_pfm,
             image_order=image_order or None, image_positions=img_pos or None,
-            template_type=template_type)
+            template_type=blank_template)
 
-    safe_name = "pusty_formularz"
+    # Nazwa pliku odpowiednia do typu szablonu i ewentualnego pre-fill
+    template_label = {
+        'IND': 'indywidualny_2sety',
+        'TROJKA': 'trojka_2sety',
+        'TROJKA_Bo3': 'trojka_Bo3',
+        'TROJKA_Bo5': 'trojka_Bo5',
+    }.get(blank_template, blank_template.lower())
+    if blank_prefill and tournament_name.strip():
+        prefix = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_')
+        safe_name = f"{prefix}_pusty_{template_label}"
+    else:
+        safe_name = f"pusty_formularz_{template_label}"
     pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:
         with st.spinner("Konwertuję do PDF..."):
