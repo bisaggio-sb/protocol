@@ -286,36 +286,48 @@ with col_form:
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
     
     with cols_t2[1]:
-        # Faza zależna od typu - trójka nie ma 1/64 ani 1/32 (zwykle za mało drużyn)
+        # Faza zależna od typu. Restrukturyzacja w 3 sekcje wizualne:
+        # • Grupowa
+        # • Drabinka główna (ścieżka prowadząca do finału)
+        # • Drabinka B (mecze o miejsca - dla zespołów które odpadły)
         if is_trojka_pre:
-            # Trójka: 1/16 niedostępne (zbyt rzadko stosowane na turniejach trójek).
             faza_options = {
                 "Grupowa": "✅ Grupowa",
-                "Pucharowa 1/16": "🔴 Pucharowa 1/16 (niedostępne dla trójek)",
-                "Pucharowa 1/8": "🟡 Pucharowa 1/8",
-                "Pucharowa 1/4": "🟡 Pucharowa 1/4",
-                "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
-                "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
-                "Finał": "🟡 Finał",
+                # ── Drabinka główna ──
+                "Pucharowa 1/16": "🔴 Główna · 1/16 finału (niedostępne dla trójek)",
+                "Pucharowa 1/8":  "✅ Główna · 1/8 finału",
+                "Pucharowa 1/4":  "✅ Główna · 1/4 finału (Ćwierćfinał)",
+                "Pucharowa 1/2":  "✅ Główna · 1/2 finału (Półfinał)",
+                "Finał":          "✅ Główna · Finał",
+                # ── Drabinka B (mecze o miejsca, grane równolegle z drabinką główną) ──
+                "Mecz o 3. miejsce": "✅ Drabinka B · Mecz o 3. miejsce  (∥ Finał)",
+                "Miejsca 5-8":       "🟡 Drabinka B · Miejsca 5-8  (∥ Półfinał)",
+                "Miejsca 9-16":      "🟡 Drabinka B · Miejsca 9-16  (∥ 1/4 finału)",
             }
         else:
             faza_options = {
                 "Grupowa": "✅ Grupowa",
-                "Pucharowa 1/64": "🟡 Pucharowa 1/64",
-                "Pucharowa 1/32": "🟡 Pucharowa 1/32",
-                "Pucharowa 1/16": "🟡 Pucharowa 1/16",
-                "Pucharowa 1/8": "🟡 Pucharowa 1/8",
-                "Pucharowa 1/4": "🟡 Pucharowa 1/4",
-                "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
-                "Mecz o 3. miejsce": "🟡 Mecz o 3. miejsce",
-                "Finał": "🟡 Finał",
+                # ── Drabinka główna ──
+                "Pucharowa 1/64": "🔴 Główna · 1/64 finału",
+                "Pucharowa 1/32": "🔴 Główna · 1/32 finału",
+                "Pucharowa 1/16": "🔴 Główna · 1/16 finału",
+                "Pucharowa 1/8":  "🔴 Główna · 1/8 finału",
+                "Pucharowa 1/4":  "🔴 Główna · 1/4 finału (Ćwierćfinał)",
+                "Pucharowa 1/2":  "🔴 Główna · 1/2 finału (Półfinał)",
+                "Finał":          "🔴 Główna · Finał",
+                # ── Drabinka B ──
+                "Mecz o 3. miejsce": "🔴 Drabinka B · Mecz o 3. miejsce  (∥ Finał)",
+                "Miejsca 5-8":       "🔴 Drabinka B · Miejsca 5-8  (∥ Półfinał)",
+                "Miejsca 9-16":      "🔴 Drabinka B · Miejsca 9-16  (∥ 1/4 finału)",
+                "Miejsca 17-32":     "🔴 Drabinka B · Miejsca 17-32  (∥ 1/8 finału)",
             }
         tournament_phase = st.selectbox(
             "Faza",
             list(faza_options.keys()),
             format_func=lambda k: faza_options[k],
             index=0,
-            help="Obecnie zweryfikowana faza grupowa. Pucharowe — w trakcie testów (wymagają best-of-3/5)."
+            help=("Drabinka główna prowadzi do finału. Drabinka B — mecze o miejsca "
+                  "dla drużyn które odpadły wcześniej (grane równolegle z głównymi).")
         )
     with cols_t2[2]:
         # Format setów zależny od fazy:
@@ -359,8 +371,17 @@ with col_form:
     is_supported_type = is_individual or is_trojka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
-    is_pucharowa = "Pucharowa" in tournament_phase or tournament_phase in (
-        "Mecz o 3. miejsce", "Finał")
+    is_pucharowa = (
+        "Pucharowa" in tournament_phase or
+        "Miejsca" in tournament_phase or
+        tournament_phase in ("Mecz o 3. miejsce", "Finał")
+    )
+    # is_drabinka_b: faza z meczów o miejsca (drabinka przegranych) — w UI
+    # wybierana z sekcji "Drabinka B".
+    is_drabinka_b = (
+        "Miejsca" in tournament_phase or
+        tournament_phase == "Mecz o 3. miejsce"
+    )
     
     is_fully_tested = is_supported_type and is_2_sety and is_grupowa
     
@@ -375,6 +396,9 @@ with col_form:
             phase_label_short = "3. miejsce"
         elif tournament_phase == "Finał":
             phase_label_short = "Finał"
+        elif "Miejsca" in tournament_phase:
+            # "Miejsca 9-16" → "Miejsca 9-16"
+            phase_label_short = tournament_phase
     
     if not is_supported_type:
         st.warning(f"⚠️ Format **{tournament_type}** nie jest jeszcze obsługiwany. "
@@ -1108,9 +1132,16 @@ if gen_clicked:
 
     safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
     if is_pucharowa:
-        # Dodaj fazę do nazwy pliku, np. "GP2_2026_1_32"
+        # Dodaj fazę + format setów do nazwy pliku.
+        # np. "TDT_2026_pucharowa_1_4_Bo5", "TDT_2026_finał_Bo3", "TDT_2026_miejsca_9_16_Bo3"
         phase_suffix = re.sub(r'[^\w]', '_', tournament_phase).strip('_').lower()
-        safe_name = f"{safe_name}_{phase_suffix}"
+        # Format: dla pucharowej zawsze Bo3 lub Bo5 (2 sety wyłączone w UI dla puchar).
+        format_suffix = ''
+        if sets_format == 'Best of 3':
+            format_suffix = '_Bo3'
+        elif sets_format == 'Best of 5':
+            format_suffix = '_Bo5'
+        safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
     
     pdf_bytes, pdf_err = (None, None)
     if fmt_pdf:

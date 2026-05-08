@@ -152,6 +152,14 @@ PHASE_NAMES = {
     'półfinał': '1/2 FINAŁU',
     '3. miejsce': 'MECZ O 3. MIEJSCE',
     'mecz o 3': 'MECZ O 3. MIEJSCE',
+    # Drabinka B (mecze o miejsca). Wpisy specyficzne — bardziej szczegółowe
+    # zakresy przed bardziej ogólnymi (np. 'miejsca 17-32' przed 'miejsca 17-24').
+    'miejsca 5-8':   'MIEJSCA 5-8',
+    'miejsca 9-16':  'MIEJSCA 9-16',
+    'miejsca 17-24': 'MIEJSCA 17-24',
+    'miejsca 17-32': 'MIEJSCA 17-32',
+    'miejsca 25-32': 'MIEJSCA 25-32',
+    'miejsca 33-64': 'MIEJSCA 33-64',
     'finał': 'FINAŁ',
 }
 
@@ -346,6 +354,13 @@ def parse_drabinka_rows(rows, target_phase=None):
         '1/8':   8, '1/4':   4, '1/2':   2,
         'półfinał': 2,
         '3. miejsce': 1, 'mecz o 3': 1,
+        # Drabinka B — liczba meczów = (liczba drużyn / 2)
+        'miejsca 5-8':   2,    # 4 drużyny → 2 mecze
+        'miejsca 9-16':  4,    # 8 drużyn  → 4 mecze
+        'miejsca 17-24': 4,    # 8 drużyn  → 4 mecze
+        'miejsca 25-32': 4,    # 8 drużyn  → 4 mecze
+        'miejsca 17-32': 8,    # 16 drużyn → 8 meczów
+        'miejsca 33-64': 16,   # 32 drużyny → 16 meczów
         'finał': 1,
     }
     expected = None
