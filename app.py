@@ -326,12 +326,11 @@ with col_form:
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            # Best of 3 jest TERAZ dostępny dla trójki pucharowej (Bo3_TROJKA.docx).
-            # Best of 5 i 2 sety są fallbackiem.
+            # Best of 3 i Best of 5 dostępne dla trójki pucharowej (oba szablony gotowe).
             is_trojka_now = tournament_type == "Drużynowy 3-os."
             if is_trojka_now:
                 bo_options = {"Best of 3": "🟡 Best of 3 (eksperymentalne)",
-                             "Best of 5": "🔴 Best of 5 (wkrótce)",
+                             "Best of 5": "🟡 Best of 5 (eksperymentalne)",
                              "2 sety": "🟡 2 sety"}
             else:
                 bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
@@ -346,7 +345,7 @@ with col_form:
                 list(bo_options.keys()),
                 format_func=lambda k: bo_options[k],
                 index=default_idx,
-                help="Best of 3 dla trójki pucharowej zaimplementowane. Reszta wkrótce."
+                help="Best of 3 i Best of 5 dla trójki pucharowej zaimplementowane."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -414,67 +413,88 @@ with col_form:
             st.code("\n".join(info))
 
     # ─── 3. Domyślne elementy ───────────────────────────────────────────
-    st.header("3. Domyślne elementy")
-    cols_dom = st.columns(2)
-    with cols_dom[0]:
-        include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
-        show_header_on_protocol = st.checkbox(
-            "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
-    with cols_dom[1]:
-        include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
+    # Bo3/Bo5 trójka pucharowa NIE używają grafik — sekcja jest ukryta
+    # i wartości default'owane na False.
+    is_no_graphics_trojka = (
+        is_trojka and is_pucharowa and sets_format in ("Best of 3", "Best of 5")
+    )
+    if is_no_graphics_trojka:
+        st.header("3. Domyślne elementy")
+        st.info("ℹ️ **Best of 3 / Best of 5 dla trójki pucharowej nie używają grafik** — "
+                "całe miejsce jest potrzebne na rozszerzoną tabelę wyników (3 lub 5 setów). "
+                "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
+        # Wyłącz wszystko
+        include_qr = False
+        show_header_on_protocol = True  # nagłówek w prawym górnym rogu i tak chcemy
+        include_pfm_logo = False
+    else:
+        st.header("3. Domyślne elementy")
+        cols_dom = st.columns(2)
+        with cols_dom[0]:
+            include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
+            show_header_on_protocol = st.checkbox(
+                "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
+        with cols_dom[1]:
+            include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
     # ─── 4. Grafiki (zwijane) - łączy dodawanie + pozycjonowanie ─────────
     NUM_LOGOS = 4
     logo_files = []
     
-    # Cache uploadowanych bajtów w session_state. Dzięki temu pliki "pamiętają się"
-    # nawet gdy expander zostanie zwinięty albo widget straci state po download_button.
-    # Klucze: 'logo_bytes_0' ... 'logo_bytes_3' przechowują (filename, bytes).
-    
-    # Sprawdź ile grafik już dodanych żeby pokazać liczbę (z widget LUB cache bajtów)
-    n_uploaded = sum(
-        1 for i in range(NUM_LOGOS)
-        if (st.session_state.get(f'logo_{i}') is not None) or
-           (st.session_state.get(f'logo_bytes_{i}') is not None)
-    )
-    
-    grafiki_label = "Grafiki"
-    if n_uploaded > 0:
-        grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
-    
-    with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
-        st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
-        cols_log = st.columns(2)
-        # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
-        # Korzystamy z prostego wrappera _CachedUpload.
-        for i in range(NUM_LOGOS):
-            with cols_log[i % 2]:
-                f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
-                                     key=f"logo_{i}", label_visibility="visible")
-                if f is not None:
-                    # Świeży upload — cache bajtów do session_state
-                    f.seek(0)
-                    raw_bytes = f.read()
-                    f.seek(0)
-                    st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
-                    logo_files.append(_CachedUpload(f.name, raw_bytes))
-                elif st.session_state.get(f'logo_bytes_{i}') is not None:
-                    # Widget zwrócił None (np. po download_button rerun), ale mamy cache
-                    name, raw_bytes = st.session_state[f'logo_bytes_{i}']
-                    logo_files.append(_CachedUpload(name, raw_bytes))
-                else:
-                    logo_files.append(None)
-        
-        # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
+    if is_no_graphics_trojka:
+        # Pomijamy całą sekcję grafik — Bo3/Bo5 ich nie wspiera
+        for _ in range(NUM_LOGOS):
+            logo_files.append(None)
         logos_aspect = {}
-        for i, f in enumerate(logo_files):
-            if f is not None:
-                try:
-                    f.seek(0)
-                    logos_aspect[f'logo{i+1}'] = get_image_aspect(f.read())
-                    f.seek(0)
-                except Exception:
-                    logos_aspect[f'logo{i+1}'] = 1.5
+    else:
+        # Cache uploadowanych bajtów w session_state. Dzięki temu pliki "pamiętają się"
+        # nawet gdy expander zostanie zwinięty albo widget straci state po download_button.
+        # Klucze: 'logo_bytes_0' ... 'logo_bytes_3' przechowują (filename, bytes).
+        
+        # Sprawdź ile grafik już dodanych żeby pokazać liczbę (z widget LUB cache bajtów)
+        n_uploaded = sum(
+            1 for i in range(NUM_LOGOS)
+            if (st.session_state.get(f'logo_{i}') is not None) or
+               (st.session_state.get(f'logo_bytes_{i}') is not None)
+        )
+        
+        grafiki_label = "Grafiki"
+        if n_uploaded > 0:
+            grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
+        
+        with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
+            st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
+            cols_log = st.columns(2)
+            # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
+            # Korzystamy z prostego wrappera _CachedUpload.
+            for i in range(NUM_LOGOS):
+                with cols_log[i % 2]:
+                    f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
+                                         key=f"logo_{i}", label_visibility="visible")
+                    if f is not None:
+                        # Świeży upload — cache bajtów do session_state
+                        f.seek(0)
+                        raw_bytes = f.read()
+                        f.seek(0)
+                        st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                        logo_files.append(_CachedUpload(f.name, raw_bytes))
+                    elif st.session_state.get(f'logo_bytes_{i}') is not None:
+                        # Widget zwrócił None (np. po download_button rerun), ale mamy cache
+                        name, raw_bytes = st.session_state[f'logo_bytes_{i}']
+                        logo_files.append(_CachedUpload(name, raw_bytes))
+                    else:
+                        logo_files.append(None)
+            
+            # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
+            logos_aspect = {}
+            for i, f in enumerate(logo_files):
+                if f is not None:
+                    try:
+                        f.seek(0)
+                        logos_aspect[f'logo{i+1}'] = get_image_aspect(f.read())
+                        f.seek(0)
+                    except Exception:
+                        logos_aspect[f'logo{i+1}'] = 1.5
         
         # ─── Aktywne elementy ────────────────────────────────────────────
         elements_active = []
@@ -598,15 +618,23 @@ with col_preview:
     
     if is_trojka:
         # ─── Preview TRÓJKOWY ───
-        # Po naszych modyfikacjach docx: obie tabele rozszerzone do 10466 dxa = 18.46 cm
-        # (cała useable area). Lewa kolumna R1.tc[0] = 2700 dxa = 4.76 cm na grafiki.
-        TROJKA_TBL_W_PX = int((18.46 / PAGE_W_CM) * PAGE_W_PX)  # 18.46 cm = pełna szerokość
-        # W tabeli 1 nazwy drużyn zajmują tc[0] gridSpan=4 czyli sumę col 0-3 oryginału.
-        # Po skalowaniu × scale_t1 = 10466/9026 ≈ 1.16: tc[0] = 3915×1.16 ≈ 4541 dxa
-        TROJKA_NAMES_PX = int((4541 / 10466) * TROJKA_TBL_W_PX)
+        # Bo2 (grupowa lub puchar 2-set): lewa kolumna R1.tc[0] poszerzona do 4.76 cm
+        # na grafiki (QR + loga). Bo3/Bo5 (puchar): bez grafik — lewa kolumna wąska
+        # (oryginalna ~0.7 cm — tylko wiersz "WYNIK"/"PKT" na dole).
+        is_no_graphics_trojka = is_pucharowa and sets_format in ("Best of 3", "Best of 5")
+        
+        TROJKA_TBL_W_PX = int((18.46 / PAGE_W_CM) * PAGE_W_PX)  # pełna szerokość strony
+        if is_no_graphics_trojka:
+            # Bez grafik: kolumna IMIONA/numerów rzędów (~0.7 cm)
+            TROJKA_R1_W_PX = int((0.7 / PAGE_W_CM) * PAGE_W_PX)
+            # Tabela 1 nazwy: dla Bo3/Bo5 cell tc[0] ma 5.24 cm (2970 dxa scaled to ~3358)
+            TROJKA_NAMES_PX = int((5.24 / PAGE_W_CM) * PAGE_W_PX)
+        else:
+            # Bo2: tabela 1 nazwa po skalowaniu × scale_t1 = 10466/9026 ≈ 1.16: tc[0] ≈ 4541 dxa
+            TROJKA_NAMES_PX = int((4541 / 10466) * TROJKA_TBL_W_PX)
+            # Lewa kolumna tabeli wynikowej (R1.tc[0] = 2700 dxa = 4.76 cm)
+            TROJKA_R1_W_PX = int((4.76 / PAGE_W_CM) * PAGE_W_PX)
         TROJKA_HEADER_W_PX = TROJKA_TBL_W_PX - TROJKA_NAMES_PX
-        # Lewa kolumna tabeli wynikowej (R1.tc[0] = 2700 dxa = 4.76 cm)
-        TROJKA_R1_W_PX = int((4.76 / PAGE_W_CM) * PAGE_W_PX)
         
         html = f"""
         <div style="background:white; border:1px solid #ccc;
@@ -1061,9 +1089,11 @@ if gen_clicked:
         else:
             show_phase = ""
         # Mapowanie typu turnieju → szablon docx
-        # Trójka pucharowa + Best of 3 → Bo3_TROJKA.docx (3 sety zamiast 2)
+        # Trójka pucharowa: Best of 3 → Bo3_TROJKA.docx, Best of 5 → Bo5_TROJKA.docx
         if is_trojka and is_pucharowa and sets_format == "Best of 3":
             template_type = 'TROJKA_Bo3'
+        elif is_trojka and is_pucharowa and sets_format == "Best of 5":
+            template_type = 'TROJKA_Bo5'
         else:
             template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_document(
@@ -1118,6 +1148,8 @@ if blank_clicked:
             show_phase = ""
         if is_trojka and is_pucharowa and sets_format == "Best of 3":
             template_type = 'TROJKA_Bo3'
+        elif is_trojka and is_pucharowa and sets_format == "Best of 5":
+            template_type = 'TROJKA_Bo5'
         else:
             template_type = 'TROJKA' if is_trojka else 'IND'
         docx_bytes = generate_docx.build_blank_document(
