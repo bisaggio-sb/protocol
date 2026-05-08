@@ -589,6 +589,63 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             if tcs: _set_cell_value(tcs[0], match.get('z2', ''), size=24, align='right')
         return  # Bo3 ma własną logikę, nie kontynuujemy ze standardową
     
+    if template_type == 'TROJKA_Bo5':
+        # Bo5 ma DWIE strony do wypełnienia (oddzielone pustą stroną):
+        #  Strona 1 (Table 1): Tor / Godz. / Runda + Punkty SET 1-3 + Wygrane + Podpis
+        #  Strona 3 (Table 3): Tor / Runda + Pkt SET 1-5 + Wygrane + Podpis  (NO Godz.!)
+        # Logika identyczna z Bo3 dla strony 1, dodatkowo wypełniamy stronę 3.
+        tor_val = match.get('tor', '').strip()
+        godz_val = match.get('godz', '').strip()
+        mecz_val = match.get('mecz', '').strip()
+        z1 = match.get('z1', '')
+        z2 = match.get('z2', '')
+        
+        # ── Strona 1 (Table 1, R1.tc[0..5]) — taka sama logika jak w Bo3 ──
+        if len(rows) >= 1:
+            tcs = rows[0].findall(wt('tc'))
+            if len(tcs) > 0 and tor_val:
+                _set_cell_label(tcs[0], f'Tor  {tor_val}')
+            if len(tcs) > 2 and godz_val:
+                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+            if len(tcs) > 5:
+                if mecz_val:
+                    _set_cell_label(tcs[5], f'Mecz  {mecz_val}')
+                else:
+                    _set_cell_label(tcs[5], '')
+        # Drużyny w T1.R3.tc[0] i T1.R4.tc[0]
+        if len(rows) > 2:
+            tcs = rows[2].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
+        if len(rows) > 3:
+            tcs = rows[3].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
+        
+        # ── Strona 3 (Table 3) — inna struktura: 7 widocznych kolumn w R1 ──
+        # tc[0]=Tor, tc[1]=empty(wide), tc[2-4]=empty, tc[5]=empty, tc[6]=Runda(last)
+        # Bez "Godz." labela (na drugiej stronie nie ma czasu, jest już na pierwszej)
+        all_tbls = [el for el in elements if el.tag == wt('tbl')]
+        if len(all_tbls) >= 3:
+            t3 = all_tbls[2]
+            t3_rows = t3.findall(wt('tr'))
+            if t3_rows:
+                tcs = t3_rows[0].findall(wt('tc'))
+                if len(tcs) > 0 and tor_val:
+                    _set_cell_label(tcs[0], f'Tor  {tor_val}')
+                # "Runda" jest w ostatniej komórce R1 — szukamy ostatniej z 7
+                if len(tcs) >= 7:
+                    if mecz_val:
+                        _set_cell_label(tcs[-1], f'Mecz  {mecz_val}')
+                    else:
+                        _set_cell_label(tcs[-1], '')
+            # Drużyny powtarzane w T3.R3.tc[0] i T3.R4.tc[0]
+            if len(t3_rows) > 2:
+                tcs = t3_rows[2].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
+            if len(t3_rows) > 3:
+                tcs = t3_rows[3].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
+        return  # Bo5 ma własną logikę
+    
     # ── Standard (IND, TROJKA Bo2): zachowane bez zmian ───────────────────
     if len(rows) > 0:
         tcs = rows[0].findall(wt('tc'))
@@ -800,6 +857,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'IND': 'Grupa_IND.docx',
         'TROJKA': 'Grupa_TROJKA.docx',
         'TROJKA_Bo3': 'Bo3_TROJKA.docx',
+        'TROJKA_Bo5': 'Bo5_TROJKA.docx',
         # CZWORKA, DRUZYNA - nie zaimplementowane jeszcze (czeka na szablony)
     }
     tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')
@@ -835,15 +893,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
-    if template_type in ('TROJKA', 'TROJKA_Bo3'):
-        # Bo2 i Bo3 mają wspólny zestaw etykiet, ale Bo3 NIE potrzebuje
-        # normalizacji fontu dla 'SET 1/2/3' bo w nowym szablonie te 3 etykiety
-        # są inaczej zbudowane (różne run-e) i normalizacja powoduje
-        # niespójność (SET 2 robi się grubsze niż SET 1/(SET 3)).
-        if template_type == 'TROJKA_Bo3':
+    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5'):
+        # Bo2 i Bo3/Bo5 mają wspólny zestaw etykiet, ale Bo3/Bo5 NIE potrzebują
+        # normalizacji fontu dla 'SET 1/2/3/4/5' / '(SET N)' bo w nowym szablonie
+        # te etykiety są inaczej zbudowane (różne run-e) i normalizacja powoduje
+        # niespójność (np. SET 2 robi się grubsze niż SET 1/(SET 3)).
+        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
             TROJKA_LABELS = {'Tor','Godz.','Godzina','Mecz','Runda',
                              'PunktySET 1','PunktySET 2','PunktySET 3',
-                             'Punkty','Wygrane','sety','Podpis','Wygranesety'}
+                             'PunktySET 4','PunktySET 5',
+                             'PktSET 1','PktSET 2','PktSET 3','PktSET 4','PktSET 5',
+                             'Punkty','Pkt','Wygrane','sety','Podpis','Wygranesety'}
         else:
             TROJKA_LABELS = {'Tor','Godzina','Godz.','Grupa','Mecz','#','Runda',
                              'Punkty','SET 1','SET 2','SET 3','(SET 3)',
@@ -867,16 +927,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         
         # Zmniejszenie odstępów po tabeli wynikowej żeby mieściło się na 1 stronie.
         # Ostatni paragraf przed sectPr ma duży before - usuwamy.
-        for p in body.iter(wt('p')):
-            pPr = p.find(wt('pPr'))
-            if pPr is not None:
-                spacing = pPr.find(wt('spacing'))
-                if spacing is not None:
-                    # Zmniejsz before/after do 0
-                    for attr in ('before','after','beforeLines','afterLines'):
-                        a = f'{{{W}}}{attr}'
-                        if a in spacing.attrib:
-                            spacing.set(a, '0')
+        # POMIJAMY DLA Bo5 — Bo5 jest 2-stronicowe, potrzebuje zachowania
+        # naturalnych odstępów dla page-break między stroną 1 (SET 1-3)
+        # a stroną 2 (SET 4-5).
+        if template_type != 'TROJKA_Bo5':
+            for p in body.iter(wt('p')):
+                pPr = p.find(wt('pPr'))
+                if pPr is not None:
+                    spacing = pPr.find(wt('spacing'))
+                    if spacing is not None:
+                        # Zmniejsz before/after do 0
+                        for attr in ('before','after','beforeLines','afterLines'):
+                            a = f'{{{W}}}{attr}'
+                            if a in spacing.attrib:
+                                spacing.set(a, '0')
         
         # ── Rozszerzenie obu tabel do PEŁNEJ szerokości użytecznej strony ──
         # Marginesy 720 dxa po obu stronach → useable area = 11906 - 1440 = 10466 dxa = 18.46 cm.
@@ -894,6 +958,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             ORIG_T1_TOTAL = 9239
             ORIG_T2_TOTAL = 9439
             ORIG_LEFT_COL_DXA = 391
+        elif template_type == 'TROJKA_Bo5':
+            # Bo5_TROJKA.docx: 4 tabele. Strona 1 = SET 1-3 (jak Bo3),
+            # strona 3 = SET 4-5 (warunkowe sety + przepisanie punktacji 1-5).
+            # T1 = 9026 dxa (header s.1), T2 = 9439 dxa (results s.1, 25 kol),
+            # T3 = 9026 dxa (header s.3, 8 kol z PktSET 1-5),
+            # T4 = 6425 dxa (results s.3, 17 kol z (SET 4)/(SET 5)).
+            ORIG_T1_TOTAL = 9026
+            ORIG_T2_TOTAL = 9439
+            ORIG_T3_TOTAL = 9026
+            ORIG_T4_TOTAL = 6425
+            ORIG_LEFT_COL_DXA = 393  # T2.col0
         else:
             # Grupa_TROJKA.docx: tabela 1 = 9026 dxa, tabela 2 = 9251 dxa, col0=1186
             ORIG_T1_TOTAL = 9026
@@ -936,10 +1011,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             
             # Tabela 2: ZALEŻNIE OD WARIANTU
             # - TROJKA (Bo2): lewa kolumna powiększona do 2700 dxa (na grafiki)
-            # - TROJKA_Bo3: jednorodne skalowanie (Bo3 nie ma grafik — col0 zostaje
-            #   wąska kolumna IMIONA, nie poszerzamy)
-            if template_type == 'TROJKA_Bo3':
-                NEW_LEFT_COL_DXA = ORIG_LEFT_COL_DXA  # zostaje 855 dxa = 1.51 cm
+            # - TROJKA_Bo3/Bo5: jednorodne skalowanie (puchar trójki nie używa
+            #   grafik — col0 zostaje wąska, nie poszerzamy)
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
+                NEW_LEFT_COL_DXA = ORIG_LEFT_COL_DXA  # zostaje wąsko (~393 dxa)
             else:
                 NEW_LEFT_COL_DXA = 2700  # 4.76 cm — większy obszar na grafiki
             NEW_REST_TOTAL = TARGET_WIDTH - NEW_LEFT_COL_DXA
@@ -1000,6 +1075,64 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Pomijamy: R1 (SET headers), R2 (SUMA labels), R3 (continuation
                 # vMerge), oraz ostatni wiersz (PKT/WYNIK).
                 if r_idx < 3 or r_idx == len(t2_rows) - 1:
+                    continue
+                cells = tr.findall(wt('tc'))
+                if not cells: continue
+                last_tc = cells[-1]
+                tcPr = last_tc.find(wt('tcPr'))
+                if tcPr is None: continue
+                tcBorders = tcPr.find(wt('tcBorders'))
+                if tcBorders is None: continue
+                for side in ('top', 'bottom'):
+                    b = tcBorders.find(wt(side))
+                    if b is not None:
+                        tcBorders.remove(b)
+        
+        # ── BO5: dodatkowo skalujemy tabele 3 i 4 (strona 3 — extension sheet) ──
+        # T3 (header s.3) skalujemy proporcjonalnie do tej samej szerokości co T1.
+        # T4 (results s.3 z (SET 4)/(SET 5)) celowo NIE skalujemy do max — niech
+        # zachowa naturalną proporcję (jest węższa od T2 bo ma tylko 2 sety).
+        if template_type == 'TROJKA_Bo5' and len(tbls) >= 4:
+            t3, t4 = tbls[2], tbls[3]
+            
+            # ── EXPLICIT PAGE BREAK przed T3 ──
+            # Bo5 musi rozłożyć się na 2 strony: strona 1 = SET 1-3,
+            # strona 2 = SET 4-5 (extension). W oryginalnym docx page break
+            # między T2 a T3 powstaje przez naturalny overflow (template ma
+            # paragraphs z dużymi spacing). Przy klonowaniu i niezależnie od
+            # spacing wstawiamy explicit `<w:br type="page"/>` w paragrafie
+            # między T2 a T3, żeby T3 ZAWSZE szedł na nową stronę.
+            t2_idx = list(body).index(t2)
+            for j in range(t2_idx + 1, list(body).index(t3)):
+                el_between = list(body)[j]
+                if el_between.tag == wt('p'):
+                    # Add page break run as the first child of this paragraph
+                    run = etree.SubElement(el_between, wt('r'))
+                    br = etree.SubElement(run, wt('br'))
+                    br.set(f'{{{W}}}type', 'page')
+                    break  # tylko raz
+            
+            scale_t3 = TARGET_WIDTH / ORIG_T3_TOTAL
+            grid3 = t3.find(wt('tblGrid'))
+            if grid3 is not None:
+                for col in grid3.findall(wt('gridCol')):
+                    w = col.get(f'{{{W}}}w')
+                    if w:
+                        col.set(f'{{{W}}}w', str(int(int(w) * scale_t3)))
+            for tr in t3.findall(wt('tr')):
+                for tc in tr.findall(wt('tc')):
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is not None:
+                        tcW = tcPr.find(wt('tcW'))
+                        if tcW is not None:
+                            w = tcW.get(f'{{{W}}}w')
+                            if w:
+                                tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t3)))
+            # T4 zostaje w oryginalnej szerokości (6425 dxa) — narrower bo tylko 2 sety
+            # ale aplikujemy fix ramek dla ostatniej kolumny (jak w T2)
+            t4_rows = t4.findall(wt('tr'))
+            for r_idx, tr in enumerate(t4_rows):
+                if r_idx < 3 or r_idx == len(t4_rows) - 1:
                     continue
                 cells = tr.findall(wt('tc'))
                 if not cells: continue
@@ -1238,8 +1371,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                            template_type=template_type)
 
             # Lista elementów do wstawienia w lewym obszarze
-            # Bo3 nie używa grafik (lewa kolumna IMIONA jest za wąska, ~1.5 cm).
-            if template_type == 'TROJKA_Bo3':
+            # Bo3/Bo5 nie używają grafik (lewa kolumna jest wąska, ~0.7 cm).
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
                 order = []
             else:
                 order = image_order if image_order else (
@@ -1303,7 +1436,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Trójka: kolumna 4.76 cm. IND: kolumna 5.24 cm. Kompensacja
                 # cellMargin (-0.185 cm) ze strony app.py oznacza że dopuszczalny
                 # zakres X to ok. -0.2…(col_width - w).
-                col_width_cm = 4.76 if template_type in ('TROJKA', 'TROJKA_Bo3') else 5.24
+                col_width_cm = 4.76 if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5') else 5.24
                 # Effective right edge (z kompensacją cellMargin po lewej)
                 # Image left edge może być nawet -0.2 (kompensacja), wtedy max w to col_width.
                 # Ale clampujemy x do >= -0.25 żeby nie wszedł za daleko w lewo.
@@ -1331,10 +1464,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     cur_y_cm += 0.4  # miejsce na napis "Wyniki turnieju"
 
             # Napis "Wyniki turnieju" - tylko gdy jest QR.
-            # Bo3 nie używa lewej kolumny na grafiki (zostaje oryginalna IMIONA),
+            # Bo3/Bo5 nie używają lewej kolumny na grafiki (zostaje oryginalna),
             # więc całkowicie pomijamy populate_left_area.
-            if template_type == 'TROJKA_Bo3':
-                pass  # nie ruszamy lewej kolumny IMIONA
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
+                pass  # nie ruszamy lewej kolumny
             elif qr_rid_info and include_qr:
                 # Wyciągnij faktyczną pozycję i wysokość QR z image_positions
                 if image_positions and 'qr' in image_positions:
