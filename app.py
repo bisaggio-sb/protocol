@@ -256,7 +256,7 @@ with col_form:
     st.header("1. Turniej")
     cols_t1 = st.columns([2, 1])
     with cols_t1[0]:
-        tournament_name = st.text_input("Nazwa", value="GP2 2026",
+        tournament_name = st.text_input("Nazwa", value="TDT 2026",
                                         placeholder="np. GP2 2026")
     with cols_t1[1]:
         next_sat = date.today() + timedelta(days=(5 - date.today().weekday()) % 7)
@@ -288,9 +288,10 @@ with col_form:
     with cols_t2[1]:
         # Faza zależna od typu - trójka nie ma 1/64 ani 1/32 (zwykle za mało drużyn)
         if is_trojka_pre:
+            # Trójka: 1/16 niedostępne (zbyt rzadko stosowane na turniejach trójek).
             faza_options = {
                 "Grupowa": "✅ Grupowa",
-                "Pucharowa 1/16": "🟡 Pucharowa 1/16",
+                "Pucharowa 1/16": "🔴 Pucharowa 1/16 (niedostępne dla trójek)",
                 "Pucharowa 1/8": "🟡 Pucharowa 1/8",
                 "Pucharowa 1/4": "🟡 Pucharowa 1/4",
                 "Pucharowa 1/2": "🟡 Pucharowa 1/2 (Półfinał)",
@@ -326,17 +327,18 @@ with col_form:
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            # Best of 3 i Best of 5 dostępne dla trójki pucharowej (oba szablony gotowe).
+            # Pucharowa: Bo3/Bo5 dla trójki dostępne. "2 sety" w pucharowej
+            # nie jest stosowane (zawsze Bo3 lub Bo5 w fazie pucharowej) — 🔴.
             is_trojka_now = tournament_type == "Drużynowy 3-os."
             if is_trojka_now:
                 bo_options = {"Best of 3": "🟡 Best of 3 (eksperymentalne)",
                              "Best of 5": "🟡 Best of 5 (eksperymentalne)",
-                             "2 sety": "🟡 2 sety"}
+                             "2 sety": "🔴 2 sety (niedostępne w pucharowej)"}
             else:
                 bo_options = {"Best of 3": "🔴 Best of 3 (wkrótce)",
                              "Best of 5": "🔴 Best of 5 (wkrótce)",
-                             "2 sety": "🟡 2 sety"}
-            # Default: Best of 3 dla 1/64-1/8, Best of 5 dla 1/4 i wyżej
+                             "2 sety": "🔴 2 sety (niedostępne w pucharowej)"}
+            # Default: Best of 3 dla 1/8, Best of 5 dla 1/4 i wyżej
             default_idx = 0
             if "1/4" in tournament_phase or "1/2" in tournament_phase or \
                tournament_phase in ("Mecz o 3. miejsce", "Finał"):
@@ -345,7 +347,7 @@ with col_form:
                 list(bo_options.keys()),
                 format_func=lambda k: bo_options[k],
                 index=default_idx,
-                help="Best of 3 i Best of 5 dla trójki pucharowej zaimplementowane."
+                help="Faza pucharowa zawsze Best of 3 lub Best of 5."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -413,19 +415,17 @@ with col_form:
             st.code("\n".join(info))
 
     # ─── 3. Domyślne elementy ───────────────────────────────────────────
-    # Bo3/Bo5 trójka pucharowa NIE używają grafik — sekcja jest ukryta
-    # i wartości default'owane na False.
-    is_no_graphics_trojka = (
-        is_trojka and is_pucharowa and sets_format in ("Best of 3", "Best of 5")
-    )
-    if is_no_graphics_trojka:
+    # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
+    # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
+    is_no_graphics = is_pucharowa
+    if is_no_graphics:
         st.header("3. Domyślne elementy")
-        st.info("ℹ️ **Best of 3 / Best of 5 dla trójki pucharowej nie używają grafik** — "
-                "całe miejsce jest potrzebne na rozszerzoną tabelę wyników (3 lub 5 setów). "
+        st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
+                "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
-        # Wyłącz wszystko
+        # Wyłącz wszystko poza nagłówkiem (ten i tak chcemy w prawym górnym rogu)
         include_qr = False
-        show_header_on_protocol = True  # nagłówek w prawym górnym rogu i tak chcemy
+        show_header_on_protocol = True
         include_pfm_logo = False
     else:
         st.header("3. Domyślne elementy")
@@ -441,8 +441,8 @@ with col_form:
     NUM_LOGOS = 4
     logo_files = []
     
-    if is_no_graphics_trojka:
-        # Pomijamy całą sekcję grafik — Bo3/Bo5 ich nie wspiera
+    if is_no_graphics:
+        # Pomijamy całą sekcję grafik — pucharowa ich nie wspiera
         for _ in range(NUM_LOGOS):
             logo_files.append(None)
         logos_aspect = {}
@@ -619,12 +619,12 @@ with col_preview:
     if is_trojka:
         # ─── Preview TRÓJKOWY ───
         # Bo2 (grupowa lub puchar 2-set): lewa kolumna R1.tc[0] poszerzona do 4.76 cm
-        # na grafiki (QR + loga). Bo3/Bo5 (puchar): bez grafik — lewa kolumna wąska
-        # (oryginalna ~0.7 cm — tylko wiersz "WYNIK"/"PKT" na dole).
-        is_no_graphics_trojka = is_pucharowa and sets_format in ("Best of 3", "Best of 5")
+        # na grafiki (QR + loga). Pucharowa (Bo3/Bo5/2sety): bez grafik — kolumna
+        # IMIONA/numerów wierszy zostaje wąska (~0.7 cm).
+        is_no_graphics_preview = is_pucharowa
         
         TROJKA_TBL_W_PX = int((18.46 / PAGE_W_CM) * PAGE_W_PX)  # pełna szerokość strony
-        if is_no_graphics_trojka:
+        if is_no_graphics_preview:
             # Bez grafik: kolumna IMIONA/numerów rzędów (~0.7 cm)
             TROJKA_R1_W_PX = int((0.7 / PAGE_W_CM) * PAGE_W_PX)
             # Tabela 1 nazwy: dla Bo3/Bo5 cell tc[0] ma 5.24 cm (2970 dxa scaled to ~3358)
