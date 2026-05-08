@@ -139,9 +139,53 @@ def fetch_all_group_sheets(sheet_id):
 # Parser zakładki "Drabinka" - dla meczów fazy pucharowej
 # ─────────────────────────────────────────────────────────────────────
 
-# Rozpoznawane nazwy faz (fragment do wyszukania w arkuszu)
-# UWAGA na kolejność: bardziej specyficzne klucze pierwsze (np. '1/2' przed 'finał',
-# bo 'finał' występuje też w '1/2 finału' itp.). Iteracja dict zachowuje insertion order.
+# Rozpoznawane nazwy faz — funkcja detect_phase rozpoznaje dynamicznie:
+#   • "1/N finału" / "1/N FINAŁU"
+#   • "PÓŁFINAŁY" / "półfinał"
+#   • "FINAŁ"
+#   • "MECZ O N. MIEJSCE" (gdzie N = 3, 5, 7, ..., 31)
+#   • "MIEJSCA X-Y" (dowolny zakres)
+# Zwraca (phase_key, phase_full_name) lub (None, None).
+# phase_key jest unikatowym kluczem fazy (do dopasowania target_phase).
+
+def detect_phase(cell_text):
+    """Rozpoznaje fazę turnieju z tekstu komórki. Zwraca (key, full_name) lub (None, None)."""
+    s = cell_text.strip().lower()
+    if not s:
+        return None, None
+    # "MECZ O N. MIEJSCE" / "Mecz o 3 miejsce" / "MIEJSCE 3" — single match for Nth place
+    m = re.search(r'mecz\s+o\s+(\d+)\.?\s*miejsc', s)
+    if m:
+        n = m.group(1)
+        return f'mecz o {n}', f'MECZ O {n}. MIEJSCE'
+    # Plain "3. MIEJSCE" / "5. MIEJSCE" itp. (bez "mecz o")
+    m = re.search(r'^(\d+)\.\s*miejsc', s)
+    if m:
+        n = m.group(1)
+        return f'mecz o {n}', f'MECZ O {n}. MIEJSCE'
+    # "MIEJSCA X-Y" (z lub bez czasu w nawiasie)
+    m = re.search(r'miejsca\s+(\d+)\s*-\s*(\d+)', s)
+    if m:
+        a, b = m.group(1), m.group(2)
+        return f'miejsca {a}-{b}', f'MIEJSCA {a}-{b}'
+    # "1/N finału"
+    m = re.search(r'1/(\d+)\b', s)
+    if m:
+        n = m.group(1)
+        if n == '2':
+            return '1/2', '1/2 FINAŁU'
+        return f'1/{n}', f'1/{n} FINAŁU'
+    # "PÓŁFINAŁY" / "półfinał"
+    if 'półfinał' in s:
+        return '1/2', '1/2 FINAŁU'
+    # "FINAŁ" (nie "półfinał" - sprawdzone wyżej)
+    if 'finał' in s:
+        return 'finał', 'FINAŁ'
+    return None, None
+
+
+# Wstecznej kompatybilności: lista znanych phase keys do iteracji w "Sprawdź zakładki".
+# (Tylko predefiniowane — dynamiczne fazy z arkusza wykrywa detect_phase.)
 PHASE_NAMES = {
     '1/64': '1/64 FINAŁU',
     '1/32': '1/32 FINAŁU',
@@ -150,16 +194,12 @@ PHASE_NAMES = {
     '1/4':  '1/4 FINAŁU',
     '1/2':  '1/2 FINAŁU',
     'półfinał': '1/2 FINAŁU',
-    '3. miejsce': 'MECZ O 3. MIEJSCE',
     'mecz o 3': 'MECZ O 3. MIEJSCE',
-    # Drabinka B (mecze o miejsca). Wpisy specyficzne — bardziej szczegółowe
-    # zakresy przed bardziej ogólnymi (np. 'miejsca 17-32' przed 'miejsca 17-24').
     'miejsca 5-8':   'MIEJSCA 5-8',
     'miejsca 9-16':  'MIEJSCA 9-16',
     'miejsca 17-24': 'MIEJSCA 17-24',
     'miejsca 17-32': 'MIEJSCA 17-32',
     'miejsca 25-32': 'MIEJSCA 25-32',
-    'miejsca 33-64': 'MIEJSCA 33-64',
     'finał': 'FINAŁ',
 }
 
@@ -192,63 +232,55 @@ def parse_drabinka_rows(rows, target_phase=None):
                      '1/8', '1/4', '1/2', 'półfinał']
     
     # ── KROK 1: skanowanie WSZYSTKICH komórek pod kątem nazw faz ──
-    # Każde znalezienie = potencjalny blok fazy
+    # Każde znalezienie = potencjalny blok fazy. Używamy detect_phase()
+    # (regex-based) — łapie też dynamiczne wartości "MIEJSCA X-Y" i
+    # "MECZ O N. MIEJSCE" których nie ma w predefiniowanym PHASE_NAMES.
     phase_blocks = []
     for r_idx, row in enumerate(rows):
         for c_idx, cell in enumerate(row):
-            cell_lower = cell.strip().lower()
-            if not cell_lower:
+            phase_key, phase_full = detect_phase(cell)
+            if phase_key is None:
                 continue
-            for phase_key, phase_full in PHASE_NAMES.items():
-                if phase_key in cell_lower:
-                    # Znaleźliśmy fazę. Szukamy "Tor" w lewo (max 4 kolumny).
-                    col_tor = None
-                    for offset in range(1, 5):
-                        if c_idx - offset >= 0:
-                            t = row[c_idx - offset].strip().lower()
-                            if t == 'tor':
-                                col_tor = c_idx - offset
-                                break
-                    # "Grupa" między col_tor a c_idx (jeśli jest)
-                    col_grupa = None
-                    if col_tor is not None:
-                        for j in range(col_tor + 1, c_idx):
-                            if j < len(row) and row[j].strip().lower() == 'grupa':
-                                col_grupa = j
-                                break
-                    m = re.search(r'\((\d{1,2}:\d{2})\)', cell)
-                    phase_time = m.group(1) if m else None
-                    phase_blocks.append({
-                        'header_row': r_idx,
-                        'col': c_idx,
-                        'phase_full': phase_full,
-                        'phase_key': phase_key,
-                        'time': phase_time,
-                        'col_tor': col_tor,
-                        'col_grupa': col_grupa,
-                    })
-                    break  # tylko 1 phase per cell
+            # Znaleźliśmy fazę. Szukamy "Tor" w lewo (max 4 kolumny).
+            col_tor = None
+            for offset in range(1, 5):
+                if c_idx - offset >= 0:
+                    t = row[c_idx - offset].strip().lower()
+                    if t == 'tor':
+                        col_tor = c_idx - offset
+                        break
+            # "Grupa" między col_tor a c_idx (jeśli jest)
+            col_grupa = None
+            if col_tor is not None:
+                for j in range(col_tor + 1, c_idx):
+                    if j < len(row) and row[j].strip().lower() == 'grupa':
+                        col_grupa = j
+                        break
+            m = re.search(r'\((\d{1,2}:\d{2})\)', cell)
+            phase_time = m.group(1) if m else None
+            phase_blocks.append({
+                'header_row': r_idx,
+                'col': c_idx,
+                'phase_full': phase_full,
+                'phase_key': phase_key,
+                'time': phase_time,
+                'col_tor': col_tor,
+                'col_grupa': col_grupa,
+            })
     
     if not phase_blocks:
         return None, None, []
     
     # ── KROK 2: wybór bloku pasującego do target_phase ──
-    # Logika: NAJPIERW znajdujemy najbardziej specyficzny phase_key dla target
-    # (PHASE_NAMES iteruje od najbardziej do najmniej specyficznego, np. '1/2'
-    # przed 'finał' — żeby '1/2 finału' nie matchowało 'finał'). Potem szukamy
-    # bloku którego phase_key == target_key, ALBO którego phase_full pasuje
-    # do canonical name dla target_key (np. 'półfinał' i '1/2' oba mapują na
-    # '1/2 FINAŁU').
+    # Używamy detect_phase() do parsowania target_phase (np. "Pucharowa 1/4 finału",
+    # "Mecz o 9. miejsce", "Miejsca 17-20"). Potem szukamy bloku którego phase_key
+    # == target_key, ALBO którego phase_full pasuje (np. 'półfinał' z arkusza i '1/2'
+    # z UI oba mapują na '1/2 FINAŁU').
     chosen = None
     target_key = None
     target_full = None
     if target_phase:
-        target_lower = target_phase.lower()
-        for phase_key in PHASE_NAMES:
-            if phase_key in target_lower:
-                target_key = phase_key
-                target_full = PHASE_NAMES[phase_key]
-                break  # pierwszy = najbardziej specyficzny
+        target_key, target_full = detect_phase(target_phase)
         if target_key:
             # Bezpośrednie: blok ma identyczny phase_key
             for block in phase_blocks:
@@ -261,13 +293,13 @@ def parse_drabinka_rows(rows, target_phase=None):
                     if block['phase_full'] == target_full:
                         chosen = block
                         break
-            # Jeśli target_phase istnieje w PHASE_NAMES ale brak takiego bloku
-            # w arkuszu — zwracamy pustą listę z poprawnym phase_full_name.
-            # User dostanie czytelny komunikat "Nie znaleziono fazy".
+            # Jeśli target_phase ma sens ale brak takiego bloku w arkuszu —
+            # zwracamy pustą listę z poprawnym phase_full_name. User dostanie
+            # czytelny komunikat "Nie znaleziono fazy".
             if not chosen:
                 return target_full, None, []
     
-    # target_phase=None lub nie ma w PHASE_NAMES → fallback do pierwszego bloku
+    # target_phase=None lub niezrozumiały → fallback do pierwszego bloku
     if not chosen:
         chosen = phase_blocks[0]
     
@@ -300,8 +332,9 @@ def parse_drabinka_rows(rows, target_phase=None):
         # Pusta komórka zawodnika? Sprawdź następny wiersz lub stop.
         if not z1_raw:
             empty_streak += 1
-            if empty_streak >= 2:
-                break  # 2+ puste = koniec bloku
+            if empty_streak >= 5:
+                break  # 5+ pustych = koniec bloku (więcej tolerancji
+                # na luki między sekcjami w arkuszu z wieloma fazami obok siebie)
             i += 1
             continue
         empty_streak = 0
@@ -343,32 +376,29 @@ def parse_drabinka_rows(rows, target_phase=None):
         
         i += 2  # przeskakujemy 2 wiersze (mecz)
     
-    # ── HARD CAP ── parser czasem łapie więcej meczów niż powinno gdy
-    # brak nagłówka rozdzielającego (np. "MIEJSCA 17-32" tuż po 1/8 bez wyraźnej
-    # przerwy). Liczba meczów w fazie jest deterministyczna:
-    #   1/N finału = N/2 par bo eliminacje pojedyncze:
-    #   1/8 = 8 par/meczów, 1/4 = 4, 1/2 = 2, finał = 1, mecz o 3. = 1.
-    #   1/16 = 16, 1/32 = 32, 1/64 = 64.
-    PHASE_MATCH_COUNT = {
-        '1/64': 64, '1/32': 32, '1/16': 16,
-        '1/8':   8, '1/4':   4, '1/2':   2,
-        'półfinał': 2,
-        '3. miejsce': 1, 'mecz o 3': 1,
-        # Drabinka B — liczba meczów = (liczba drużyn / 2)
-        'miejsca 5-8':   2,    # 4 drużyny → 2 mecze
-        'miejsca 9-16':  4,    # 8 drużyn  → 4 mecze
-        'miejsca 17-24': 4,    # 8 drużyn  → 4 mecze
-        'miejsca 25-32': 4,    # 8 drużyn  → 4 mecze
-        'miejsca 17-32': 8,    # 16 drużyn → 8 meczów
-        'miejsca 33-64': 16,   # 32 drużyny → 16 meczów
-        'finał': 1,
-    }
+    # ── HARD CAP ── parser czasem łapie więcej meczów niż powinno (np. brak
+    # nagłówka "MECZE O MIEJSCA" oddzielającego 1/8 finału od meczów o miejsca
+    # 17-32). Liczba meczów w fazie jest deterministyczna:
+    #   1/N finału = N/2 par, MIEJSCA X-Y = (Y-X+1)/2 par, MECZ O N = 1.
     expected = None
-    src = (target_phase or phase_full_name or '').lower()
-    for key, cnt in PHASE_MATCH_COUNT.items():
-        if key in src:
-            expected = cnt
-            break
+    src_full = phase_full_name or ''
+    src_key = chosen.get('phase_key', '') if chosen else ''
+    # 1/N finału — N meczów (np. 1/8 = 8 meczów, 1/4 = 4, 1/2 = 2)
+    m = re.match(r'1/(\d+)', src_key)
+    if m:
+        expected = int(m.group(1))
+    # Mecz o N. miejsce
+    elif src_key.startswith('mecz o '):
+        expected = 1
+    # MIEJSCA X-Y
+    elif src_key.startswith('miejsca '):
+        rng = re.match(r'miejsca (\d+)-(\d+)', src_key)
+        if rng:
+            x, y = int(rng.group(1)), int(rng.group(2))
+            expected = max(1, (y - x + 1) // 2)
+    # FINAŁ
+    elif src_key == 'finał':
+        expected = 1
     if expected is not None and len(matches) > expected:
         matches = matches[:expected]
     
