@@ -1009,6 +1009,37 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             if w:
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t1)))
             
+            # ── Bo3/Bo5: redystrybucja szerokości kolumn w T1 ──
+            # Dłuższe nazwy drużyn (np. "SIERMOLKKY-LESZNO TEAM" ~21 znaków)
+            # nie mieszczą się w domyślnej szerokości komórki Tor (5.94 cm po
+            # skalowaniu). Przesuwamy 800 dxa = 1.41 cm z ostatniej kolumny
+            # (Podpis) do pierwszej (Tor / nazwa drużyny).
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
+                TEAM_COL_TRANSFER = 800  # dxa
+                tblGrid_t1 = t1.find(wt('tblGrid'))
+                if tblGrid_t1 is not None:
+                    gcols = tblGrid_t1.findall(wt('gridCol'))
+                    if len(gcols) >= 2:
+                        first = gcols[0]
+                        last = gcols[-1]
+                        first_w = int(first.get(f'{{{W}}}w', '0'))
+                        last_w = int(last.get(f'{{{W}}}w', '0'))
+                        first.set(f'{{{W}}}w', str(first_w + TEAM_COL_TRANSFER))
+                        last.set(f'{{{W}}}w', str(last_w - TEAM_COL_TRANSFER))
+                # Dla każdego wiersza: pierwsza komórka +TRANSFER, ostatnia -TRANSFER
+                for tr in t1.findall(wt('tr')):
+                    cells = tr.findall(wt('tc'))
+                    if len(cells) >= 2:
+                        for tc, delta in ((cells[0], TEAM_COL_TRANSFER),
+                                          (cells[-1], -TEAM_COL_TRANSFER)):
+                            tcPr = tc.find(wt('tcPr'))
+                            if tcPr is None: continue
+                            tcW = tcPr.find(wt('tcW'))
+                            if tcW is None: continue
+                            cw = tcW.get(f'{{{W}}}w')
+                            if cw:
+                                tcW.set(f'{{{W}}}w', str(int(cw) + delta))
+            
             # Tabela 2: ZALEŻNIE OD WARIANTU
             # - TROJKA (Bo2): lewa kolumna powiększona do 2700 dxa (na grafiki)
             # - TROJKA_Bo3/Bo5: jednorodne skalowanie (puchar trójki nie używa
@@ -1128,6 +1159,30 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             w = tcW.get(f'{{{W}}}w')
                             if w:
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t3)))
+            # Bo5: redystrybucja szerokości w T3 (header s.2) — analogicznie do T1
+            T3_TEAM_TRANSFER = 800  # dxa
+            grid3 = t3.find(wt('tblGrid'))
+            if grid3 is not None:
+                gcols = grid3.findall(wt('gridCol'))
+                if len(gcols) >= 2:
+                    first = gcols[0]
+                    last = gcols[-1]
+                    first.set(f'{{{W}}}w',
+                              str(int(first.get(f'{{{W}}}w', '0')) + T3_TEAM_TRANSFER))
+                    last.set(f'{{{W}}}w',
+                             str(int(last.get(f'{{{W}}}w', '0')) - T3_TEAM_TRANSFER))
+            for tr in t3.findall(wt('tr')):
+                cells = tr.findall(wt('tc'))
+                if len(cells) >= 2:
+                    for tc, delta in ((cells[0], T3_TEAM_TRANSFER),
+                                      (cells[-1], -T3_TEAM_TRANSFER)):
+                        tcPr = tc.find(wt('tcPr'))
+                        if tcPr is None: continue
+                        tcW = tcPr.find(wt('tcW'))
+                        if tcW is None: continue
+                        cw = tcW.get(f'{{{W}}}w')
+                        if cw:
+                            tcW.set(f'{{{W}}}w', str(int(cw) + delta))
             # T4 zostaje w oryginalnej szerokości (6425 dxa) — narrower bo tylko 2 sety
             # ale aplikujemy fix ramek dla ostatniej kolumny (jak w T2)
             t4_rows = t4.findall(wt('tr'))
@@ -1365,6 +1420,19 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 ht = etree.SubElement(hr, wt('t'))
                 ht.text = header_text
                 cloned.insert(0, hp)
+                
+                # ── BO5: header też na drugiej stronie (przed T3) ──
+                # Bo5 jest 2-stronicowe per mecz. Header w prawym górnym
+                # rogu chcemy na obu stronach, więc klonujemy paragraf
+                # i wstawiamy przed tabelą 3 (header s.2).
+                if template_type == 'TROJKA_Bo5':
+                    cloned_tbls = [el for el in cloned if el.tag == wt('tbl')]
+                    if len(cloned_tbls) >= 3:
+                        t3_in_cloned = cloned_tbls[2]
+                        from copy import deepcopy
+                        hp_page2 = deepcopy(hp)
+                        t3_idx = list(cloned).index(t3_in_cloned)
+                        cloned.insert(t3_idx, hp_page2)
             _fill_protocol(cloned, match,
                            hide_grupa_mecz=hide_grupa_mecz,
                            phase_label=phase_label,
