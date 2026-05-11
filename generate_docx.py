@@ -1069,28 +1069,36 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t1)))
             
             # ── Bo3/Bo5: redystrybucja szerokości kolumn w T1 ──
-            # Dłuższe nazwy drużyn (np. "SIERMOLKKY-LESZNO TEAM" ~21 znaków)
-            # nie mieszczą się w domyślnej szerokości komórki Tor (5.94 cm po
-            # skalowaniu). Przesuwamy 800 dxa = 1.41 cm z ostatniej kolumny
-            # (Podpis) do pierwszej (Tor / nazwa drużyny).
+            # Dłuższe nazwy drużyn (np. "SIERMOLKKY-LESZNO TEAM" ~21 znaków) nie
+            # mieszczą się w domyślnej szerokości Tor (5.94 cm po skalowaniu).
+            # Przesuwamy 800 dxa = 1.41 cm do Tor: 300 z "Wygrane sety" (kol -2)
+            # + 500 z "Podpis" (kol -1). Dzięki temu Podpis pozostaje szerszy
+            # od Wygrane sety (po skalowaniu Wygrane sety ~1.93 cm, Podpis ~3.13 cm
+            # → po transferze: Wygrane sety ~1.40 cm, Podpis ~2.25 cm).
             if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
-                TEAM_COL_TRANSFER = 800  # dxa
+                TRANSFER_FROM_PODPIS = 500
+                TRANSFER_FROM_WYGRANE = 300
+                TOTAL_TRANSFER = TRANSFER_FROM_PODPIS + TRANSFER_FROM_WYGRANE
                 tblGrid_t1 = t1.find(wt('tblGrid'))
                 if tblGrid_t1 is not None:
                     gcols = tblGrid_t1.findall(wt('gridCol'))
-                    if len(gcols) >= 2:
+                    if len(gcols) >= 3:
                         first = gcols[0]
-                        last = gcols[-1]
-                        first_w = int(first.get(f'{{{W}}}w', '0'))
-                        last_w = int(last.get(f'{{{W}}}w', '0'))
-                        first.set(f'{{{W}}}w', str(first_w + TEAM_COL_TRANSFER))
-                        last.set(f'{{{W}}}w', str(last_w - TEAM_COL_TRANSFER))
-                # Dla każdego wiersza: pierwsza komórka +TRANSFER, ostatnia -TRANSFER
+                        wygrane = gcols[-2]
+                        podpis = gcols[-1]
+                        first.set(f'{{{W}}}w', str(int(first.get(f'{{{W}}}w','0')) + TOTAL_TRANSFER))
+                        wygrane.set(f'{{{W}}}w', str(int(wygrane.get(f'{{{W}}}w','0')) - TRANSFER_FROM_WYGRANE))
+                        podpis.set(f'{{{W}}}w', str(int(podpis.get(f'{{{W}}}w','0')) - TRANSFER_FROM_PODPIS))
+                # Dla każdego wiersza: dopasuj komórki tc[0], tc[-2], tc[-1].
                 for tr in t1.findall(wt('tr')):
                     cells = tr.findall(wt('tc'))
-                    if len(cells) >= 2:
-                        for tc, delta in ((cells[0], TEAM_COL_TRANSFER),
-                                          (cells[-1], -TEAM_COL_TRANSFER)):
+                    if len(cells) >= 3:
+                        deltas = [
+                            (cells[0],  TOTAL_TRANSFER),
+                            (cells[-2], -TRANSFER_FROM_WYGRANE),
+                            (cells[-1], -TRANSFER_FROM_PODPIS),
+                        ]
+                        for tc, delta in deltas:
                             tcPr = tc.find(wt('tcPr'))
                             if tcPr is None: continue
                             tcW = tcPr.find(wt('tcW'))
@@ -1218,23 +1226,34 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             w = tcW.get(f'{{{W}}}w')
                             if w:
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t3)))
-            # Bo5: redystrybucja szerokości w T3 (header s.2) — analogicznie do T1
-            T3_TEAM_TRANSFER = 800  # dxa
+            # Bo5: redystrybucja szerokości w T3 (header s.2) — analogicznie do T1.
+            # Bierzemy 500 z Podpis + 300 z Wygrane sety (kol -1, -2). Suma = 800
+            # idzie do kol Tor (kol 0). Po: Podpis ~2.21 cm > Wygrane sety ~1.36 cm.
+            T3_FROM_PODPIS = 500
+            T3_FROM_WYGRANE = 300
+            T3_TOTAL = T3_FROM_PODPIS + T3_FROM_WYGRANE
             grid3 = t3.find(wt('tblGrid'))
             if grid3 is not None:
                 gcols = grid3.findall(wt('gridCol'))
-                if len(gcols) >= 2:
+                if len(gcols) >= 3:
                     first = gcols[0]
-                    last = gcols[-1]
+                    wygrane = gcols[-2]
+                    podpis = gcols[-1]
                     first.set(f'{{{W}}}w',
-                              str(int(first.get(f'{{{W}}}w', '0')) + T3_TEAM_TRANSFER))
-                    last.set(f'{{{W}}}w',
-                             str(int(last.get(f'{{{W}}}w', '0')) - T3_TEAM_TRANSFER))
+                              str(int(first.get(f'{{{W}}}w','0')) + T3_TOTAL))
+                    wygrane.set(f'{{{W}}}w',
+                                str(int(wygrane.get(f'{{{W}}}w','0')) - T3_FROM_WYGRANE))
+                    podpis.set(f'{{{W}}}w',
+                               str(int(podpis.get(f'{{{W}}}w','0')) - T3_FROM_PODPIS))
             for tr in t3.findall(wt('tr')):
                 cells = tr.findall(wt('tc'))
-                if len(cells) >= 2:
-                    for tc, delta in ((cells[0], T3_TEAM_TRANSFER),
-                                      (cells[-1], -T3_TEAM_TRANSFER)):
+                if len(cells) >= 3:
+                    deltas = [
+                        (cells[0],  T3_TOTAL),
+                        (cells[-2], -T3_FROM_WYGRANE),
+                        (cells[-1], -T3_FROM_PODPIS),
+                    ]
+                    for tc, delta in deltas:
                         tcPr = tc.find(wt('tcPr'))
                         if tcPr is None: continue
                         tcW = tcPr.find(wt('tcW'))
