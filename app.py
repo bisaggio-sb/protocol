@@ -344,13 +344,13 @@ with col_form:
                 index=default_idx,
             )
         else:  # Odpadów
-            # Pełna lista możliwych meczów drabinki przegranych:
-            # • Mecze o pojedyncze miejsce (3, 5, 7, ..., 31)
-            # • Mini-turnieje (Miejsca X-Y)
+            # Pełna lista możliwych meczów drabinki przegranych dla turnieju
+            # do 32 drużyn (jak np. TDT_Oława):
+            # • Mecze pojedyncze: o N. miejsce dla N=3,5,7,...,31
+            # • Mini-turnieje: Miejsca X-Y (rozbiegane potem na pary)
             if is_trojka_pre:
-                # Mecz o N (single match) — typowo 3, 5, 7, 9, 11, 13, 15
-                # Miejsca X-Y (mini-bracket) — typowo 5-8, 9-12, 9-16, 13-16
                 faza_options = {
+                    # ── Mecze o pojedyncze miejsce ──
                     "Mecz o 3. miejsce":  "✅ Mecz o 3. miejsce",
                     "Mecz o 5. miejsce":  "🟡 Mecz o 5. miejsce",
                     "Mecz o 7. miejsce":  "🟡 Mecz o 7. miejsce",
@@ -358,10 +358,26 @@ with col_form:
                     "Mecz o 11. miejsce": "🟡 Mecz o 11. miejsce",
                     "Mecz o 13. miejsce": "🟡 Mecz o 13. miejsce",
                     "Mecz o 15. miejsce": "🟡 Mecz o 15. miejsce",
+                    "Mecz o 17. miejsce": "🟡 Mecz o 17. miejsce",
+                    "Mecz o 19. miejsce": "🟡 Mecz o 19. miejsce",
+                    "Mecz o 21. miejsce": "🟡 Mecz o 21. miejsce",
+                    "Mecz o 23. miejsce": "🟡 Mecz o 23. miejsce",
+                    "Mecz o 25. miejsce": "🟡 Mecz o 25. miejsce",
+                    "Mecz o 27. miejsce": "🟡 Mecz o 27. miejsce",
+                    "Mecz o 29. miejsce": "🟡 Mecz o 29. miejsce",
+                    "Mecz o 31. miejsce": "🟡 Mecz o 31. miejsce",
+                    # ── Mini-turnieje (mecze parami) ──
                     "Miejsca 5-8":   "🟡 Miejsca 5-8",
                     "Miejsca 9-12":  "🟡 Miejsca 9-12",
                     "Miejsca 9-16":  "🟡 Miejsca 9-16",
                     "Miejsca 13-16": "🟡 Miejsca 13-16",
+                    "Miejsca 17-20": "🟡 Miejsca 17-20",
+                    "Miejsca 17-24": "🟡 Miejsca 17-24",
+                    "Miejsca 17-32": "🟡 Miejsca 17-32",
+                    "Miejsca 21-24": "🟡 Miejsca 21-24",
+                    "Miejsca 25-28": "🟡 Miejsca 25-28",
+                    "Miejsca 25-32": "🟡 Miejsca 25-32",
+                    "Miejsca 29-32": "🟡 Miejsca 29-32",
                 }
             else:
                 faza_options = {
@@ -482,17 +498,6 @@ with col_form:
     if not is_supported_type:
         st.warning(f"⚠️ Format **{tournament_type}** nie jest jeszcze obsługiwany. "
                    "Obecnie dostępne: Indywidualny, Drużynowy 3-os.")
-    elif is_pucharowa:
-        # Pucharowa wymaga best-of-3/5 - jeszcze nie ma. Można użyć "2 sety" jako
-        # zastępstwo, ale nie jest to oficjalny format pucharowej.
-        st.warning(f"⚠️ Faza **{tournament_phase}** wymaga formatu **Best of 3/5** "
-                   "który jest jeszcze w przygotowaniu. Generator wczyta mecze z "
-                   "zakładki **Drabinka** używając formatu 2 sety jako tymczasowego "
-                   "rozwiązania — protokół może być nieoficjalny. **Zweryfikowana jest "
-                   "obecnie tylko faza grupowa.**")
-    elif not is_2_sety:
-        st.warning("⚠️ Obecnie zaimplementowane są tylko mecze na **2 sety**. "
-                   "Best of 3/5 będą dostępne w kolejnej wersji.")
     
     if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
@@ -1126,6 +1131,19 @@ with cols_fmt[0]:
 with cols_fmt[1]:
     fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=True)
 
+# Filtr po godzinie — tylko dla fazy pucharowej (gdzie różne fazy mogą iść równolegle).
+time_filter = ""
+if is_pucharowa:
+    with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
+        st.caption("Wpisz godzinę startu (np. **13:00**) żeby wygenerować tylko te mecze. "
+                   "Puste = wszystkie z wybranej fazy. Przydatne gdy chcesz wydrukować "
+                   "protokoły dla konkretnego slotu czasowego (np. 1/4 finału + Miejsca 9-16 "
+                   "grane są o 14:15 — wybierając tę godzinę dla każdej fazy osobno wygenerujesz "
+                   "kolejno wszystkie protokoły grane w tym samym czasie).")
+        time_filter = st.text_input("Godzina (HH:MM)",
+                                    placeholder="13:00",
+                                    key="time_filter_input")
+
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
     gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
@@ -1191,6 +1209,22 @@ if gen_clicked:
             st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' w zakładce Drabinka. "
                      "Upewnij się że arkusz ma zakładkę o nazwie 'Drabinka' i że nagłówek "
                      f"kolumny zawiera nazwę fazy (np. '1/32 FINAŁU')."); st.stop()
+        
+        # Filter po godzinie — tylko jeśli user wpisał coś
+        all_matches_count = len(matches)
+        if time_filter and time_filter.strip():
+            tf = time_filter.strip()
+            matches = [m for m in matches if m.get('godz', '').startswith(tf)]
+            if not matches:
+                # Pokaż wszystkie dostępne godziny w tej fazie
+                all_times = sorted(set(m['godz'] for _, m_list in [(phase_name, [])]
+                                       for m in [] if m.get('godz')))
+                st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' o godzinie '{tf}'. "
+                         f"Sprawdź godzinę startu fazy w arkuszu.")
+                st.stop()
+            else:
+                st.info(f"🕐 Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
+        
         # Format dla build_document: lista (group_name, matches)
         sheets_data = [(phase_name or tournament_phase, matches)]
     else:
