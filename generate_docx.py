@@ -429,6 +429,96 @@ def fetch_drabinka_phase(sheet_id, target_phase):
     return None, []
 
 
+def detect_drabinka_phases(sheet_id):
+    """
+    Wykrywa WSZYSTKIE fazy zaprezentowane w zakładce Drabinka oraz fazę grupową.
+    Zwraca dict:
+        {
+            'has_grupowa': bool,
+            'group_count': int,
+            'group_total_matches': int,
+            'glowna': [{'key', 'full', 'time', 'n_matches'}, ...],
+            'b':      [{'key', 'full', 'time', 'n_matches'}, ...],
+            'all_times': sorted unique list of times across all phases,
+        }
+    """
+    result = {
+        'has_grupowa': False,
+        'group_count': 0,
+        'group_total_matches': 0,
+        'glowna': [],
+        'b': [],
+        'all_times': [],
+    }
+    gid_map = get_sheet_gids(sheet_id)
+    
+    # Faza grupowa - zakładki Gr. A, Gr. B, ...
+    group_count = 0
+    group_matches_total = 0
+    for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+        for prefix in ('Gr. ', 'Gr.', 'Grupa '):
+            tab_name = f'{prefix}{letter}'
+            try:
+                rows = fetch_sheet(sheet_id, tab_name, gid_map)
+                if rows:
+                    matches = parse_group_rows(rows)
+                    if matches:
+                        group_count += 1
+                        group_matches_total += len(matches)
+                        break
+            except Exception:
+                continue
+    if group_count > 0:
+        result['has_grupowa'] = True
+        result['group_count'] = group_count
+        result['group_total_matches'] = group_matches_total
+    
+    # Drabinka — zbieramy wszystkie wykryte fazy
+    drabinka_rows = None
+    for tab_name in ('Drabinka', 'drabinka', 'DRABINKA'):
+        try:
+            r = fetch_sheet(sheet_id, tab_name, gid_map)
+            if r:
+                drabinka_rows = r
+                break
+        except Exception:
+            continue
+    
+    if drabinka_rows:
+        # Iteruj WSZYSTKIE komórki — detect_phase wyciąga klucz + pełną nazwę
+        seen = set()
+        for r_idx, row in enumerate(drabinka_rows):
+            for c_idx, cell in enumerate(row):
+                pkey, pfull = detect_phase(cell)
+                if pkey is None or pkey in seen:
+                    continue
+                seen.add(pkey)
+                # Pobierz mecze, by znać dokładną liczbę
+                _, time, matches = parse_drabinka_rows(drabinka_rows, target_phase=cell)
+                if not matches:
+                    continue
+                entry = {
+                    'key': pkey,
+                    'full': pfull,
+                    'time': time or '',
+                    'n_matches': len(matches),
+                }
+                # Klasyfikacja: drabinka główna vs B
+                if pkey.startswith('miejsca ') or pkey.startswith('mecz o '):
+                    result['b'].append(entry)
+                else:
+                    result['glowna'].append(entry)
+    
+    # Wszystkie wykryte godziny (do filtra czasowego)
+    all_times = set()
+    for entry in result['glowna'] + result['b']:
+        if entry['time']:
+            all_times.add(entry['time'])
+    result['all_times'] = sorted(all_times)
+    
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────
 
 
@@ -635,7 +725,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             if len(tcs) > 5:
                 if mecz_val:
                     # Podmieniamy "Runda" na "Mecz X"
-                    _set_cell_label(tcs[5], f'Mecz  {mecz_val}')
+                    _set_cell_label(tcs[5], f'Mecz #  {mecz_val}')
                 else:
                     # Bez numeru meczu - czyścimy całkowicie (faza w nagłówku)
                     _set_cell_label(tcs[5], '')
@@ -668,7 +758,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
             if len(tcs) > 5:
                 if mecz_val:
-                    _set_cell_label(tcs[5], f'Mecz  {mecz_val}')
+                    _set_cell_label(tcs[5], f'Mecz #  {mecz_val}')
                 else:
                     _set_cell_label(tcs[5], '')
         # Drużyny w T1.R3.tc[0] i T1.R4.tc[0]
@@ -693,7 +783,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 # "Runda" jest w ostatniej komórce R1 — szukamy ostatniej z 7
                 if len(tcs) >= 7:
                     if mecz_val:
-                        _set_cell_label(tcs[-1], f'Mecz  {mecz_val}')
+                        _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
                     else:
                         _set_cell_label(tcs[-1], '')
             # Drużyny powtarzane w T3.R3.tc[0] i T3.R4.tc[0]
