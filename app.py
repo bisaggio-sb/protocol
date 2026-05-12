@@ -282,21 +282,21 @@ with col_form:
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
     
     # ─── Wiersz 2: Drabinka | Faza | Format ────────────────────────────
-    # Dwupoziomowy wybór: najpierw drabinka (Grupowa / Główna / Turniej odpadów),
+    # Dwupoziomowy wybór: najpierw drabinka (Grupowa / Główna / Drabinka B),
     # potem konkretna faza w obrębie tej drabinki.
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
         if is_trojka_pre:
             drabinka_options = {
-                "Grupowa": "✅ Faza grupowa",
-                "Główna":  "✅ Drabinka główna",
-                "Odpadów": "🟡 Turniej odpadów",
+                "Grupowa":    "✅ Faza grupowa",
+                "Główna":     "✅ Drabinka główna",
+                "Drabinka B": "🟡 Drabinka B (mecze o miejsca)",
             }
         else:
             drabinka_options = {
-                "Grupowa": "✅ Faza grupowa",
-                "Główna":  "🔴 Drabinka główna (wkrótce)",
-                "Odpadów": "🔴 Turniej odpadów (wkrótce)",
+                "Grupowa":    "✅ Faza grupowa",
+                "Główna":     "🔴 Drabinka główna (wkrótce)",
+                "Drabinka B": "🔴 Drabinka B (wkrótce)",
             }
         drabinka = st.selectbox(
             "Drabinka",
@@ -304,7 +304,7 @@ with col_form:
             format_func=lambda k: drabinka_options[k],
             index=0,
             help=("Drabinka główna prowadzi do finału (1/8, 1/4, 1/2, Finał). "
-                  "Turniej odpadów — mecze o miejsca dla zespołów które odpadły "
+                  "Drabinka B — mecze o miejsca dla zespołów które odpadły "
                   "(grane równolegle z drabinką główną).")
         )
     
@@ -322,7 +322,7 @@ with col_form:
                     "Pucharowa 1/16": "🔴 1/16 finału (niedostępne dla trójek)",
                     "Pucharowa 1/8":  "✅ 1/8 finału",
                     "Pucharowa 1/4":  "✅ 1/4 finału (Ćwierćfinał)",
-                    "Pucharowa 1/2":  "✅ Półfinał",
+                    "Pucharowa 1/2":  "✅ 1/2 finału (Półfinał)",
                     "Finał":          "✅ Finał",
                 }
                 default_idx = 1  # 1/8 finału
@@ -333,7 +333,7 @@ with col_form:
                     "Pucharowa 1/16": "🔴 1/16 finału",
                     "Pucharowa 1/8":  "🔴 1/8 finału",
                     "Pucharowa 1/4":  "🔴 1/4 finału (Ćwierćfinał)",
-                    "Pucharowa 1/2":  "🔴 Półfinał",
+                    "Pucharowa 1/2":  "🔴 1/2 finału (Półfinał)",
                     "Finał":          "🔴 Finał",
                 }
                 default_idx = 0
@@ -343,71 +343,36 @@ with col_form:
                 format_func=lambda k: faza_options[k],
                 index=default_idx,
             )
-        else:  # Odpadów
-            # Pełna lista możliwych meczów drabinki przegranych dla turnieju
-            # do 32 drużyn (jak np. TDT_Oława):
-            # • Mecze pojedyncze: o N. miejsce dla N=3,5,7,...,31
-            # • Mini-turnieje: Miejsca X-Y (rozbiegane potem na pary)
+        else:  # Drabinka B
+            # Lista posortowana hierarchicznie:
+            # 1) Mini-turnieje "Miejsca X-Y" — sort po (start asc, -rozmiar)
+            #    żeby parent przed children (17-32 przed 17-24, 17-24 przed 17-20/21-24).
+            # 2) Mecze o pojedyncze miejsca — sort po N ascending.
+            miejsca_ranges = [
+                (5, 8), (9, 12), (9, 16), (13, 16),
+                (17, 20), (17, 24), (17, 32),
+                (21, 24), (25, 28), (25, 32), (29, 32),
+            ]
+            # Sortowanie: start ASC, -rozmiar DESC (parent przed children)
+            miejsca_sorted = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
+            mecze_o_n = list(range(3, 32, 2))  # 3, 5, 7, ..., 31
+            
             if is_trojka_pre:
-                faza_options = {
-                    # ── Mecze o pojedyncze miejsce ──
-                    "Mecz o 3. miejsce":  "✅ Mecz o 3. miejsce",
-                    "Mecz o 5. miejsce":  "🟡 Mecz o 5. miejsce",
-                    "Mecz o 7. miejsce":  "🟡 Mecz o 7. miejsce",
-                    "Mecz o 9. miejsce":  "🟡 Mecz o 9. miejsce",
-                    "Mecz o 11. miejsce": "🟡 Mecz o 11. miejsce",
-                    "Mecz o 13. miejsce": "🟡 Mecz o 13. miejsce",
-                    "Mecz o 15. miejsce": "🟡 Mecz o 15. miejsce",
-                    "Mecz o 17. miejsce": "🟡 Mecz o 17. miejsce",
-                    "Mecz o 19. miejsce": "🟡 Mecz o 19. miejsce",
-                    "Mecz o 21. miejsce": "🟡 Mecz o 21. miejsce",
-                    "Mecz o 23. miejsce": "🟡 Mecz o 23. miejsce",
-                    "Mecz o 25. miejsce": "🟡 Mecz o 25. miejsce",
-                    "Mecz o 27. miejsce": "🟡 Mecz o 27. miejsce",
-                    "Mecz o 29. miejsce": "🟡 Mecz o 29. miejsce",
-                    "Mecz o 31. miejsce": "🟡 Mecz o 31. miejsce",
-                    # ── Mini-turnieje (mecze parami) ──
-                    "Miejsca 5-8":   "🟡 Miejsca 5-8",
-                    "Miejsca 9-12":  "🟡 Miejsca 9-12",
-                    "Miejsca 9-16":  "🟡 Miejsca 9-16",
-                    "Miejsca 13-16": "🟡 Miejsca 13-16",
-                    "Miejsca 17-20": "🟡 Miejsca 17-20",
-                    "Miejsca 17-24": "🟡 Miejsca 17-24",
-                    "Miejsca 17-32": "🟡 Miejsca 17-32",
-                    "Miejsca 21-24": "🟡 Miejsca 21-24",
-                    "Miejsca 25-28": "🟡 Miejsca 25-28",
-                    "Miejsca 25-32": "🟡 Miejsca 25-32",
-                    "Miejsca 29-32": "🟡 Miejsca 29-32",
-                }
+                faza_options = {}
+                for a, b in miejsca_sorted:
+                    key = f"Miejsca {a}-{b}"
+                    faza_options[key] = f"🟡 {key}"
+                for n in mecze_o_n:
+                    key = f"Mecz o {n}. miejsce"
+                    faza_options[key] = ("✅ " + key) if n == 3 else f"🟡 {key}"
             else:
-                faza_options = {
-                    "Mecz o 3. miejsce":  "🔴 Mecz o 3. miejsce",
-                    "Mecz o 5. miejsce":  "🔴 Mecz o 5. miejsce",
-                    "Mecz o 7. miejsce":  "🔴 Mecz o 7. miejsce",
-                    "Mecz o 9. miejsce":  "🔴 Mecz o 9. miejsce",
-                    "Mecz o 11. miejsce": "🔴 Mecz o 11. miejsce",
-                    "Mecz o 13. miejsce": "🔴 Mecz o 13. miejsce",
-                    "Mecz o 15. miejsce": "🔴 Mecz o 15. miejsce",
-                    "Mecz o 17. miejsce": "🔴 Mecz o 17. miejsce",
-                    "Mecz o 19. miejsce": "🔴 Mecz o 19. miejsce",
-                    "Mecz o 21. miejsce": "🔴 Mecz o 21. miejsce",
-                    "Mecz o 23. miejsce": "🔴 Mecz o 23. miejsce",
-                    "Mecz o 25. miejsce": "🔴 Mecz o 25. miejsce",
-                    "Mecz o 27. miejsce": "🔴 Mecz o 27. miejsce",
-                    "Mecz o 29. miejsce": "🔴 Mecz o 29. miejsce",
-                    "Mecz o 31. miejsce": "🔴 Mecz o 31. miejsce",
-                    "Miejsca 5-8":   "🔴 Miejsca 5-8",
-                    "Miejsca 9-12":  "🔴 Miejsca 9-12",
-                    "Miejsca 9-16":  "🔴 Miejsca 9-16",
-                    "Miejsca 13-16": "🔴 Miejsca 13-16",
-                    "Miejsca 17-20": "🔴 Miejsca 17-20",
-                    "Miejsca 17-24": "🔴 Miejsca 17-24",
-                    "Miejsca 17-32": "🔴 Miejsca 17-32",
-                    "Miejsca 21-24": "🔴 Miejsca 21-24",
-                    "Miejsca 25-28": "🔴 Miejsca 25-28",
-                    "Miejsca 25-32": "🔴 Miejsca 25-32",
-                    "Miejsca 29-32": "🔴 Miejsca 29-32",
-                }
+                faza_options = {}
+                for a, b in miejsca_sorted:
+                    key = f"Miejsca {a}-{b}"
+                    faza_options[key] = f"🔴 {key}"
+                for n in mecze_o_n:
+                    key = f"Mecz o {n}. miejsce"
+                    faza_options[key] = f"🔴 {key}"
             tournament_phase = st.selectbox(
                 "Faza",
                 list(faza_options.keys()),
@@ -511,16 +476,35 @@ with col_form:
             help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
             label_visibility="collapsed")
     with cols_link[1]:
-        check_clicked = st.button("🔍 Sprawdź zakładki", use_container_width=True)
+        check_clicked = st.button("🔍 Wczytaj zakładki", use_container_width=True)
     
     if check_clicked:
         sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
         if not sid:
             st.error("Wklej najpierw poprawny link do arkusza.")
         else:
-            with st.spinner("Sprawdzam zakładki Gr. A – Gr. Z..."):
+            with st.spinner("Wczytuję arkusz..."):
                 info = generate_docx.get_sheet_names_debug(sid)
+                try:
+                    detected_info = generate_docx.detect_drabinka_phases(sid)
+                    detected_info['sheet_id'] = sid
+                    st.session_state['detected'] = detected_info
+                except Exception as e:
+                    st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
+                    st.session_state.pop('detected', None)
             st.code("\n".join(info))
+    
+    # Pokaż info o aktywnym cache (jeśli URL match)
+    if 'detected' in st.session_state and sheets_url.strip():
+        cached = st.session_state['detected']
+        cur_sid = extract_id(sheets_url.strip())
+        if cached.get('sheet_id') == cur_sid:
+            n_g = len(cached.get('glowna', []))
+            n_b = len(cached.get('b', []))
+            n_grp = cached.get('group_count', 0)
+            st.caption(f"📋 **Wczytano arkusz** · faza grupowa: {n_grp} grup · "
+                       f"drabinka główna: {n_g} faz · drabinka B: {n_b} faz · "
+                       "fazy poniżej automatycznie ograniczone do obecnych w arkuszu")
 
     # ─── 3. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
