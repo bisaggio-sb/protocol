@@ -148,6 +148,19 @@ def fetch_all_group_sheets(sheet_id):
 # Zwraca (phase_key, phase_full_name) lub (None, None).
 # phase_key jest unikatowym kluczem fazy (do dopasowania target_phase).
 
+def pluralize(n, sing, few, many):
+    """Polish plural: 1 → sing, 2-4 (oprócz 12-14) → few, reszta → many.
+    Przykład: 1 grupa / 2 grupy / 5 grup; 1 mecz / 2 mecze / 5 meczów; 1 faza / 2 fazy / 5 faz."""
+    last = n % 10
+    last2 = n % 100
+    if n == 1:
+        return sing
+    elif last in (2, 3, 4) and last2 not in (12, 13, 14):
+        return few
+    else:
+        return many
+
+
 def detect_phase(cell_text):
     """Rozpoznaje fazę turnieju z tekstu komórki. Zwraca (key, full_name) lub (None, None)."""
     s = cell_text.strip().lower()
@@ -485,26 +498,71 @@ def detect_drabinka_phases(sheet_id):
             continue
     
     if drabinka_rows:
-        # Iteruj WSZYSTKIE komórki — detect_phase wyciąga klucz + pełną nazwę
-        seen = set()
+        # PASS 1 — single full scan: znajdź wszystkie phase block markers
+        phase_block_markers = []  # [{'header_row', 'col', 'key', 'full', 'time'}]
         for r_idx, row in enumerate(drabinka_rows):
             for c_idx, cell in enumerate(row):
                 pkey, pfull = detect_phase(cell)
-                if pkey is None or pkey in seen:
+                if pkey is None:
                     continue
-                seen.add(pkey)
-                # Pobierz mecze, by znać dokładną liczbę
-                _, time, matches = parse_drabinka_rows(drabinka_rows, target_phase=cell)
-                if not matches:
+                ptime = None
+                m = re.search(r'\((\d{1,2}:\d{2})\)', cell)
+                if m: ptime = m.group(1)
+                # Tor w lewo (max 4 col)
+                col_tor = None
+                for offset in range(1, 5):
+                    if c_idx - offset >= 0:
+                        t = row[c_idx - offset].strip().lower()
+                        if t == 'tor':
+                            col_tor = c_idx - offset
+                            break
+                phase_block_markers.append({
+                    'header_row': r_idx, 'col': c_idx, 'col_tor': col_tor,
+                    'key': pkey, 'full': pfull, 'time': ptime,
+                })
+        
+        # PASS 2 — dla każdego markera policz mecze schodząc w dół jego kolumny.
+        # Dużo szybsze niż wcześniejsze N×parse_drabinka_rows.
+        STOP_KWS = ['miejsc', 'finał', 'mecz o', '1/64', '1/32',
+                    '1/16', '1/8', '1/4', '1/2', 'półfinał']
+        seen_keys = set()
+        for marker in phase_block_markers:
+            if marker['key'] in seen_keys:
+                continue
+            seen_keys.add(marker['key'])
+            col = marker['col']
+            i = marker['header_row'] + 1
+            n_matches = 0
+            empty_streak = 0
+            while i < len(drabinka_rows):
+                row1 = drabinka_rows[i]
+                z1 = row1[col].strip() if col < len(row1) else ''
+                if not z1:
+                    empty_streak += 1
+                    if empty_streak >= 5: break
+                    i += 1
                     continue
+                empty_streak = 0
+                # Stop na pod-nagłówek nowej sekcji
+                z1_lower = z1.lower()
+                if any(kw in z1_lower for kw in STOP_KWS):
+                    break
+                # Para zawodników
+                row2 = drabinka_rows[i+1] if i+1 < len(drabinka_rows) else []
+                z2 = row2[col].strip() if col < len(row2) else ''
+                if z1 and z2 and len(z1) >= 3 and len(z2) >= 3 \
+                   and any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
+                    n_matches += 1
+                i += 2
+            
+            if n_matches > 0:
                 entry = {
-                    'key': pkey,
-                    'full': pfull,
-                    'time': time or '',
-                    'n_matches': len(matches),
+                    'key': marker['key'],
+                    'full': marker['full'],
+                    'time': marker['time'] or '',
+                    'n_matches': n_matches,
                 }
-                # Klasyfikacja: drabinka główna vs B
-                if pkey.startswith('miejsca ') or pkey.startswith('mecz o '):
+                if marker['key'].startswith('miejsca ') or marker['key'].startswith('mecz o '):
                     result['b'].append(entry)
                 else:
                     result['glowna'].append(entry)
@@ -523,93 +581,52 @@ def detect_drabinka_phases(sheet_id):
 
 
 def get_sheet_names_debug(sheet_id):
-    """Czytelny debug: liczba grup, liczba meczów per grupa, total + info o Drabince."""
+    """Czytelny debug oparty o detect_drabinka_phases: 1 scan, brak duplikatów,
+    grupowanie faz drabinki po godzinie."""
     info = []
-    gid_map = get_sheet_gids(sheet_id)
-    found_groups = []
-    total_matches = 0
-    for letter in string.ascii_uppercase:
-        name = f"Gr. {letter}"
-        rows = fetch_via_gviz(sheet_id, name)
-        if not rows and name in gid_map:
-            rows = fetch_via_gid(sheet_id, gid_map[name])
-        if not rows:
-            rows = fetch_via_export_name(sheet_id, name)
-        if not rows:
-            continue
-        matches = parse_group_rows(rows)
-        if not matches:
-            continue
-        found_groups.append((name, len(matches)))
-        total_matches += len(matches)
-
-    # Sprawdź też zakładkę Drabinka — pokazujemy WSZYSTKIE wykryte fazy
-    drabinka_phases = []  # [(phase_full_name, n_matches, time)]
-    for tab_name in ('Drabinka', 'drabinka', 'DRABINKA'):
-        try:
-            rows = fetch_sheet(sheet_id, tab_name, gid_map)
-            if not rows:
-                continue
-            # Iteruj wszystkie zarejestrowane fazy i sprawdź każdą
-            seen_phase_full = set()
-            for phase_key in PHASE_NAMES:
-                phase_full = PHASE_NAMES[phase_key]
-                if phase_full in seen_phase_full:
-                    continue  # różne klucze mogą mapować na ten sam phase_full
-                phase_name, phase_time, matches = parse_drabinka_rows(rows, phase_key)
-                if matches:
-                    drabinka_phases.append((phase_name, len(matches), phase_time))
-                    seen_phase_full.add(phase_full)
-            break
-        except Exception:
-            continue
-
-    if not found_groups and not drabinka_phases:
+    detected = detect_drabinka_phases(sheet_id)
+    
+    if not detected['has_grupowa'] and not detected['glowna'] and not detected['b']:
         info.append("❌ Nie znaleziono żadnych grup z meczami ani zakładki Drabinka.")
         info.append("   Sprawdź czy arkusz jest publiczny.")
         return info
-
-    if found_groups:
-        n = len(found_groups)
-        # Polski plural dla "grupa": 1 grupa, 2-4 grupy, 5+ grup, 22-24 grupy itd.
-        last = n % 10
-        last2 = n % 100
-        if n == 1:
-            grupa_word = "grupa"
-        elif last in (2, 3, 4) and last2 not in (12, 13, 14):
-            grupa_word = "grupy"
-        else:
-            grupa_word = "grup"
-        # Polski plural dla "mecz": 1 mecz, 2-4 mecze, 5+ meczów
-        m = total_matches
-        m_last = m % 10
-        m_last2 = m % 100
-        if m == 1:
-            mecz_word = "mecz"
-        elif m_last in (2, 3, 4) and m_last2 not in (12, 13, 14):
-            mecz_word = "mecze"
-        else:
-            mecz_word = "meczów"
-        info.append(f"✅ Faza grupowa: {n} {grupa_word}, {m} {mecz_word}")
-        for name, count in found_groups:
-            count_word = "mecz" if count == 1 else (
-                "mecze" if (count % 10) in (2, 3, 4) and (count % 100) not in (12, 13, 14)
-                else "meczów")
-            info.append(f"  • {name}: {count} {count_word}")
     
-    if drabinka_phases:
-        info.append("")
-        n_phases = len(drabinka_phases)
-        faza_word = "faza" if n_phases == 1 else (
-            "fazy" if (n_phases % 10) in (2, 3, 4) and (n_phases % 100) not in (12, 13, 14)
-            else "faz")
-        info.append(f"✅ Drabinka: {n_phases} {faza_word}")
-        for phase_name, count, time_str in drabinka_phases:
-            count_word = "mecz" if count == 1 else (
-                "mecze" if (count % 10) in (2, 3, 4) and (count % 100) not in (12, 13, 14)
-                else "meczów")
-            time_part = f" ({time_str})" if time_str else ""
-            info.append(f"  • {phase_name}{time_part}: {count} {count_word}")
+    # Faza grupowa
+    if detected['has_grupowa']:
+        ng = detected['group_count']
+        nm = detected['group_total_matches']
+        info.append(f"✅ Faza grupowa: {ng} {pluralize(ng, 'grupa', 'grupy', 'grup')}, "
+                    f"{nm} {pluralize(nm, 'mecz', 'mecze', 'meczów')}")
+    
+    # Drabinka — grupowanie po godzinie
+    all_phases = detected['glowna'] + detected['b']
+    if all_phases:
+        if info: info.append("")
+        n_total = len(all_phases)
+        info.append(f"✅ Drabinka: {n_total} {pluralize(n_total, 'faza', 'fazy', 'faz')} "
+                    "(pogrupowane po godzinie startu):")
+        
+        # Grupuj po godzinie
+        by_time = {}
+        no_time = []
+        for p in all_phases:
+            t = p['time']
+            if t:
+                by_time.setdefault(t, []).append(p)
+            else:
+                no_time.append(p)
+        
+        for t in sorted(by_time.keys()):
+            phases_at_t = sorted(by_time[t], key=lambda x: x['full'])
+            info.append(f"  🕐 {t}:")
+            for p in phases_at_t:
+                n_m = p['n_matches']
+                info.append(f"     • {p['full']}: {n_m} {pluralize(n_m, 'mecz', 'mecze', 'meczów')}")
+        if no_time:
+            info.append("  🕐 (bez wykrytej godziny):")
+            for p in sorted(no_time, key=lambda x: x['full']):
+                n_m = p['n_matches']
+                info.append(f"     • {p['full']}: {n_m} {pluralize(n_m, 'mecz', 'mecze', 'meczów')}")
     
     return info
 

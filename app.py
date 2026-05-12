@@ -284,20 +284,48 @@ with col_form:
     # ─── Wiersz 2: Drabinka | Faza | Format ────────────────────────────
     # Dwupoziomowy wybór: najpierw drabinka (Grupowa / Główna / Drabinka B),
     # potem konkretna faza w obrębie tej drabinki.
+    #
+    # SHEET-DRIVEN FILTERING: po kliknięciu "Wczytaj zakładki" (sekcja 2 niżej)
+    # session_state['detected'] zawiera fazy faktycznie obecne w arkuszu.
+    # Wtedy dropdowny pokazują TYLKO te fazy (z liczbą meczów + godziną w opisie).
+    # Bez cache → pełne hardcoded listy (fallback).
+    
+    # Czytanie URL z session_state (widget renderuje się w sekcji 2 niżej,
+    # ale wartość jest dostępna już teraz na każdym kolejnym renderze dzięki kluczowi).
+    _current_url = st.session_state.get('sheets_url_input', '').strip()
+    detected = None
+    if 'detected' in st.session_state and _current_url:
+        _cached = st.session_state['detected']
+        if _cached.get('sheet_id') == extract_id(_current_url):
+            detected = _cached
+    
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
         if is_trojka_pre:
-            drabinka_options = {
+            drabinka_options_full = {
                 "Grupowa":    "✅ Faza grupowa",
                 "Główna":     "✅ Drabinka główna",
                 "Drabinka B": "🟡 Drabinka B (mecze o miejsca)",
             }
         else:
-            drabinka_options = {
+            drabinka_options_full = {
                 "Grupowa":    "✅ Faza grupowa",
                 "Główna":     "🔴 Drabinka główna (wkrótce)",
                 "Drabinka B": "🔴 Drabinka B (wkrótce)",
             }
+        # Filtruj na podstawie detected
+        if detected is not None:
+            drabinka_options = {}
+            if detected.get('has_grupowa'):
+                drabinka_options['Grupowa'] = drabinka_options_full['Grupowa']
+            if detected.get('glowna'):
+                drabinka_options['Główna'] = drabinka_options_full['Główna']
+            if detected.get('b'):
+                drabinka_options['Drabinka B'] = drabinka_options_full['Drabinka B']
+            if not drabinka_options:  # pusty arkusz — fallback
+                drabinka_options = drabinka_options_full
+        else:
+            drabinka_options = drabinka_options_full
         drabinka = st.selectbox(
             "Drabinka",
             list(drabinka_options.keys()),
@@ -317,7 +345,30 @@ with col_form:
                          index=0, disabled=True,
                          help="Wybrano fazę grupową — nie ma podfaz.")
         elif drabinka == "Główna":
-            if is_trojka_pre:
+            faza_options = {}
+            # Sheet-driven: tylko fazy z arkusza, każda z liczbą meczów + godziną
+            if detected is not None and detected.get('glowna'):
+                for entry in detected['glowna']:
+                    pkey = entry['key']
+                    if pkey == 'finał':
+                        ui_key = "Finał"
+                        label = "Finał"
+                    else:
+                        m = re.match(r'1/(\d+)', pkey)
+                        if not m: continue
+                        n = m.group(1)
+                        ui_key = f"Pucharowa 1/{n}"
+                        if n == '2':   label = "1/2 finału (Półfinał)"
+                        elif n == '4': label = "1/4 finału (Ćwierćfinał)"
+                        else:          label = f"1/{n} finału"
+                    badge = ("✅" if (is_trojka_pre and pkey in ('1/8','1/4','1/2','finał'))
+                             else ("🔴" if (pkey == '1/16' and is_trojka_pre) else "🟡"))
+                    n_m = entry['n_matches']
+                    t = entry['time']
+                    suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
+                    if t: suffix += f"  ·  {t}"
+                    faza_options[ui_key] = f"{badge} {label}{suffix}"
+            elif is_trojka_pre:
                 faza_options = {
                     "Pucharowa 1/16": "🔴 1/16 finału (niedostępne dla trójek)",
                     "Pucharowa 1/8":  "✅ 1/8 finału",
@@ -325,7 +376,6 @@ with col_form:
                     "Pucharowa 1/2":  "✅ 1/2 finału (Półfinał)",
                     "Finał":          "✅ Finał",
                 }
-                default_idx = 1  # 1/8 finału
             else:
                 faza_options = {
                     "Pucharowa 1/64": "🔴 1/64 finału",
@@ -336,49 +386,74 @@ with col_form:
                     "Pucharowa 1/2":  "🔴 1/2 finału (Półfinał)",
                     "Finał":          "🔴 Finał",
                 }
-                default_idx = 0
-            tournament_phase = st.selectbox(
-                "Faza",
-                list(faza_options.keys()),
-                format_func=lambda k: faza_options[k],
-                index=default_idx,
-            )
-        else:  # Drabinka B
-            # Lista posortowana hierarchicznie:
-            # 1) Mini-turnieje "Miejsca X-Y" — sort po (start asc, -rozmiar)
-            #    żeby parent przed children (17-32 przed 17-24, 17-24 przed 17-20/21-24).
-            # 2) Mecze o pojedyncze miejsca — sort po N ascending.
-            miejsca_ranges = [
-                (5, 8), (9, 12), (9, 16), (13, 16),
-                (17, 20), (17, 24), (17, 32),
-                (21, 24), (25, 28), (25, 32), (29, 32),
-            ]
-            # Sortowanie: start ASC, -rozmiar DESC (parent przed children)
-            miejsca_sorted = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
-            mecze_o_n = list(range(3, 32, 2))  # 3, 5, 7, ..., 31
-            
-            if is_trojka_pre:
-                faza_options = {}
-                for a, b in miejsca_sorted:
-                    key = f"Miejsca {a}-{b}"
-                    faza_options[key] = f"🟡 {key}"
-                for n in mecze_o_n:
-                    key = f"Mecz o {n}. miejsce"
-                    faza_options[key] = ("✅ " + key) if n == 3 else f"🟡 {key}"
+            if faza_options:
+                tournament_phase = st.selectbox(
+                    "Faza",
+                    list(faza_options.keys()),
+                    format_func=lambda k: faza_options[k],
+                    index=0,
+                )
             else:
-                faza_options = {}
-                for a, b in miejsca_sorted:
-                    key = f"Miejsca {a}-{b}"
-                    faza_options[key] = f"🔴 {key}"
+                tournament_phase = "Pucharowa 1/8"
+                st.selectbox("Faza", ["(brak faz w arkuszu)"], disabled=True)
+        else:  # Drabinka B
+            faza_options = {}
+            # Sortowanie B: Miejsca po (start, -size) parent before children; Mecze po N asc.
+            def _sort_b(key):
+                m = re.match(r'miejsca (\d+)-(\d+)', key)
+                if m:
+                    a, b = int(m.group(1)), int(m.group(2))
+                    return (0, a, -(b - a))
+                m = re.match(r'mecz o (\d+)', key)
+                if m:
+                    return (1, int(m.group(1)), 0)
+                return (2, 0, 0)
+            
+            if detected is not None and detected.get('b'):
+                b_sorted = sorted(detected['b'], key=lambda e: _sort_b(e['key']))
+                for entry in b_sorted:
+                    pkey = entry['key']
+                    m = re.match(r'miejsca (\d+)-(\d+)', pkey)
+                    if m:
+                        a, b = m.group(1), m.group(2)
+                        ui_key = f"Miejsca {a}-{b}"
+                    else:
+                        m = re.match(r'mecz o (\d+)', pkey)
+                        if not m: continue
+                        n = m.group(1)
+                        ui_key = f"Mecz o {n}. miejsce"
+                    badge = "✅" if (pkey == 'mecz o 3' and is_trojka_pre) else (
+                        "🟡" if is_trojka_pre else "🔴")
+                    n_m = entry['n_matches']
+                    t = entry['time']
+                    suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
+                    if t: suffix += f"  ·  {t}"
+                    faza_options[ui_key] = f"{badge} {ui_key}{suffix}"
+            else:
+                # Fallback bez cache — pełna lista
+                miejsca_ranges = [(5,8),(9,12),(9,16),(13,16),(17,20),(17,24),
+                                  (17,32),(21,24),(25,28),(25,32),(29,32)]
+                miejsca_sorted_pairs = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
+                mecze_o_n = list(range(3, 32, 2))
+                badge_def = "🟡" if is_trojka_pre else "🔴"
+                for a, b in miejsca_sorted_pairs:
+                    k = f"Miejsca {a}-{b}"
+                    faza_options[k] = f"{badge_def} {k}"
                 for n in mecze_o_n:
-                    key = f"Mecz o {n}. miejsce"
-                    faza_options[key] = f"🔴 {key}"
-            tournament_phase = st.selectbox(
-                "Faza",
-                list(faza_options.keys()),
-                format_func=lambda k: faza_options[k],
-                index=0,
-            )
+                    k = f"Mecz o {n}. miejsce"
+                    badge = "✅" if (is_trojka_pre and n == 3) else badge_def
+                    faza_options[k] = f"{badge} {k}"
+            
+            if faza_options:
+                tournament_phase = st.selectbox(
+                    "Faza",
+                    list(faza_options.keys()),
+                    format_func=lambda k: faza_options[k],
+                    index=0,
+                )
+            else:
+                tournament_phase = "Mecz o 3. miejsce"
+                st.selectbox("Faza", ["(brak faz Drabinki B w arkuszu)"], disabled=True)
     
     with cols_t2[2]:
         # Format setów zależny od drabinki:
@@ -474,7 +549,8 @@ with col_form:
         sheets_url = st.text_input("URL arkusza",
             placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
             help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
-            label_visibility="collapsed")
+            label_visibility="collapsed",
+            key='sheets_url_input')
     with cols_link[1]:
         check_clicked = st.button("🔍 Wczytaj zakładki", use_container_width=True)
     
@@ -502,9 +578,13 @@ with col_form:
             n_g = len(cached.get('glowna', []))
             n_b = len(cached.get('b', []))
             n_grp = cached.get('group_count', 0)
-            st.caption(f"📋 **Wczytano arkusz** · faza grupowa: {n_grp} grup · "
-                       f"drabinka główna: {n_g} faz · drabinka B: {n_b} faz · "
-                       "fazy poniżej automatycznie ograniczone do obecnych w arkuszu")
+            grp_w = generate_docx.pluralize(n_grp, 'grupa', 'grupy', 'grup')
+            faza_g = generate_docx.pluralize(n_g, 'faza', 'fazy', 'faz')
+            faza_b = generate_docx.pluralize(n_b, 'faza', 'fazy', 'faz')
+            st.caption(f"📋 **Arkusz wczytany** · faza grupowa: {n_grp} {grp_w} · "
+                       f"drabinka główna: {n_g} {faza_g} · drabinka B: {n_b} {faza_b} · "
+                       "**fazy w sekcji 1. zostały ograniczone do tych z arkusza** "
+                       "(zmień URL i kliknij Wczytaj ponownie żeby odświeżyć)")
 
     # ─── 3. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
@@ -1118,15 +1198,47 @@ with cols_fmt[1]:
 # Filtr po godzinie — tylko dla fazy pucharowej (gdzie różne fazy mogą iść równolegle).
 time_filter = ""
 if is_pucharowa:
-    with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
-        st.caption("Wpisz godzinę startu (np. **13:00**) żeby wygenerować tylko te mecze. "
-                   "Puste = wszystkie z wybranej fazy. Przydatne gdy chcesz wydrukować "
-                   "protokoły dla konkretnego slotu czasowego (np. 1/4 finału + Miejsca 9-16 "
-                   "grane są o 14:15 — wybierając tę godzinę dla każdej fazy osobno wygenerujesz "
-                   "kolejno wszystkie protokoły grane w tym samym czasie).")
-        time_filter = st.text_input("Godzina (HH:MM)",
-                                    placeholder="13:00",
-                                    key="time_filter_input")
+    # Pobierz cache (jeśli URL/sheet już wczytane)
+    _cur_url = st.session_state.get('sheets_url_input', '').strip()
+    _det = None
+    if 'detected' in st.session_state and _cur_url:
+        _c = st.session_state['detected']
+        if _c.get('sheet_id') == extract_id(_cur_url):
+            _det = _c
+    
+    if _det:
+        # Group phases by time
+        times_with_phases = {}
+        for p in (_det.get('glowna', []) + _det.get('b', [])):
+            if p.get('time'):
+                times_with_phases.setdefault(p['time'], []).append(p['full'])
+        
+        if times_with_phases:
+            with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
+                st.caption("Pokaż tylko mecze rozpoczynające się o wybranej godzinie. "
+                           "Lista godzin pochodzi z arkusza — przy każdej zobaczysz "
+                           "które fazy są wtedy grane.")
+                opts = ["(wszystkie godziny)"]
+                opt_to_time = {opts[0]: ""}
+                for t in sorted(times_with_phases.keys()):
+                    phases_str = ', '.join(times_with_phases[t])
+                    label = f"{t} — {phases_str}"
+                    opts.append(label)
+                    opt_to_time[label] = t
+                picked = st.selectbox("Godzina startu", opts, index=0,
+                                       key="time_filter_dropdown")
+                time_filter = opt_to_time.get(picked, "")
+        else:
+            with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
+                st.caption("Nie wykryto godzin startu w arkuszu.")
+    else:
+        # Bez cache — text input fallback
+        with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
+            st.caption("💡 Wczytaj arkusz w sekcji 2 żeby zobaczyć dostępne godziny "
+                       "jako dropdown z listą faz przy każdej godzinie.")
+            time_filter = st.text_input("Godzina (HH:MM)",
+                                        placeholder="13:00",
+                                        key="time_filter_input")
 
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
