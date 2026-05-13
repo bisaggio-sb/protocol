@@ -361,12 +361,18 @@ def parse_drabinka_rows(rows, target_phase=None):
         z2_raw = g(row2, col_player)
         z2_lower = z2_raw.lower()
         
-        # Tor: hierarchia źródeł — row1.col_tor → row2.col_tor → last+1 → match_num
+        # Tor: hierarchia źródeł
+        # 1) Wartość w komórce row1 lub row2 (numer LUB tekst typu "TBC5")
+        # 2) Empty → fallback: last_known_tor+1 (typowy wzorzec merged cells)
+        # 3) Brak last_known → fallback: match_num
         tor_raw = g(row1, col_tor) or g(row2, col_tor)
-        if tor_raw and tor_raw.strip().isdigit():
+        if tor_raw:
+            # Jakakolwiek wartość — zachowujemy as-is (numer, "TBC5", "?", itp.)
             tor = tor_raw.strip()
-            last_known_tor = tor
+            if tor.isdigit():
+                last_known_tor = tor  # pamiętaj numer do fallback
         elif last_known_tor and last_known_tor.isdigit():
+            # Pusta komórka (np. merged), inkrementujemy ostatni znany numer
             tor = str(int(last_known_tor) + 1)
             last_known_tor = tor
         else:
@@ -617,7 +623,22 @@ def get_sheet_names_debug(sheet_id):
                 no_time.append(p)
         
         for t in sorted(by_time.keys()):
-            phases_at_t = sorted(by_time[t], key=lambda x: x['full'])
+            # Sortuj fazy NUMERYCZNIE (nie alfabetycznie):
+            # • "1/N FINAŁU" → po N (mniejsze N = późniejsza runda, ważniejsza)
+            # • "MIEJSCA X-Y" → po X
+            # • "MECZ O N. MIEJSCE" → po N (9 przed 11, nie 11 przed 9)
+            def _phase_sort_key(p):
+                full_lower = p['full'].lower()
+                m = re.search(r'1/(\d+)', full_lower)
+                if m: return (0, int(m.group(1)))
+                if 'finał' in full_lower and 'półfinał' not in full_lower:
+                    return (0, 1)  # FINAŁ traktowany jak 1/1
+                m = re.search(r'miejsca\s+(\d+)', full_lower)
+                if m: return (1, int(m.group(1)))
+                m = re.search(r'mecz\s+o\s+(\d+)', full_lower)
+                if m: return (2, int(m.group(1)))
+                return (3, 0)
+            phases_at_t = sorted(by_time[t], key=_phase_sort_key)
             info.append(f"  🕐 {t}:")
             for p in phases_at_t:
                 n_m = p['n_matches']
