@@ -281,23 +281,100 @@ with col_form:
     
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
     
-    # ─── Wiersz 2: Drabinka | Faza | Format ────────────────────────────
-    # Dwupoziomowy wybór: najpierw drabinka (Grupowa / Główna / Drabinka B),
-    # potem konkretna faza w obrębie tej drabinki.
-    #
-    # SHEET-DRIVEN FILTERING: po kliknięciu "Wczytaj zakładki" (sekcja 2 niżej)
-    # session_state['detected'] zawiera fazy faktycznie obecne w arkuszu.
-    # Wtedy dropdowny pokazują TYLKO te fazy (z liczbą meczów + godziną w opisie).
-    # Bez cache → pełne hardcoded listy (fallback).
+    # ─── 2. Link do arkusza ─────────────────────────────────────────────
+    st.header("2. Link do arkusza Google Sheets")
+    cols_link = st.columns([4, 1])
+    with cols_link[0]:
+        sheets_url = st.text_input("URL arkusza",
+            placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
+            help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
+            label_visibility="collapsed",
+            key='sheets_url_input')
+    with cols_link[1]:
+        check_clicked = st.button("🔍 Wczytaj zakładki", use_container_width=True)
     
-    # Czytanie URL z session_state (widget renderuje się w sekcji 2 niżej,
-    # ale wartość jest dostępna już teraz na każdym kolejnym renderze dzięki kluczowi).
-    _current_url = st.session_state.get('sheets_url_input', '').strip()
+    if check_clicked:
+        sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+        if not sid:
+            st.error("Wklej najpierw poprawny link do arkusza.")
+        else:
+            with st.spinner("Wczytuję arkusz..."):
+                info = generate_docx.get_sheet_names_debug(sid)
+                try:
+                    detected_info = generate_docx.detect_drabinka_phases(sid)
+                    detected_info['sheet_id'] = sid
+                    st.session_state['detected'] = detected_info
+                except Exception as e:
+                    st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
+                    st.session_state.pop('detected', None)
+            st.code("\n".join(info))
+    
+    # Pokaż info o aktywnym cache (jeśli URL match)
+    if 'detected' in st.session_state and sheets_url.strip():
+        cached = st.session_state['detected']
+        cur_sid = extract_id(sheets_url.strip())
+        if cached.get('sheet_id') == cur_sid:
+            n_g = len(cached.get('glowna', []))
+            n_b = len(cached.get('b', []))
+            n_grp = cached.get('group_count', 0)
+            grp_w = generate_docx.pluralize(n_grp, 'grupa', 'grupy', 'grup')
+            faza_g = generate_docx.pluralize(n_g, 'faza', 'fazy', 'faz')
+            faza_b = generate_docx.pluralize(n_b, 'faza', 'fazy', 'faz')
+            st.caption(f"📋 **Arkusz wczytany** · faza grupowa: {n_grp} {grp_w} · "
+                       f"drabinka główna: {n_g} {faza_g} · drabinka B: {n_b} {faza_b} · "
+                       "**fazy w sekcji 1. zostały ograniczone do tych z arkusza** "
+                       "(zmień URL i kliknij Wczytaj ponownie żeby odświeżyć)")
+    # ─── 3. Wybór fazy ──────────────────────────────────────────────────
+    # SHEET-DRIVEN: po wczytaniu arkusza (sekcja 2) dropdowny pokazują tylko
+    # fazy obecne w arkuszu. Godzina (góra) jest GŁÓWNYM filtrem — wybór
+    # godziny zawęża Drabinkę i Fazę do tych granych o tej porze.
+    st.header("3. Wybór fazy")
+    
+    # Cache (filled by Wczytaj button w sekcji 2)
     detected = None
-    if 'detected' in st.session_state and _current_url:
+    if 'detected' in st.session_state and sheets_url.strip():
         _cached = st.session_state['detected']
-        if _cached.get('sheet_id') == extract_id(_current_url):
+        if _cached.get('sheet_id') == extract_id(sheets_url.strip()):
             detected = _cached
+    
+    if detected is None:
+        st.caption("💡 Wklej URL w sekcji 2 i kliknij **Wczytaj zakładki** żeby zobaczyć "
+                   "tylko fazy obecne w arkuszu. Bez wczytania — pokazujemy pełną listę.")
+    
+    # ── Godzina filter (góra, full width) — pierwszorzędny filtr ──
+    time_filter = ""
+    if detected and detected.get('all_times'):
+        time_opts = ["(wszystkie godziny — wybór per faza)"]
+        time_label_to_value = {time_opts[0]: ""}
+        # Faza grupowa może mieć różne godziny → ją pomijamy w mapie
+        for t in sorted(detected['all_times']):
+            phases_at_t = [p['full'] for p in (detected['glowna'] + detected['b'])
+                           if p.get('time') == t]
+            label = f"{t} — {', '.join(phases_at_t)}" if phases_at_t else t
+            time_opts.append(label)
+            time_label_to_value[label] = t
+        picked = st.selectbox("🕐 Godzina startu",
+                              time_opts, index=0, key="godzina_top",
+                              help=("Wybierz godzinę → Drabinka i Faza poniżej "
+                                    "zostaną zawężone do faz granych o tej porze. "
+                                    "Wszystkie godziny pochodzą z arkusza."))
+        time_filter = time_label_to_value.get(picked, "")
+    
+    # Apply time filter na listy faz (używane do filtrowania Drabinki i Fazy poniżej)
+    if detected:
+        if time_filter:
+            filtered_glowna = [p for p in detected.get('glowna', []) if p.get('time') == time_filter]
+            filtered_b = [p for p in detected.get('b', []) if p.get('time') == time_filter]
+            # Grupowa nie ma jednej godziny startu — ukrywamy gdy time_filter aktywny
+            filtered_has_grupowa = False
+        else:
+            filtered_glowna = detected.get('glowna', [])
+            filtered_b = detected.get('b', [])
+            filtered_has_grupowa = detected.get('has_grupowa', False)
+    else:
+        filtered_glowna = []
+        filtered_b = []
+        filtered_has_grupowa = False
     
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
@@ -313,16 +390,18 @@ with col_form:
                 "Główna":     "🔴 Drabinka główna (wkrótce)",
                 "Drabinka B": "🔴 Drabinka B (wkrótce)",
             }
-        # Filtruj na podstawie detected
+        # Filtruj na podstawie detected + time_filter
         if detected is not None:
             drabinka_options = {}
-            if detected.get('has_grupowa'):
+            if filtered_has_grupowa:
                 drabinka_options['Grupowa'] = drabinka_options_full['Grupowa']
-            if detected.get('glowna'):
+            if filtered_glowna:
                 drabinka_options['Główna'] = drabinka_options_full['Główna']
-            if detected.get('b'):
+            if filtered_b:
                 drabinka_options['Drabinka B'] = drabinka_options_full['Drabinka B']
-            if not drabinka_options:  # pusty arkusz — fallback
+            if not drabinka_options:
+                if time_filter:
+                    st.warning(f"⚠️ Brak faz o godzinie **{time_filter}** w arkuszu.")
                 drabinka_options = drabinka_options_full
         else:
             drabinka_options = drabinka_options_full
@@ -347,8 +426,8 @@ with col_form:
         elif drabinka == "Główna":
             faza_options = {}
             # Sheet-driven: tylko fazy z arkusza, każda z liczbą meczów + godziną
-            if detected is not None and detected.get('glowna'):
-                for entry in detected['glowna']:
+            if detected is not None and filtered_glowna:
+                for entry in filtered_glowna:
                     pkey = entry['key']
                     if pkey == 'finał':
                         ui_key = "Finał"
@@ -409,8 +488,8 @@ with col_form:
                     return (1, int(m.group(1)), 0)
                 return (2, 0, 0)
             
-            if detected is not None and detected.get('b'):
-                b_sorted = sorted(detected['b'], key=lambda e: _sort_b(e['key']))
+            if detected is not None and filtered_b:
+                b_sorted = sorted(filtered_b, key=lambda e: _sort_b(e['key']))
                 for entry in b_sorted:
                     pkey = entry['key']
                     m = re.match(r'miejsca (\d+)-(\d+)', pkey)
@@ -541,57 +620,12 @@ with col_form:
     
     if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
-
-    # ─── 2. Link do arkusza ─────────────────────────────────────────────
-    st.header("2. Link do arkusza Google Sheets")
-    cols_link = st.columns([4, 1])
-    with cols_link[0]:
-        sheets_url = st.text_input("URL arkusza",
-            placeholder="https://docs.google.com/spreadsheets/d/XXXX/edit...",
-            help="Arkusz musi być publiczny. Zakładki grup: 'Gr. A', 'Gr. B', ...",
-            label_visibility="collapsed",
-            key='sheets_url_input')
-    with cols_link[1]:
-        check_clicked = st.button("🔍 Wczytaj zakładki", use_container_width=True)
-    
-    if check_clicked:
-        sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
-        if not sid:
-            st.error("Wklej najpierw poprawny link do arkusza.")
-        else:
-            with st.spinner("Wczytuję arkusz..."):
-                info = generate_docx.get_sheet_names_debug(sid)
-                try:
-                    detected_info = generate_docx.detect_drabinka_phases(sid)
-                    detected_info['sheet_id'] = sid
-                    st.session_state['detected'] = detected_info
-                except Exception as e:
-                    st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
-                    st.session_state.pop('detected', None)
-            st.code("\n".join(info))
-    
-    # Pokaż info o aktywnym cache (jeśli URL match)
-    if 'detected' in st.session_state and sheets_url.strip():
-        cached = st.session_state['detected']
-        cur_sid = extract_id(sheets_url.strip())
-        if cached.get('sheet_id') == cur_sid:
-            n_g = len(cached.get('glowna', []))
-            n_b = len(cached.get('b', []))
-            n_grp = cached.get('group_count', 0)
-            grp_w = generate_docx.pluralize(n_grp, 'grupa', 'grupy', 'grup')
-            faza_g = generate_docx.pluralize(n_g, 'faza', 'fazy', 'faz')
-            faza_b = generate_docx.pluralize(n_b, 'faza', 'fazy', 'faz')
-            st.caption(f"📋 **Arkusz wczytany** · faza grupowa: {n_grp} {grp_w} · "
-                       f"drabinka główna: {n_g} {faza_g} · drabinka B: {n_b} {faza_b} · "
-                       "**fazy w sekcji 1. zostały ograniczone do tych z arkusza** "
-                       "(zmień URL i kliknij Wczytaj ponownie żeby odświeżyć)")
-
-    # ─── 3. Domyślne elementy ───────────────────────────────────────────
+    # ─── 4. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
     is_no_graphics = is_pucharowa
     if is_no_graphics:
-        st.header("3. Domyślne elementy")
+        st.header("4. Domyślne elementy")
         st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
                 "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
@@ -600,7 +634,7 @@ with col_form:
         show_header_on_protocol = True
         include_pfm_logo = False
     else:
-        st.header("3. Domyślne elementy")
+        st.header("4. Domyślne elementy")
         cols_dom = st.columns(2)
         with cols_dom[0]:
             include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
@@ -609,7 +643,7 @@ with col_form:
         with cols_dom[1]:
             include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
-    # ─── 4. Grafiki (zwijane) - łączy dodawanie + pozycjonowanie ─────────
+    # ─── 5. Grafiki (zwijane) - łączy dodawanie + pozycjonowanie ─────────
     NUM_LOGOS = 4
     logo_files = []
     
@@ -709,6 +743,22 @@ with col_form:
             template_type=('TROJKA' if is_trojka else 'IND'))
     if 'active_keys_signature' not in dir():
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
+    
+    # ── Apply user slider positions PRZED renderem podglądu ──
+    # Suwaki Pozycji grafik (number_input) zapisują wartości w st.session_state pod kluczami
+    # 'x_{key}_{sig}_{nonce}' itd. Ich rendering jest POD podglądem (linia ~1149),
+    # więc musimy ZASYMULOWAĆ ich efekt na image_positions zanim narysujemy podgląd.
+    # Bez tego: zmiana X/Y w suwakach nie aktualizuje preview do następnego rerunu.
+    _nonce_for_preview = st.session_state.get('reset_nonce', 0)
+    for _key in image_positions:
+        _base = f"{_key}_{active_keys_signature}_{_nonce_for_preview}"
+        for _dim, _src in (('x', f'x_{_base}'), ('y', f'y_{_base}'),
+                           ('w', f'w_{_base}'), ('h', f'h_{_base}')):
+            if _src in st.session_state:
+                try:
+                    image_positions[_key][_dim] = float(st.session_state[_src])
+                except (TypeError, ValueError):
+                    pass
 
 
 # ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
@@ -1187,7 +1237,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("4. Generuj")
+st.header("6. Generuj")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
@@ -1195,50 +1245,9 @@ with cols_fmt[0]:
 with cols_fmt[1]:
     fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=True)
 
-# Filtr po godzinie — tylko dla fazy pucharowej (gdzie różne fazy mogą iść równolegle).
-time_filter = ""
-if is_pucharowa:
-    # Pobierz cache (jeśli URL/sheet już wczytane)
-    _cur_url = st.session_state.get('sheets_url_input', '').strip()
-    _det = None
-    if 'detected' in st.session_state and _cur_url:
-        _c = st.session_state['detected']
-        if _c.get('sheet_id') == extract_id(_cur_url):
-            _det = _c
-    
-    if _det:
-        # Group phases by time
-        times_with_phases = {}
-        for p in (_det.get('glowna', []) + _det.get('b', [])):
-            if p.get('time'):
-                times_with_phases.setdefault(p['time'], []).append(p['full'])
-        
-        if times_with_phases:
-            with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
-                st.caption("Pokaż tylko mecze rozpoczynające się o wybranej godzinie. "
-                           "Lista godzin pochodzi z arkusza — przy każdej zobaczysz "
-                           "które fazy są wtedy grane.")
-                opts = ["(wszystkie godziny)"]
-                opt_to_time = {opts[0]: ""}
-                for t in sorted(times_with_phases.keys()):
-                    phases_str = ', '.join(times_with_phases[t])
-                    label = f"{t} — {phases_str}"
-                    opts.append(label)
-                    opt_to_time[label] = t
-                picked = st.selectbox("Godzina startu", opts, index=0,
-                                       key="time_filter_dropdown")
-                time_filter = opt_to_time.get(picked, "")
-        else:
-            with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
-                st.caption("Nie wykryto godzin startu w arkuszu.")
-    else:
-        # Bez cache — text input fallback
-        with st.expander("🕐 Filtruj po godzinie (opcjonalne)"):
-            st.caption("💡 Wczytaj arkusz w sekcji 2 żeby zobaczyć dostępne godziny "
-                       "jako dropdown z listą faz przy każdej godzinie.")
-            time_filter = st.text_input("Godzina (HH:MM)",
-                                        placeholder="13:00",
-                                        key="time_filter_input")
+# Filtr po godzinie jest zdefiniowany w sekcji 3 (na górze, jako filtr główny).
+# Zmienna time_filter jest już ustawiona powyżej w col_form scope.
+
 
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
