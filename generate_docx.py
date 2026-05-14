@@ -1046,8 +1046,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'TROJKA_Bo3': 'Bo3_TROJKA.docx',
         'TROJKA_Bo5': 'Bo5_TROJKA.docx',
         'CZWORKA': 'Grupa_CZWORKA.docx',  # 4-osobowa drużyna, grupowa
-        # CZWORKA_Bo3, CZWORKA_Bo5 — czekają na osobne szablony designerskie
-        # (4 graczy = inne kolumny w T1 vs trójka)
+        'CZWORKA_Bo3': 'Bo3_CZWORKA.docx',  # 4-osobowa, Bo3 (31 kol w T1)
+        'CZWORKA_Bo5': 'Bo5_CZWORKA.docx',  # 4-osobowa, Bo5 (31 kol T1, 21 kol T3)
         # DRUZYNA (2-osobowa) — nie zaimplementowane jeszcze
     }
     tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')

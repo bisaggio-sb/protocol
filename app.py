@@ -167,8 +167,9 @@ def compute_default_positions(active_keys, logos_aspect=None,
             qr_x -= 0.185
         positions['qr'] = {'x': qr_x, 'y': 0.2, 'w': QR_W, 'h': QR_W}
         # Po QR: napis "Wyniki turnieju" + WYRAŹNY odstęp do pierwszego logo.
-        # text_h to wysokość napisu, SPACE_AFTER_QR to odstęp od napisu do logo.
-        text_h = 0.5
+        # text_h = wysokość 2-liniowego napisu (font-size:7px × 2 lines + line-height) ≈ 1.0 cm.
+        # Wcześniej 0.5 — PFM zachodziło na tekst.
+        text_h = 1.0
         first_logo_y = 0.2 + QR_W + text_h + SPACE_AFTER_QR
         pfm_w_target = PFM_TARGET_W
     else:
@@ -272,7 +273,7 @@ with col_form:
             "Indywidualny":     "✅ Indywidualny",
             "Drużynowy 2-os.":  "🔴 Drużynowy 2-os. (wkrótce)",
             "Drużynowy 3-os.":  "✅ Drużynowy 3-os.",
-            "Drużynowy 4-os.":  "🟡 Drużynowy 4-os. (tylko grupowa)",
+            "Drużynowy 4-os.":  "✅ Drużynowy 4-os.",
         }
         tournament_type = st.selectbox(
             "Rodzaj",
@@ -652,8 +653,7 @@ with col_form:
     is_individual = tournament_type == "Indywidualny"
     is_trojka = tournament_type == "Drużynowy 3-os."
     is_czworka = tournament_type == "Drużynowy 4-os."
-    # Czwórka obsługujemy TYLKO dla fazy grupowej (Bo3/Bo5 czwórka czeka na osobne szablony).
-    is_supported_type = is_individual or is_trojka or (is_czworka and tournament_phase == "Grupowa")
+    is_supported_type = is_individual or is_trojka or is_czworka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
     # is_drabinka_b: dowolny mecz o N miejsce LUB mini-turniej Miejsca X-Y.
@@ -1327,9 +1327,29 @@ with cols_fmt[0]:
 with cols_fmt[1]:
     fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=True)
 
-# Filtr po godzinie jest zdefiniowany w sekcji 3 (na górze, jako filtr główny).
-# Zmienna time_filter jest już ustawiona powyżej w col_form scope.
-
+# Sortowanie protokołów — tylko dla fazy grupowej, gdzie jest sens
+# (puchar / multi-phase generuje single phase z natury sekwencyjnie).
+# Default: po Tor (najpraktyczniejsze — protokoły leżą na torach po kolei).
+sort_mode = "tor"
+if tournament_phase == "Grupowa":
+    cols_sort = st.columns([2, 5])
+    with cols_sort[0]:
+        sort_options = {
+            "tor":    "🎯 Po torach (default)",
+            "godz":   "🕐 Po godzinie",
+            "grupa":  "📋 Po grupach",
+        }
+        sort_mode = st.selectbox(
+            "Sortowanie protokołów",
+            list(sort_options.keys()),
+            format_func=lambda k: sort_options[k],
+            index=0,
+            help=("**Po torach** (domyślne) — protokoły leżą na danym torze "
+                  "jeden pod drugim, gracze biorą je po kolei.\n\n"
+                  "**Po godzinie** — protokoły posortowane chronologicznie.\n\n"
+                  "**Po grupach** — protokoły pogrupowane po Gr. A / B / C ... "
+                  "(stara logika).")
+        )
 
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
@@ -1456,6 +1476,12 @@ if gen_clicked:
             template_type = 'TROJKA_Bo3'
         elif is_trojka and sets_format == "Best of 5":
             template_type = 'TROJKA_Bo5'
+        elif is_czworka and sets_format == "Best of 3":
+            template_type = 'CZWORKA_Bo3'
+        elif is_czworka and sets_format == "Best of 5":
+            template_type = 'CZWORKA_Bo5'
+        elif is_czworka:
+            template_type = 'CZWORKA'
         else:
             template_type = 'TROJKA' if is_trojka else 'IND'
         
@@ -1509,140 +1535,184 @@ if gen_clicked:
                    f"{generate_docx.pluralize(total_matches,'protokołem','protokołami','protokołami')} "
                    f"z **{len(all_sheets_data)}** {generate_docx.pluralize(len(all_sheets_data),'fazy','faz','faz')} "
                    f"(godzina **{time_filter}**).")
-        st.stop()
-    
-    # ═══════════════════════════════════════════════════════════════════
-    # SINGLE-PHASE MODE (existing flow)
-    # ═══════════════════════════════════════════════════════════════════
-
-    # Wybierz źródło danych zależne od fazy:
-    # - Faza grupowa → zakładki Gr. A/B/C...
-    # - Faza pucharowa → zakładka Drabinka
-    if is_pucharowa:
-        with st.spinner(f"Pobieram mecze z zakładki Drabinka (faza {tournament_phase})..."):
-            try:
-                phase_name, matches = generate_docx.fetch_drabinka_phase(sid, tournament_phase)
-            except Exception as e:
-                st.error(f"Błąd pobierania zakładki Drabinka: {e}"); st.stop()
-        if not matches:
-            st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' w zakładce Drabinka. "
-                     "Upewnij się że arkusz ma zakładkę o nazwie 'Drabinka' i że nagłówek "
-                     f"kolumny zawiera nazwę fazy (np. '1/32 FINAŁU')."); st.stop()
-        
-        # Filter po godzinie — tylko jeśli user wybrał konkretną
-        all_matches_count = len(matches)
-        if time_filter and time_filter.strip():
-            tf = time_filter.strip()
-            matches = [m for m in matches if m.get('godz', '').startswith(tf)]
-            if not matches:
-                st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' o godzinie '{tf}'. "
-                         f"Sprawdź godzinę startu fazy w arkuszu.")
-                st.stop()
-            elif len(matches) != all_matches_count:
-                st.info(f"🕐 Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
-        
-        # Detekcja niekompletnych par (placeholder typu #N/A, TBD, BYE)
-        # i mocno krótkich nazw. Te mecze są POMIJANE z ostrzeżeniem.
-        INCOMPLETE_MARKERS = {'#n/a', 'n/a', 'tbd', '?', 'bye', '-', '—', 'wolny',
-                              'puste', 'tba', 'nieznany'}
-        complete_matches = []
-        incomplete_matches = []
-        for m in matches:
-            z1 = (m.get('z1') or '').strip()
-            z2 = (m.get('z2') or '').strip()
-            z1_low = z1.lower()
-            z2_low = z2.lower()
-            if (not z1 or not z2 or len(z1) < 3 or len(z2) < 3 or
-                z1_low in INCOMPLETE_MARKERS or z2_low in INCOMPLETE_MARKERS):
-                incomplete_matches.append(m)
-            else:
-                complete_matches.append(m)
-        
-        if incomplete_matches:
-            n_inc = len(incomplete_matches)
-            n_total = len(matches)
-            example = incomplete_matches[0]
-            ex_text = f"{example.get('z1','?')} vs {example.get('z2','?')}"
-            st.warning(f"⚠️ **{n_inc} z {n_total}** {generate_docx.pluralize(n_inc,'mecz','mecze','meczów')} "
-                       f"{generate_docx.pluralize(n_inc,'ma','ma','ma')} niekompletne pary "
-                       f"(np. brak drugiego gracza, #N/A, BYE). Przykład: *{ex_text}*. "
-                       f"**Te mecze zostaną pominięte przy generowaniu** — wygenerujemy "
-                       f"{len(complete_matches)} {generate_docx.pluralize(len(complete_matches),'protokół','protokoły','protokołów')}.")
-            matches = complete_matches
-        
-        if not matches:
-            st.error("Wszystkie mecze są niekompletne — nic do wygenerowania.")
-            st.stop()
-        
-        sheets_data = [(phase_name or tournament_phase, matches)]
+        _multi_phase_done = True
     else:
-        with st.spinner("Pobieram dane z grup..."):
-            try:
-                sheets_data = generate_docx.fetch_all_group_sheets(sid)
-            except Exception as e:
-                st.error(f"Błąd pobierania: {e}"); st.stop()
-
-    total = sum(len(m) for _,m in sheets_data)
-    if total == 0:
-        st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
-
-    with st.spinner(f"Generuję {total} protokołów..."):
-        logos_bytes, image_order, img_pos = build_image_args()
-        show_name = tournament_name.strip() if show_header_on_protocol else ""
-        show_date = tournament_date if show_header_on_protocol else ""
-        # Tekst fazy w prawym górnym rogu — phase_label_short zawiera już pełną
-        # czytelną nazwę ("1/8 finału", "Półfinał", "Miejsca 5-8", "Mecz o 9. miejsce").
-        if show_header_on_protocol:
-            show_phase = phase_label_short if is_pucharowa else "Faza grupowa"
-        else:
-            show_phase = ""
-        # Mapowanie typu turnieju → szablon docx
-        # Trójka pucharowa: Best of 3 → Bo3_TROJKA.docx, Best of 5 → Bo5_TROJKA.docx
-        if is_trojka and is_pucharowa and sets_format == "Best of 3":
-            template_type = 'TROJKA_Bo3'
-        elif is_trojka and is_pucharowa and sets_format == "Best of 5":
-            template_type = 'TROJKA_Bo5'
-        else:
-            template_type = 'TROJKA' if is_trojka else 'IND'
-        docx_bytes = generate_docx.build_document(
-            sid, sheets_url.strip(), sheets_data,
-            logos=logos_bytes or None,
-            tournament_name=show_name, tournament_date=show_date,
-            tournament_phase_text=show_phase,
-            include_qr=include_qr, include_pfm_logo=include_pfm_logo,
-            image_order=image_order or None, image_positions=img_pos or None,
-            hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short,
-            template_type=template_type)
-
-    safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
-    if is_pucharowa:
-        # Dodaj fazę + format setów do nazwy pliku.
-        # np. "TDT_2026_pucharowa_1_4_Bo5", "TDT_2026_finał_Bo3", "TDT_2026_miejsca_9_16_Bo3"
-        phase_suffix = re.sub(r'[^\w]', '_', tournament_phase).strip('_').lower()
-        # Format: dla pucharowej zawsze Bo3 lub Bo5 (2 sety wyłączone w UI dla puchar).
-        format_suffix = ''
-        if sets_format == 'Best of 3':
-            format_suffix = '_Bo3'
-        elif sets_format == 'Best of 5':
-            format_suffix = '_Bo5'
-        safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
+        _multi_phase_done = False
     
-    pdf_bytes, pdf_err = (None, None)
-    if fmt_pdf:
-        with st.spinner("Konwertuję do PDF..."):
-            pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
+    if not _multi_phase_done:
 
-    st.session_state['last_gen'] = {
-        'docx': docx_bytes if fmt_docx else None,
-        'pdf': pdf_bytes if fmt_pdf else None,
-        'pdf_err': pdf_err,
-        'name': safe_name,
-        'total': total,
-        'groups': len(sheets_data),
-        'kind': 'full',
-        'is_pucharowa': is_pucharowa,
-        'phase_name': tournament_phase,
-    }
+        # Wybierz źródło danych zależne od fazy:
+        # - Faza grupowa → zakładki Gr. A/B/C...
+        # - Faza pucharowa → zakładka Drabinka
+        if is_pucharowa:
+            with st.spinner(f"Pobieram mecze z zakładki Drabinka (faza {tournament_phase})..."):
+                try:
+                    phase_name, matches = generate_docx.fetch_drabinka_phase(sid, tournament_phase)
+                except Exception as e:
+                    st.error(f"Błąd pobierania zakładki Drabinka: {e}"); st.stop()
+            if not matches:
+                st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' w zakładce Drabinka. "
+                         "Upewnij się że arkusz ma zakładkę o nazwie 'Drabinka' i że nagłówek "
+                         f"kolumny zawiera nazwę fazy (np. '1/32 FINAŁU')."); st.stop()
+        
+            # Filter po godzinie — tylko jeśli user wybrał konkretną
+            all_matches_count = len(matches)
+            if time_filter and time_filter.strip():
+                tf = time_filter.strip()
+                matches = [m for m in matches if m.get('godz', '').startswith(tf)]
+                if not matches:
+                    st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' o godzinie '{tf}'. "
+                             f"Sprawdź godzinę startu fazy w arkuszu.")
+                    st.stop()
+                elif len(matches) != all_matches_count:
+                    st.info(f"🕐 Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
+        
+            # Detekcja niekompletnych par (placeholder typu #N/A, TBD, BYE)
+            # i mocno krótkich nazw. Te mecze są POMIJANE z ostrzeżeniem.
+            INCOMPLETE_MARKERS = {'#n/a', 'n/a', 'tbd', '?', 'bye', '-', '—', 'wolny',
+                                  'puste', 'tba', 'nieznany'}
+            complete_matches = []
+            incomplete_matches = []
+            for m in matches:
+                z1 = (m.get('z1') or '').strip()
+                z2 = (m.get('z2') or '').strip()
+                z1_low = z1.lower()
+                z2_low = z2.lower()
+                if (not z1 or not z2 or len(z1) < 3 or len(z2) < 3 or
+                    z1_low in INCOMPLETE_MARKERS or z2_low in INCOMPLETE_MARKERS):
+                    incomplete_matches.append(m)
+                else:
+                    complete_matches.append(m)
+        
+            if incomplete_matches:
+                n_inc = len(incomplete_matches)
+                n_total = len(matches)
+                example = incomplete_matches[0]
+                ex_text = f"{example.get('z1','?')} vs {example.get('z2','?')}"
+                st.warning(f"⚠️ **{n_inc} z {n_total}** {generate_docx.pluralize(n_inc,'mecz','mecze','meczów')} "
+                           f"{generate_docx.pluralize(n_inc,'ma','ma','ma')} niekompletne pary "
+                           f"(np. brak drugiego gracza, #N/A, BYE). Przykład: *{ex_text}*. "
+                           f"**Te mecze zostaną pominięte przy generowaniu** — wygenerujemy "
+                           f"{len(complete_matches)} {generate_docx.pluralize(len(complete_matches),'protokół','protokoły','protokołów')}.")
+                matches = complete_matches
+        
+            if not matches:
+                st.error("Wszystkie mecze są niekompletne — nic do wygenerowania.")
+                st.stop()
+        
+            sheets_data = [(phase_name or tournament_phase, matches)]
+        else:
+            with st.spinner("Pobieram dane z grup..."):
+                try:
+                    sheets_data = generate_docx.fetch_all_group_sheets(sid)
+                except Exception as e:
+                    st.error(f"Błąd pobierania: {e}"); st.stop()
+            
+            # ── Sortowanie protokołów (sort_mode z sekcji 5) ──
+            # "grupa" (default historyczny) — zostaw jak jest: każda grupa to osobny block
+            # "tor"   — flatten + sort po torze, potem po godzinie (drugorzędne)
+            # "godz"  — flatten + sort po godzinie, potem po torze
+            # Sortowanie SOLO dla grupowej (multi-phase / puchar nie używa).
+            if sort_mode in ("tor", "godz") and sheets_data:
+                # Sortuj wszystkie mecze ze wszystkich grup razem
+                all_matches = []
+                for group_name, matches in sheets_data:
+                    for m in matches:
+                        # Zachowaj odniesienie do grupy (pole 'grupa' już w mecz dict zwykle istnieje
+                        # ale na wszelki wypadek ustawiamy z nazwy zakładki gdy puste)
+                        if not m.get('grupa'):
+                            # Wyciąg np. "A" z "Gr. A"
+                            gnm = group_name.replace('Gr.', '').replace('Grupa', '').strip()
+                            m = dict(m); m['grupa'] = gnm
+                        all_matches.append(m)
+                
+                def _tor_key(m):
+                    t = (m.get('tor') or '').strip()
+                    # Numeryczne tory sortuj jako int; reszta (np. "TBC5") leksykograficznie po nich
+                    if t.isdigit():
+                        return (0, int(t))
+                    return (1, t)
+                
+                def _godz_key(m):
+                    return (m.get('godz') or '').strip()
+                
+                if sort_mode == "tor":
+                    all_matches.sort(key=lambda m: (_tor_key(m), _godz_key(m)))
+                    sheets_data = [(f"Wszystkie mecze (po torach)", all_matches)]
+                else:  # godz
+                    all_matches.sort(key=lambda m: (_godz_key(m), _tor_key(m)))
+                    sheets_data = [(f"Wszystkie mecze (po godzinie)", all_matches)]
+
+        total = sum(len(m) for _,m in sheets_data)
+        if total == 0:
+            st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
+
+        with st.spinner(f"Generuję {total} protokołów..."):
+            logos_bytes, image_order, img_pos = build_image_args()
+            show_name = tournament_name.strip() if show_header_on_protocol else ""
+            show_date = tournament_date if show_header_on_protocol else ""
+            # Tekst fazy w prawym górnym rogu — phase_label_short zawiera już pełną
+            # czytelną nazwę ("1/8 finału", "Półfinał", "Miejsca 5-8", "Mecz o 9. miejsce").
+            if show_header_on_protocol:
+                show_phase = phase_label_short if is_pucharowa else "Faza grupowa"
+            else:
+                show_phase = ""
+            # Mapowanie typu turnieju → szablon docx
+            # Trójka pucharowa: Best of 3 → Bo3_TROJKA.docx, Best of 5 → Bo5_TROJKA.docx
+            # Czwórka analogicznie: CZWORKA, CZWORKA_Bo3, CZWORKA_Bo5
+            if is_trojka and is_pucharowa and sets_format == "Best of 3":
+                template_type = 'TROJKA_Bo3'
+            elif is_trojka and is_pucharowa and sets_format == "Best of 5":
+                template_type = 'TROJKA_Bo5'
+            elif is_czworka and is_pucharowa and sets_format == "Best of 3":
+                template_type = 'CZWORKA_Bo3'
+            elif is_czworka and is_pucharowa and sets_format == "Best of 5":
+                template_type = 'CZWORKA_Bo5'
+            elif is_czworka:
+                template_type = 'CZWORKA'
+            elif is_trojka:
+                template_type = 'TROJKA'
+            else:
+                template_type = 'IND'
+            docx_bytes = generate_docx.build_document(
+                sid, sheets_url.strip(), sheets_data,
+                logos=logos_bytes or None,
+                tournament_name=show_name, tournament_date=show_date,
+                tournament_phase_text=show_phase,
+                include_qr=include_qr, include_pfm_logo=include_pfm_logo,
+                image_order=image_order or None, image_positions=img_pos or None,
+                hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short,
+                template_type=template_type)
+
+        safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
+        if is_pucharowa:
+            # Dodaj fazę + format setów do nazwy pliku.
+            # np. "TDT_2026_pucharowa_1_4_Bo5", "TDT_2026_finał_Bo3", "TDT_2026_miejsca_9_16_Bo3"
+            phase_suffix = re.sub(r'[^\w]', '_', tournament_phase).strip('_').lower()
+            # Format: dla pucharowej zawsze Bo3 lub Bo5 (2 sety wyłączone w UI dla puchar).
+            format_suffix = ''
+            if sets_format == 'Best of 3':
+                format_suffix = '_Bo3'
+            elif sets_format == 'Best of 5':
+                format_suffix = '_Bo5'
+            safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
+    
+        pdf_bytes, pdf_err = (None, None)
+        if fmt_pdf:
+            with st.spinner("Konwertuję do PDF..."):
+                pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
+
+        st.session_state['last_gen'] = {
+            'docx': docx_bytes if fmt_docx else None,
+            'pdf': pdf_bytes if fmt_pdf else None,
+            'pdf_err': pdf_err,
+            'name': safe_name,
+            'total': total,
+            'groups': len(sheets_data),
+            'kind': 'full',
+            'is_pucharowa': is_pucharowa,
+            'phase_name': tournament_phase,
+        }
 
 if blank_clicked:
     if not fmt_docx and not fmt_pdf:
