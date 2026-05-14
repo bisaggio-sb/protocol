@@ -1045,7 +1045,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'TROJKA': 'Grupa_TROJKA.docx',
         'TROJKA_Bo3': 'Bo3_TROJKA.docx',
         'TROJKA_Bo5': 'Bo5_TROJKA.docx',
-        # CZWORKA, DRUZYNA - nie zaimplementowane jeszcze (czeka na szablony)
+        'CZWORKA': 'Grupa_CZWORKA.docx',  # 4-osobowa drużyna, grupowa
+        # CZWORKA_Bo3, CZWORKA_Bo5 — czekają na osobne szablony designerskie
+        # (4 graczy = inne kolumny w T1 vs trójka)
+        # DRUZYNA (2-osobowa) — nie zaimplementowane jeszcze
     }
     tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')
     tpl_path = os.path.join(os.path.dirname(__file__), tpl_filename)
@@ -1585,7 +1588,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
     # ── Generuj protokoły
     first = True
-    for group_name, matches in sheets_data:
+    for group_entry in sheets_data:
+        # sheets_data może być listą (group_name, matches) lub
+        # (group_name, matches, phase_text_override) — to ostatnie używamy gdy
+        # generujemy MULTI-PHASE w 1 dokumencie i każda grupa ma osobną fazę.
+        if len(group_entry) == 3:
+            group_name, matches, group_phase_override = group_entry
+        else:
+            group_name, matches = group_entry
+            group_phase_override = None
+        # Phase text efektywny dla tego protokołu: override per grupa lub globalny
+        effective_phase_text = group_phase_override if group_phase_override is not None else tournament_phase_text
         for match in matches:
             if not first:
                 body.append(_make_page_break_para())
@@ -1595,14 +1608,14 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
             # Wstaw nazwę turnieju + datę + fazę jako paragraf w prawym górnym rogu
             # (przed pierwszą tabelą, wyrównany do prawej, małą czcionką)
-            if tournament_name or tournament_date or tournament_phase_text:
+            if tournament_name or tournament_date or effective_phase_text:
                 header_parts = []
                 if tournament_name:
                     header_parts.append(tournament_name.strip())
                 if tournament_date:
                     header_parts.append(tournament_date.strip())
-                if tournament_phase_text:
-                    header_parts.append(tournament_phase_text.strip())
+                if effective_phase_text:
+                    header_parts.append(effective_phase_text.strip())
                 header_text = ' · '.join(header_parts)
 
                 hp = etree.Element(wt('p'))

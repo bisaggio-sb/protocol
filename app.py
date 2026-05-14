@@ -117,7 +117,10 @@ LEFT_AREA_CM = 5.24    # Indywidualny: szerokość lewej kolumny tabeli wynikowe
 # Zostawiamy 0.3 cm marginesu od prawej (kolumny numerków 1-18).
 TROJKA_LEFT_AREA_CM = 4.76    # pełna szerokość komórki R1.tc[0] - obrazy idealnie wyśrodkowane
 TROJKA_GRAPHIC_W_CM = 2.7     # max szer logo w trójce (zbliżona do PFM domyślnego ~2.18 - spójność wizualna)
-TROJKA_AREA_HEIGHT_CM = 18.5  # Trójka: lewa kolumna tabeli wynikowej, z R1 aż do dolnej krawędzi (PKT)
+TROJKA_AREA_HEIGHT_CM = 15.0  # Trójka: wysokość lewej kolumny tabeli widoczna w podglądzie
+# (preview container = PAGE_H_PX - 184 = ~250 px = ~15.6 cm; 15.0 zostawia margines bezpieczeństwa).
+# Wcześniej 18.5 powodowało że 4 grafika lądowała pozycyjnie pod widocznym obszarem
+# i była ucinana przez overflow:hidden lewego paska.
 
 
 def compute_default_positions(active_keys, logos_aspect=None,
@@ -269,7 +272,7 @@ with col_form:
             "Indywidualny":     "✅ Indywidualny",
             "Drużynowy 2-os.":  "🔴 Drużynowy 2-os. (wkrótce)",
             "Drużynowy 3-os.":  "✅ Drużynowy 3-os.",
-            "Drużynowy 4-os.":  "🔴 Drużynowy 4-os. (wkrótce)",
+            "Drużynowy 4-os.":  "🟡 Drużynowy 4-os. (tylko grupowa)",
         }
         tournament_type = st.selectbox(
             "Rodzaj",
@@ -648,7 +651,9 @@ with col_form:
     # Wszystko inne — eksperymentalne lub w trakcie przygotowywania.
     is_individual = tournament_type == "Indywidualny"
     is_trojka = tournament_type == "Drużynowy 3-os."
-    is_supported_type = is_individual or is_trojka
+    is_czworka = tournament_type == "Drużynowy 4-os."
+    # Czwórka obsługujemy TYLKO dla fazy grupowej (Bo3/Bo5 czwórka czeka na osobne szablony).
+    is_supported_type = is_individual or is_trojka or (is_czworka and tournament_phase == "Grupowa")
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
     # is_drabinka_b: dowolny mecz o N miejsce LUB mini-turniej Miejsca X-Y.
@@ -1381,7 +1386,8 @@ if gen_clicked:
     # ═══════════════════════════════════════════════════════════════════
     # MULTI-PHASE MODE: time filter aktywny + multiselect zaznaczony
     # ═══════════════════════════════════════════════════════════════════
-    # Każda faza generuje osobny protokół; wszystko pakujemy w ZIP.
+    # Wszystkie wybrane fazy budujemy w 1 dokumencie (osobne strony z prawidłowym
+    # nagłówkiem fazy per protokół, dzięki sheets_data 3-tuple z phase_override).
     if selected_phase_keys_multi is not None and len(selected_phase_keys_multi) >= 1:
         if not is_supported_type:
             st.error(f"Format **{tournament_type}** nie jest jeszcze obsługiwany dla "
@@ -1390,7 +1396,6 @@ if gen_clicked:
         
         INCOMPLETE_MARKERS = {'#n/a','n/a','tbd','?','bye','-','—','wolny','puste','tba','nieznany'}
         
-        # Helper: phase_label_short dla danego phase_key
         def _phase_label_for(pk):
             mm = re.search(r'[Mm]ecz\s+o\s+(\d+)\.?\s*miejsc', pk)
             if mm: return f"Mecz o {mm.group(1)}. miejsce"
@@ -1401,6 +1406,50 @@ if gen_clicked:
             if pk == "Finał": return "Finał"
             return pk
         
+        # Zbieramy dane wszystkich faz: list of (phase_name, matches, phase_label_text)
+        all_sheets_data = []
+        skipped = []
+        progress_msg = st.empty()
+        total_matches = 0
+        
+        for idx, phase_key in enumerate(selected_phase_keys_multi, 1):
+            progress_msg.info(f"⚙️ Wczytuję {idx}/{len(selected_phase_keys_multi)}: **{phase_key}**...")
+            try:
+                phase_name, matches = generate_docx.fetch_drabinka_phase(sid, phase_key)
+            except Exception as e:
+                skipped.append((phase_key, f"błąd pobierania: {e}"))
+                continue
+            if not matches:
+                skipped.append((phase_key, "brak meczów w arkuszu"))
+                continue
+            if time_filter:
+                matches = [m for m in matches if m.get('godz', '').startswith(time_filter)]
+            if not matches:
+                skipped.append((phase_key, f"brak meczów o godzinie {time_filter}"))
+                continue
+            # Niekompletne pary
+            complete = []
+            for m in matches:
+                z1 = (m.get('z1') or '').strip()
+                z2 = (m.get('z2') or '').strip()
+                if (z1 and z2 and len(z1) >= 3 and len(z2) >= 3 and
+                    z1.lower() not in INCOMPLETE_MARKERS and
+                    z2.lower() not in INCOMPLETE_MARKERS):
+                    complete.append(m)
+            if not complete:
+                skipped.append((phase_key, "wszystkie pary niekompletne"))
+                continue
+            p_label = _phase_label_for(phase_key)
+            # 3-tuple: phase_name, matches, phase_text_override
+            all_sheets_data.append((phase_name or phase_key, complete, p_label))
+            total_matches += len(complete)
+        
+        progress_msg.empty()
+        
+        if not all_sheets_data:
+            st.error("Nie udało się zebrać meczów dla żadnej fazy."); st.stop()
+        
+        # Build SINGLE document zawierający wszystkie fazy (każdy protokół z własnym nagłówkiem)
         logos_bytes, image_order, img_pos = build_image_args()
         
         if is_trojka and sets_format == "Best of 3":
@@ -1410,111 +1459,56 @@ if gen_clicked:
         else:
             template_type = 'TROJKA' if is_trojka else 'IND'
         
-        # Build ZIP iteratively
-        zip_buf = io.BytesIO()
-        n_generated = 0
-        skipped = []
-        progress_msg = st.empty()
+        # Nagłówek bazowy bez fazy — phase per protokół via 3-tuple override.
+        # show_phase_global zostaje pusty, by każdy protokół brał własny label.
+        show_name_g = tournament_name.strip() if show_header_on_protocol else ""
+        show_date_g = tournament_date if show_header_on_protocol else ""
         
+        with st.spinner(f"Buduję dokument ({total_matches} protokołów)..."):
+            try:
+                docx_bytes = generate_docx.build_document(
+                    sid, sheets_url.strip(), all_sheets_data,
+                    logos=logos_bytes or None,
+                    tournament_name=show_name_g, tournament_date=show_date_g,
+                    tournament_phase_text="",  # globalny pusty — każdy protokół ma own override
+                    include_qr=include_qr, include_pfm_logo=include_pfm_logo,
+                    image_order=image_order or None, image_positions=img_pos or None,
+                    hide_grupa_mecz=True,
+                    phase_label="",
+                    template_type=template_type)
+            except Exception as e:
+                st.error(f"Błąd budowy dokumentu: {e}"); st.stop()
+        
+        # Nazwa pliku + PDF konwersja
         base_name = re.sub(r'[^\w\s-]', '', tournament_name).strip().replace(' ', '_') or "protokoly"
         fmt_suffix = '_Bo3' if sets_format == 'Best of 3' else ('_Bo5' if sets_format == 'Best of 5' else '')
+        safe_name = f"{base_name}_godzina_{time_filter.replace(':', '_')}{fmt_suffix}"
         
-        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for idx, phase_key in enumerate(selected_phase_keys_multi, 1):
-                progress_msg.info(f"⚙️ Generuję {idx}/{len(selected_phase_keys_multi)}: **{phase_key}**...")
-                
-                # Fetch matches dla tej fazy
-                try:
-                    phase_name, matches = generate_docx.fetch_drabinka_phase(sid, phase_key)
-                except Exception as e:
-                    skipped.append((phase_key, f"błąd pobierania: {e}"))
-                    continue
-                
-                if not matches:
-                    skipped.append((phase_key, "brak meczów w arkuszu"))
-                    continue
-                
-                # Filter po godzinie (musi pasować bo wybrane fazy są z tej godziny)
-                if time_filter:
-                    matches = [m for m in matches if m.get('godz', '').startswith(time_filter)]
-                
-                if not matches:
-                    skipped.append((phase_key, f"brak meczów o godzinie {time_filter}"))
-                    continue
-                
-                # Filter niekompletne pary
-                complete = []
-                for m in matches:
-                    z1 = (m.get('z1') or '').strip()
-                    z2 = (m.get('z2') or '').strip()
-                    if (z1 and z2 and len(z1) >= 3 and len(z2) >= 3 and
-                        z1.lower() not in INCOMPLETE_MARKERS and
-                        z2.lower() not in INCOMPLETE_MARKERS):
-                        complete.append(m)
-                
-                if not complete:
-                    skipped.append((phase_key, "wszystkie pary niekompletne (#N/A, TBD, ...)"))
-                    continue
-                
-                # Phase label
-                p_label = _phase_label_for(phase_key)
-                
-                # Build per-phase doc
-                show_name_p = tournament_name.strip() if show_header_on_protocol else ""
-                show_date_p = tournament_date if show_header_on_protocol else ""
-                show_phase_p = p_label if show_header_on_protocol else ""
-                
-                sheets_data_p = [(phase_name or phase_key, complete)]
-                
-                try:
-                    docx_bytes_p = generate_docx.build_document(
-                        sid, sheets_url.strip(), sheets_data_p,
-                        logos=logos_bytes or None,
-                        tournament_name=show_name_p, tournament_date=show_date_p,
-                        tournament_phase_text=show_phase_p,
-                        include_qr=include_qr, include_pfm_logo=include_pfm_logo,
-                        image_order=image_order or None, image_positions=img_pos or None,
-                        hide_grupa_mecz=True, phase_label=p_label,
-                        template_type=template_type)
-                except Exception as e:
-                    skipped.append((phase_key, f"błąd budowy dokumentu: {e}"))
-                    continue
-                
-                phase_suffix = re.sub(r'[^\w]', '_', phase_key).strip('_').lower()
-                file_base = f"{base_name}_{phase_suffix}{fmt_suffix}"
-                
-                if fmt_docx:
-                    zf.writestr(f"{file_base}.docx", docx_bytes_p)
-                if fmt_pdf:
-                    pdf_bytes_p, _err = docx_to_pdf(docx_bytes_p, file_base)
-                    if pdf_bytes_p:
-                        zf.writestr(f"{file_base}.pdf", pdf_bytes_p)
-                
-                n_generated += 1
+        pdf_bytes, pdf_err = (None, None)
+        if fmt_pdf:
+            with st.spinner("Konwertuję do PDF..."):
+                pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name)
         
-        progress_msg.empty()
-        zip_buf.seek(0)
-        
-        if n_generated == 0:
-            st.error("Nie udało się wygenerować żadnej fazy — sprawdź arkusz."); st.stop()
-        
-        # Pokaż podsumowanie pominiętych
         if skipped:
             with st.expander(f"⚠️ Pominięto {len(skipped)} {generate_docx.pluralize(len(skipped),'fazę','fazy','faz')}"):
                 for pk, reason in skipped:
                     st.markdown(f"- **{pk}**: {reason}")
         
-        zip_name = f"{base_name}_godzina_{time_filter.replace(':', '_')}"
         st.session_state['last_gen'] = {
-            'zip': zip_buf.getvalue(),
-            'name': zip_name,
-            'kind': 'multi_phase',
-            'phase_count': n_generated,
+            'docx': docx_bytes if fmt_docx else None,
+            'pdf': pdf_bytes if fmt_pdf else None,
+            'pdf_err': pdf_err,
+            'name': safe_name,
+            'total': total_matches,
+            'groups': len(all_sheets_data),
+            'kind': 'multi_phase_doc',  # single doc, not ZIP
+            'phase_count': len(all_sheets_data),
             'time_filter': time_filter,
         }
-        st.success(f"✅ Wygenerowano **{n_generated}** {generate_docx.pluralize(n_generated,'protokół','protokoły','protokołów')} "
-                   f"z godziny **{time_filter}**.")
-        # Skip rest of gen_clicked handler
+        st.success(f"✅ Gotowe! 1 dokument z **{total_matches}** "
+                   f"{generate_docx.pluralize(total_matches,'protokołem','protokołami','protokołami')} "
+                   f"z **{len(all_sheets_data)}** {generate_docx.pluralize(len(all_sheets_data),'fazy','faz','faz')} "
+                   f"(godzina **{time_filter}**).")
         st.stop()
     
     # ═══════════════════════════════════════════════════════════════════
@@ -1718,17 +1712,13 @@ if blank_clicked:
 
 if 'last_gen' in st.session_state:
     gen = st.session_state['last_gen']
-    if gen['kind'] == 'multi_phase':
-        # Multi-phase: jeden ZIP
-        n_p = gen['phase_count']
+    if gen['kind'] == 'multi_phase_doc':
+        n_p = gen['total']
+        n_f = gen['phase_count']
         p_word = generate_docx.pluralize(n_p, 'protokół', 'protokoły', 'protokołów')
-        st.success(f"✅ Gotowe! ZIP z **{n_p}** {p_word} z godziny **{gen['time_filter']}**.")
-        st.download_button(f"⬇️ Pobierz {gen['name']}.zip",
-            data=gen['zip'],
-            file_name=f"{gen['name']}.zip",
-            mime="application/zip",
-            type="primary",
-            use_container_width=True)
+        f_word = generate_docx.pluralize(n_f, 'fazy', 'faz', 'faz')
+        st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
+                   f"(godzina **{gen['time_filter']}**).")
     elif gen['kind'] == 'full':
         # Polski plural dla "protokół": 1 protokół, 2-4 protokoły, 5+ protokołów
         n_p = gen['total']
@@ -1756,37 +1746,41 @@ if 'last_gen' in st.session_state:
     else:
         st.success("✅ Pusty formularz gotowy!")
 
-    # Jeśli oba formaty - 2 kolumny side by side. Jeśli tylko jeden - wycentrowany.
-    has_docx = bool(gen['docx'])
-    has_pdf = bool(gen['pdf'])
-    if has_docx and has_pdf:
-        cols_dl = st.columns(2)
-        with cols_dl[0]:
-            st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
-                data=gen['docx'], file_name=f"{gen['name']}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True, key=f"dl_docx_{gen['name']}")
-        with cols_dl[1]:
-            st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
-                data=gen['pdf'], file_name=f"{gen['name']}.pdf",
-                mime="application/pdf",
-                use_container_width=True, key=f"dl_pdf_{gen['name']}")
-    elif has_docx:
-        cols_dl = st.columns([1, 2, 1])
-        with cols_dl[1]:
-            st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
-                data=gen['docx'], file_name=f"{gen['name']}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True, key=f"dl_docx_{gen['name']}")
-    elif has_pdf:
-        cols_dl = st.columns([1, 2, 1])
-        with cols_dl[1]:
-            st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
-                data=gen['pdf'], file_name=f"{gen['name']}.pdf",
-                mime="application/pdf",
-                use_container_width=True, key=f"dl_pdf_{gen['name']}")
-    elif gen.get('pdf_err'):
-        st.error(f"Konwersja PDF nie powiodła się: {gen['pdf_err']}")
+    # multi_phase_doc używa standardowego UI docx/pdf (jak full)
+    if gen['kind'] == 'multi_phase_old_zip':  # nie używane
+        pass
+    else:
+        # Jeśli oba formaty - 2 kolumny side by side. Jeśli tylko jeden - wycentrowany.
+        has_docx = bool(gen.get('docx'))
+        has_pdf = bool(gen.get('pdf'))
+        if has_docx and has_pdf:
+            cols_dl = st.columns(2)
+            with cols_dl[0]:
+                st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
+                    data=gen['docx'], file_name=f"{gen['name']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True, key=f"dl_docx_{gen['name']}")
+            with cols_dl[1]:
+                st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
+                    data=gen['pdf'], file_name=f"{gen['name']}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True, key=f"dl_pdf_{gen['name']}")
+        elif has_docx:
+            cols_dl = st.columns([1, 2, 1])
+            with cols_dl[1]:
+                st.download_button(f"⬇️ Pobierz {gen['name']}.docx",
+                    data=gen['docx'], file_name=f"{gen['name']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True, key=f"dl_docx_{gen['name']}")
+        elif has_pdf:
+            cols_dl = st.columns([1, 2, 1])
+            with cols_dl[1]:
+                st.download_button(f"⬇️ Pobierz {gen['name']}.pdf",
+                    data=gen['pdf'], file_name=f"{gen['name']}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True, key=f"dl_pdf_{gen['name']}")
+        elif gen.get('pdf_err'):
+            st.error(f"Konwersja PDF nie powiodła się: {gen['pdf_err']}")
 
 st.divider()
 st.caption("Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol")
