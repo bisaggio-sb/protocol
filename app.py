@@ -382,7 +382,7 @@ with col_form:
             drabinka_options_full = {
                 "Grupowa":    "✅ Faza grupowa",
                 "Główna":     "✅ Drabinka główna",
-                "Drabinka B": "🟡 Drabinka B (mecze o miejsca)",
+                "Drabinka B": "✅ Drabinka B (mecze o miejsca)",
             }
         else:
             drabinka_options_full = {
@@ -440,8 +440,8 @@ with col_form:
                         if n == '2':   label = "1/2 finału (Półfinał)"
                         elif n == '4': label = "1/4 finału (Ćwierćfinał)"
                         else:          label = f"1/{n} finału"
-                    badge = ("✅" if (is_trojka_pre and pkey in ('1/8','1/4','1/2','finał'))
-                             else ("🔴" if (pkey == '1/16' and is_trojka_pre) else "🟡"))
+                    badge = ("🔴" if (pkey == '1/16' and is_trojka_pre)
+                             else ("✅" if is_trojka_pre else "🟡"))
                     n_m = entry['n_matches']
                     t = entry['time']
                     suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
@@ -501,8 +501,7 @@ with col_form:
                         if not m: continue
                         n = m.group(1)
                         ui_key = f"Mecz o {n}. miejsce"
-                    badge = "✅" if (pkey == 'mecz o 3' and is_trojka_pre) else (
-                        "🟡" if is_trojka_pre else "🔴")
+                    badge = "✅" if is_trojka_pre else "🔴"
                     n_m = entry['n_matches']
                     t = entry['time']
                     suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
@@ -514,14 +513,13 @@ with col_form:
                                   (17,32),(21,24),(25,28),(25,32),(29,32)]
                 miejsca_sorted_pairs = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
                 mecze_o_n = list(range(3, 32, 2))
-                badge_def = "🟡" if is_trojka_pre else "🔴"
+                badge_def = "✅" if is_trojka_pre else "🔴"
                 for a, b in miejsca_sorted_pairs:
                     k = f"Miejsca {a}-{b}"
                     faza_options[k] = f"{badge_def} {k}"
                 for n in mecze_o_n:
                     k = f"Mecz o {n}. miejsce"
-                    badge = "✅" if (is_trojka_pre and n == 3) else badge_def
-                    faza_options[k] = f"{badge} {k}"
+                    faza_options[k] = f"{badge_def} {k}"
             
             if faza_options:
                 tournament_phase = st.selectbox(
@@ -576,16 +574,18 @@ with col_form:
     is_supported_type = is_individual or is_trojka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
-    is_pucharowa = (
-        "Pucharowa" in tournament_phase or
-        "Miejsca" in tournament_phase or
-        tournament_phase in ("Mecz o 3. miejsce", "Finał")
-    )
-    # is_drabinka_b: faza z meczów o miejsca (drabinka przegranych) — w UI
-    # wybierana z sekcji "Drabinka B".
+    # is_drabinka_b: dowolny mecz o N miejsce LUB mini-turniej Miejsca X-Y.
+    # KRYTYCZNE: musi łapać "Mecz o 9. miejsce", "Mecz o 11. miejsce" itp. — nie tylko
+    # specyficzny string "Mecz o 3. miejsce". Wcześniej bug: phase = "Mecz o 9. miejsce"
+    # → is_pucharowa=False → handler szedł grupową ścieżką i generował 105 grupowych.
     is_drabinka_b = (
         "Miejsca" in tournament_phase or
-        tournament_phase == "Mecz o 3. miejsce"
+        bool(re.search(r'[Mm]ecz\s+o\s+\d+\.?\s*miejsc', tournament_phase))
+    )
+    is_pucharowa = (
+        "Pucharowa" in tournament_phase or
+        is_drabinka_b or
+        tournament_phase == "Finał"
     )
     
     is_fully_tested = is_supported_type and is_2_sety and is_grupowa
@@ -643,7 +643,7 @@ with col_form:
         with cols_dom[1]:
             include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
 
-    # ─── 5. Grafiki (zwijane) - łączy dodawanie + pozycjonowanie ─────────
+    # ─── Grafiki (expander wewnątrz "4. Domyślne elementy") ─────────────
     NUM_LOGOS = 4
     logo_files = []
     
@@ -1237,7 +1237,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("6. Generuj")
+st.header("5. Generuj")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
@@ -1315,22 +1315,51 @@ if gen_clicked:
                      "Upewnij się że arkusz ma zakładkę o nazwie 'Drabinka' i że nagłówek "
                      f"kolumny zawiera nazwę fazy (np. '1/32 FINAŁU')."); st.stop()
         
-        # Filter po godzinie — tylko jeśli user wpisał coś
+        # Filter po godzinie — tylko jeśli user wybrał konkretną
         all_matches_count = len(matches)
         if time_filter and time_filter.strip():
             tf = time_filter.strip()
             matches = [m for m in matches if m.get('godz', '').startswith(tf)]
             if not matches:
-                # Pokaż wszystkie dostępne godziny w tej fazie
-                all_times = sorted(set(m['godz'] for _, m_list in [(phase_name, [])]
-                                       for m in [] if m.get('godz')))
                 st.error(f"Nie znaleziono meczów fazy '{tournament_phase}' o godzinie '{tf}'. "
                          f"Sprawdź godzinę startu fazy w arkuszu.")
                 st.stop()
-            else:
+            elif len(matches) != all_matches_count:
                 st.info(f"🕐 Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
         
-        # Format dla build_document: lista (group_name, matches)
+        # Detekcja niekompletnych par (placeholder typu #N/A, TBD, BYE)
+        # i mocno krótkich nazw. Te mecze są POMIJANE z ostrzeżeniem.
+        INCOMPLETE_MARKERS = {'#n/a', 'n/a', 'tbd', '?', 'bye', '-', '—', 'wolny',
+                              'puste', 'tba', 'nieznany'}
+        complete_matches = []
+        incomplete_matches = []
+        for m in matches:
+            z1 = (m.get('z1') or '').strip()
+            z2 = (m.get('z2') or '').strip()
+            z1_low = z1.lower()
+            z2_low = z2.lower()
+            if (not z1 or not z2 or len(z1) < 3 or len(z2) < 3 or
+                z1_low in INCOMPLETE_MARKERS or z2_low in INCOMPLETE_MARKERS):
+                incomplete_matches.append(m)
+            else:
+                complete_matches.append(m)
+        
+        if incomplete_matches:
+            n_inc = len(incomplete_matches)
+            n_total = len(matches)
+            example = incomplete_matches[0]
+            ex_text = f"{example.get('z1','?')} vs {example.get('z2','?')}"
+            st.warning(f"⚠️ **{n_inc} z {n_total}** {generate_docx.pluralize(n_inc,'mecz','mecze','meczów')} "
+                       f"{generate_docx.pluralize(n_inc,'ma','ma','ma')} niekompletne pary "
+                       f"(np. brak drugiego gracza, #N/A, BYE). Przykład: *{ex_text}*. "
+                       f"**Te mecze zostaną pominięte przy generowaniu** — wygenerujemy "
+                       f"{len(complete_matches)} {generate_docx.pluralize(len(complete_matches),'protokół','protokoły','protokołów')}.")
+            matches = complete_matches
+        
+        if not matches:
+            st.error("Wszystkie mecze są niekompletne — nic do wygenerowania.")
+            st.stop()
+        
         sheets_data = [(phase_name or tournament_phase, matches)]
     else:
         with st.spinner("Pobieram dane z grup..."):
