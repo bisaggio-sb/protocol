@@ -273,7 +273,7 @@ with col_form:
             "Indywidualny":     "✅ Indywidualny",
             "Drużynowy 2-os.":  "🔴 Drużynowy 2-os. (wkrótce)",
             "Drużynowy 3-os.":  "✅ Drużynowy 3-os.",
-            "Drużynowy 4-os.":  "✅ Drużynowy 4-os.",
+            "Drużynowy 4-os.":  "🟡 Drużynowy 4-os. (tylko grupowa)",
         }
         tournament_type = st.selectbox(
             "Rodzaj",
@@ -328,6 +328,76 @@ with col_form:
                        f"drabinka główna: {n_g} {faza_g} · drabinka B: {n_b} {faza_b} · "
                        "**fazy w sekcji 1. zostały ograniczone do tych z arkusza** "
                        "(zmień URL i kliknij Wczytaj ponownie żeby odświeżyć)")
+            
+            # ── PUNKT C: Permanent summary wszystkich faz z arkusza, grupowanie po godzinie
+            # Lista co user dostanie jako protokoły, BEZ konieczności klikania Sprawdź zakładki.
+            with st.expander("📊 Lista wszystkich faz w arkuszu (grupowanie po godzinie)", expanded=False):
+                # Zbierz wszystkie fazy (głowna + B) z ich godzinami i liczbą meczów
+                all_phase_entries = []  # list of (time, label, n_matches, drabinka_type)
+                if n_grp > 0:
+                    all_phase_entries.append(("—", f"Faza grupowa ({n_grp} {grp_w})",
+                                              cached.get('group_total_matches', 0), "grupowa"))
+                
+                def _phase_label_from_key(pk):
+                    if pk == 'finał': return "Finał"
+                    mm = re.match(r'1/(\d+)', pk)
+                    if mm:
+                        n = mm.group(1)
+                        if n == '2': return "Półfinał"
+                        if n == '4': return "Ćwierćfinał"
+                        return f"1/{n} finału"
+                    mm = re.match(r'miejsca (\d+)-(\d+)', pk)
+                    if mm: return f"Miejsca {mm.group(1)}-{mm.group(2)}"
+                    mm = re.match(r'mecz o (\d+)', pk)
+                    if mm: return f"Mecz o {mm.group(1)}. miejsce"
+                    return pk
+                
+                for entry in cached.get('glowna', []):
+                    all_phase_entries.append((entry.get('time') or "—",
+                                              _phase_label_from_key(entry['key']),
+                                              entry.get('n_matches', 0),
+                                              "główna"))
+                for entry in cached.get('b', []):
+                    all_phase_entries.append((entry.get('time') or "—",
+                                              _phase_label_from_key(entry['key']),
+                                              entry.get('n_matches', 0),
+                                              "B"))
+                
+                # Grupowanie po godzinie
+                from collections import defaultdict
+                by_time = defaultdict(list)
+                for t, label, n_m, dr in all_phase_entries:
+                    by_time[t].append((label, n_m, dr))
+                
+                # Sortuj godziny (— na końcu jako grupowa bez fixed time)
+                def _time_sort_key(t):
+                    if t == "—": return (1, "")
+                    return (0, t)
+                
+                sorted_times = sorted(by_time.keys(), key=_time_sort_key)
+                
+                # Wyświetlanie pogrupowane
+                drabinka_emoji = {"grupowa": "🟢", "główna": "🔵", "B": "🟣"}
+                total_matches = 0
+                for t in sorted_times:
+                    items = by_time[t]
+                    n_items = sum(m for _, m, _ in items)
+                    total_matches += n_items
+                    time_label = "Faza grupowa (różne godziny)" if t == "—" else f"Godzina **{t}**"
+                    summary_line = f"### {time_label} — {n_items} {generate_docx.pluralize(n_items,'mecz','mecze','meczów')}"
+                    st.markdown(summary_line)
+                    rows = []
+                    for label, n_m, dr in items:
+                        emoji = drabinka_emoji.get(dr, "·")
+                        rows.append(f"- {emoji} **{label}** ({dr}) — {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}")
+                    st.markdown("\n".join(rows))
+                
+                if total_matches > 0:
+                    st.divider()
+                    st.markdown(f"**Razem: {total_matches} meczów** w arkuszu "
+                                f"({len(all_phase_entries)} {generate_docx.pluralize(len(all_phase_entries),'faza','fazy','faz')})")
+                
+                st.caption("Legenda: 🟢 Faza grupowa · 🔵 Drabinka główna · 🟣 Drabinka B (mecze o miejsca)")
     # ─── 3. Wybór fazy ──────────────────────────────────────────────────
     # SHEET-DRIVEN: po wczytaniu arkusza (sekcja 2) dropdowny pokazują tylko
     # fazy obecne w arkuszu. Godzina (góra) jest GŁÓWNYM filtrem — wybór
@@ -653,7 +723,8 @@ with col_form:
     is_individual = tournament_type == "Indywidualny"
     is_trojka = tournament_type == "Drużynowy 3-os."
     is_czworka = tournament_type == "Drużynowy 4-os."
-    is_supported_type = is_individual or is_trojka or is_czworka
+    # Czwórka obsługujemy TYLKO dla fazy grupowej (Bo3/Bo5 czeka na finalny szablon)
+    is_supported_type = is_individual or is_trojka or (is_czworka and tournament_phase == "Grupowa")
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
     # is_drabinka_b: dowolny mecz o N miejsce LUB mini-turniej Miejsca X-Y.
@@ -1476,10 +1547,6 @@ if gen_clicked:
             template_type = 'TROJKA_Bo3'
         elif is_trojka and sets_format == "Best of 5":
             template_type = 'TROJKA_Bo5'
-        elif is_czworka and sets_format == "Best of 3":
-            template_type = 'CZWORKA_Bo3'
-        elif is_czworka and sets_format == "Best of 5":
-            template_type = 'CZWORKA_Bo5'
         elif is_czworka:
             template_type = 'CZWORKA'
         else:
@@ -1659,15 +1726,11 @@ if gen_clicked:
                 show_phase = ""
             # Mapowanie typu turnieju → szablon docx
             # Trójka pucharowa: Best of 3 → Bo3_TROJKA.docx, Best of 5 → Bo5_TROJKA.docx
-            # Czwórka analogicznie: CZWORKA, CZWORKA_Bo3, CZWORKA_Bo5
+            # Czwórka — tylko grupowa (Bo3/Bo5 czwórka czeka na finalny szablon)
             if is_trojka and is_pucharowa and sets_format == "Best of 3":
                 template_type = 'TROJKA_Bo3'
             elif is_trojka and is_pucharowa and sets_format == "Best of 5":
                 template_type = 'TROJKA_Bo5'
-            elif is_czworka and is_pucharowa and sets_format == "Best of 3":
-                template_type = 'CZWORKA_Bo3'
-            elif is_czworka and is_pucharowa and sets_format == "Best of 5":
-                template_type = 'CZWORKA_Bo5'
             elif is_czworka:
                 template_type = 'CZWORKA'
             elif is_trojka:
