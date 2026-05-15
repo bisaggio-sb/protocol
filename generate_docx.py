@@ -1045,10 +1045,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'TROJKA': 'Grupa_TROJKA.docx',
         'TROJKA_Bo3': 'Bo3_TROJKA.docx',
         'TROJKA_Bo5': 'Bo5_TROJKA.docx',
-        'CZWORKA': 'Grupa_CZWORKA.docx',  # 4-osobowa drużyna, grupowa
-        'CZWORKA_Bo3': 'Bo3_CZWORKA.docx',  # 4-osobowa, Bo3 (31 kol w T1)
-        'CZWORKA_Bo5': 'Bo5_CZWORKA.docx',  # 4-osobowa, Bo5 (31 kol T1, 21 kol T3)
-        # DRUZYNA (2-osobowa) — nie zaimplementowane jeszcze
+        'CZWORKA': 'Grupa_CZWORKA.docx',  # 4-osobowa drużyna, tylko grupowa
+        # CZWORKA_Bo3, CZWORKA_Bo5 — pominięte (czeka na finalny design szablonu)
+        # DRUZYNA (2-osobowa) — nie zaimplementowane
     }
     tpl_filename = template_files.get(template_type, 'Grupa_IND.docx')
     tpl_path = os.path.join(os.path.dirname(__file__), tpl_filename)
