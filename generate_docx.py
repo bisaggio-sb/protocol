@@ -1752,8 +1752,14 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # Napis "Wyniki turnieju" - tylko gdy jest QR.
             # Bo3/Bo5 nie używają lewej kolumny na grafiki (zostaje oryginalna),
             # więc całkowicie pomijamy populate_left_area.
+            # Czwórka — nowy layout: grafiki w poziomie pod tabelą. Template ma już
+            # własny napis "Wyniki turnieju" więc tylko placujemy anchored w R1.tc[0]
+            # (kotwica) — pozycje z compute_default_positions dla CZWORKA mają Y~22.5cm
+            # co spycha je pod tabelę dzięki layoutInCell=0.
             if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
                 pass  # nie ruszamy lewej kolumny
+            elif template_type == 'CZWORKA':
+                _populate_left_area(cloned, anchored, '', 0)
             elif qr_rid_info and include_qr:
                 # Wyciągnij faktyczną pozycję i wysokość QR z image_positions
                 if image_positions and 'qr' in image_positions:
