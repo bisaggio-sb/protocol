@@ -139,6 +139,37 @@ def compute_default_positions(active_keys, logos_aspect=None,
     Z layoutInCell=0 obrazy mogą wystawać poza komórkę kotwicy R1
     i ciągnąć się aż do dołu tabeli."""
     is_trojka = (template_type == 'TROJKA')
+    is_czworka = (template_type == 'CZWORKA')
+    
+    # CZWORKA: nowy layout — QR mały + PFM + max 2 grafiki w POZIOMIE pod tabelą.
+    # User: "QR generowany pod tabelką i będzie mniejszy, po prawej od niego logo PFM
+    # i dalej po prawej miejsce na 2 grafiki max."
+    # Pozycje (cm) liczone od pozycji kotwicy R1.tc[0] u góry T1. Y_BASE=22cm spycha
+    # grafiki niżej (poza tabelę, do dolnej części strony pod "Wyniki turnieju").
+    if is_czworka:
+        # Pozycje (cm) liczone od pozycji kotwicy R1.tc[0] u góry T1 (~y=6.5cm absolute).
+        # Y_BASE=20 cm spycha grafiki pod "Wyniki turnieju" text (~y=25.5cm absolute)
+        # do dolnej części strony (page bottom ~28.2cm minus 2cm height = 26.2cm safe top).
+        Y_BASE = 20.0
+        ROW_H = 1.7    # wysokość rzędu grafik (kompaktowo by mieścić się pod tekstem)
+        positions = {}
+        if 'qr' in active_keys:
+            positions['qr'] = {'x': 1.0, 'y': Y_BASE, 'w': 2.0, 'h': 2.0}
+        if 'pfm' in active_keys:
+            positions['pfm'] = {'x': 4.0, 'y': Y_BASE, 'w': 2.5, 'h': ROW_H}
+        # Max 2 grafiki dla Czwórki (logo3, logo4 ignorowane)
+        x_g = 7.5
+        for i in (1, 2):
+            key = f'logo{i}'
+            if key in active_keys:
+                aspect = (logos_aspect or {}).get(key, 1.5)
+                target_h = ROW_H
+                target_w = min(3.5, target_h * aspect)
+                positions[key] = {'x': x_g, 'y': Y_BASE, 'w': target_w, 'h': target_h}
+                x_g += target_w + 0.5
+        # logo3, logo4 — pomijane (Czwórka ma max 2 grafiki)
+        # Pozostawione w aktywnych ale bez pozycji = nie wyświetlane.
+        return positions
     
     # Trójka ma węższy lewy pas niż indywidualny - mniejsze rozmiary domyślne
     # ale po rozszerzeniu tabeli 2 (4.76 cm) jest dość miejsca dla grafik
@@ -940,8 +971,24 @@ with col_preview:
             image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
     elements_html = ""
-    for key in image_urls:
+    # CZWORKA: nowy layout — grafiki w POZIOMIE pod tabelą. W preview robimy uproszczony
+    # strip u dołu strony (czworka_strip_html jako flex-row). Pozycje X/Y z image_positions
+    # są respektowane w DOCX, ale preview używa proporcjonalnego flex-layoutu.
+    czworka_strip_items = []  # lista (key, html) — w kolejności image_order
+    
+    keys_in_order = list(image_urls.keys())
+    if image_order:
+        # Preserve order from image_order
+        keys_in_order = [k for k in image_order if k in image_urls]
+        for k in image_urls:
+            if k not in keys_in_order:
+                keys_in_order.append(k)
+    
+    for key in keys_in_order:
         if key not in image_positions:
+            continue
+        # Dla Czwórki: pomiń logo3, logo4 (max 2 grafiki)
+        if is_czworka and key in ('logo3', 'logo4'):
             continue
         pos = image_positions[key]
         x_px = int(pos['x'] * SCALE)
@@ -949,7 +996,7 @@ with col_preview:
         w_px = int(pos['w'] * SCALE)
         h_px = int(pos['h'] * SCALE)
         if key == 'qr':
-            elements_html += f"""
+            absolute_div = f"""
             <div style="position:absolute; left:{x_px}px; top:{y_px}px; 
                         width:{w_px}px; height:{h_px}px; 
                         background:white; border:2px solid #333;
@@ -957,12 +1004,28 @@ with col_preview:
                         font-size:11px; color:#333; font-family:monospace;">
               <div style="text-align:center;"><div style="font-weight:bold;">QR</div></div>
             </div>"""
+            inline_div = f"""
+            <div style="width:{min(w_px,22)}px; height:{min(h_px,22)}px;
+                        background:white; border:1.5px solid #333; flex-shrink:0;
+                        display:flex; align-items:center; justify-content:center;
+                        font-size:8px; font-weight:bold;">QR</div>"""
         else:
-            elements_html += f"""
+            absolute_div = f"""
             <img src="{image_urls[key]}" 
                  style="position:absolute; left:{x_px}px; top:{y_px}px;
                         width:{w_px}px; height:{h_px}px; object-fit:contain;
                         border:1px dashed #ccc;"/>"""
+            inline_div = f"""
+            <img src="{image_urls[key]}" 
+                 style="height:22px; max-width:60px; object-fit:contain;
+                        border:1px dashed #ccc; flex-shrink:0;"/>"""
+        if is_czworka:
+            # Strip horizontal: używamy inline_div (compact size)
+            czworka_strip_items.append(inline_div)
+        else:
+            elements_html += absolute_div
+    
+    czworka_strip_html = "".join(czworka_strip_items)
 
     label_y_px = 5
     if include_qr and 'qr' in image_positions:
@@ -989,18 +1052,19 @@ with col_preview:
     NAMES_FRAC = 3915 / 9090
     NAMES_PX = int((PAGE_W_PX - TBL1_OFFSET_PX) * NAMES_FRAC)
     
-    if is_trojka:
-        # ─── Preview TRÓJKOWY ───
-        # Bo2 (grupowa lub puchar 2-set): lewa kolumna R1.tc[0] poszerzona do 4.76 cm
-        # na grafiki (QR + loga). Pucharowa (Bo3/Bo5/2sety): bez grafik — kolumna
-        # IMIONA/numerów wierszy zostaje wąska (~0.7 cm).
-        is_no_graphics_preview = is_pucharowa
+    if is_trojka or is_czworka:
+        # ─── Preview TRÓJKOWY / CZWÓRKOWY ───
+        # Trójka Bo2: lewa kolumna R1.tc[0] poszerzona do 4.76 cm na grafiki (QR + loga)
+        # Trójka pucharowa (Bo3/Bo5): bez grafik — kolumna IMIONA/numerów wąska (~0.7 cm)
+        # Czwórka: bez lewego paska (R1_W=0.7cm), grafiki w POZIOMIE pod tabelą
+        # (strip renderowany u dołu container'a)
+        is_no_graphics_preview = is_pucharowa or is_czworka
         
         TROJKA_TBL_W_PX = int((18.46 / PAGE_W_CM) * PAGE_W_PX)  # pełna szerokość strony
         if is_no_graphics_preview:
-            # Bez grafik: kolumna IMIONA/numerów rzędów (~0.7 cm)
+            # Bez lewego paska na grafiki: tylko wąska kolumna numerów rzędów (~0.7 cm)
             TROJKA_R1_W_PX = int((0.7 / PAGE_W_CM) * PAGE_W_PX)
-            # Tabela 1 nazwy: dla Bo3/Bo5 cell tc[0] ma 5.24 cm (2970 dxa scaled to ~3358)
+            # Tabela 1 nazwy: dla Bo3/Bo5 i Czwórki, T0.tc[0] = 5.24 cm
             TROJKA_NAMES_PX = int((5.24 / PAGE_W_CM) * PAGE_W_PX)
         else:
             # Bo2: tabela 1 nazwa po skalowaniu × scale_t1 = 10466/9026 ≈ 1.16: tc[0] ≈ 4541 dxa
@@ -1144,6 +1208,22 @@ with col_preview:
               </div>
             </div>
           </div>
+          {f'''
+          <!-- CZWÓRKA: poziomy strip z grafikami pod tabelą + napis "Wyniki turnieju" -->
+          <div style="position:absolute; left:0; right:0; bottom:6px; height:38px;
+                      border-top:1px dashed #ccc;
+                      background:rgba(245,247,250,0.8);
+                      padding:2px 4px;">
+            <div style="position:absolute; left:4px; top:2px;
+                        font-size:9px; font-weight:bold; color:#333;">
+              Wyniki turnieju
+            </div>
+            <div style="position:absolute; left:0; right:0; top:14px; height:24px;
+                        display:flex; gap:6px; align-items:center; padding:0 4px;">
+              {czworka_strip_html}
+            </div>
+          </div>
+          ''' if is_czworka else ''}
         </div>
         """
     else:
@@ -1598,10 +1678,8 @@ if gen_clicked:
             'phase_count': len(all_sheets_data),
             'time_filter': time_filter,
         }
-        st.success(f"✅ Gotowe! 1 dokument z **{total_matches}** "
-                   f"{generate_docx.pluralize(total_matches,'protokołem','protokołami','protokołami')} "
-                   f"z **{len(all_sheets_data)}** {generate_docx.pluralize(len(all_sheets_data),'fazy','faz','faz')} "
-                   f"(godzina **{time_filter}**).")
+        # Wiadomość success pokazuje się w UI download poniżej (persistent przez reruns),
+        # więc nie dublujemy jej tutaj.
         _multi_phase_done = True
     else:
         _multi_phase_done = False
