@@ -1409,6 +1409,65 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     if b is not None:
                         tcBorders.remove(b)
 
+    # ── Operacje SPECYFICZNE DLA CZWÓRKOWEGO szablonu (Grupa_CZWORKA):
+    # T1 i T2 mają szerokość 9026/9014 dxa → skalujemy do TARGET_WIDTH (pełna strona).
+    # Calibri normalizacja: Aptos (font szablonu) nie jest dostępny w LibreOffice
+    # → fallback na szerszy font → etykiety T1 zawijają się na 2 linie.
+    if template_type == 'CZWORKA':
+        CZWORKA_LABELS = {'Tor', 'Godzina', 'Godz.', 'Grupa', 'Mecz', '#', 'Mecz #',
+                          'Punkty', 'SET 1', 'SET 2', 'Wygrane', 'sety', 'Podpis',
+                          'Wyniki turnieju', 'Wyniki turnieju:'}
+        for r in body.iter(wt('r')):
+            ts = r.findall(wt('t'))
+            if not ts: continue
+            text_content = ''.join((t.text or '') for t in ts).strip()
+            if text_content in CZWORKA_LABELS:
+                rPr = r.find(wt('rPr'))
+                if rPr is None:
+                    rPr = etree.Element(wt('rPr'))
+                    r.insert(0, rPr)
+                fonts = rPr.find(wt('rFonts'))
+                if fonts is None:
+                    fonts = etree.SubElement(rPr, wt('rFonts'))
+                for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                    fonts.set(f'{{{W}}}{a}', 'Calibri')
+
+        TARGET_WIDTH = 10466
+        CZWORKA_T1_TOTAL = 9026
+        CZWORKA_T2_TOTAL = 9014
+        czworka_tbls = body.findall(wt('tbl'))
+        if len(czworka_tbls) >= 2:
+            ct1, ct2 = czworka_tbls[0], czworka_tbls[1]
+            for tbl, orig_total in ((ct1, CZWORKA_T1_TOTAL), (ct2, CZWORKA_T2_TOTAL)):
+                scale = TARGET_WIDTH / orig_total
+                tblPr = tbl.find(wt('tblPr'))
+                if tblPr is not None:
+                    tblW = tblPr.find(wt('tblW'))
+                    if tblW is None:
+                        tblW = etree.SubElement(tblPr, wt('tblW'))
+                    tblW.set(f'{{{W}}}w', str(TARGET_WIDTH))
+                    tblW.set(f'{{{W}}}type', 'dxa')
+                    tblInd = tblPr.find(wt('tblInd'))
+                    if tblInd is None:
+                        tblInd = etree.SubElement(tblPr, wt('tblInd'))
+                    tblInd.set(f'{{{W}}}w', '0')
+                    tblInd.set(f'{{{W}}}type', 'dxa')
+                grid = tbl.find(wt('tblGrid'))
+                if grid is not None:
+                    for gc in grid.findall(wt('gridCol')):
+                        w = gc.get(f'{{{W}}}w')
+                        if w:
+                            gc.set(f'{{{W}}}w', str(int(int(w) * scale)))
+                for tr in tbl.findall(wt('tr')):
+                    for tc in tr.findall(wt('tc')):
+                        tcPr = tc.find(wt('tcPr'))
+                        if tcPr is not None:
+                            tcW = tcPr.find(wt('tcW'))
+                            if tcW is not None:
+                                w = tcW.get(f'{{{W}}}w')
+                                if w:
+                                    tcW.set(f'{{{W}}}w', str(int(int(w) * scale)))
+
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)
     # 2) Przesunięcie tabeli 1 w prawo (tblInd=600 dxa)
@@ -1722,7 +1781,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Trójka: kolumna 4.76 cm. IND: kolumna 5.24 cm. Kompensacja
                 # cellMargin (-0.185 cm) ze strony app.py oznacza że dopuszczalny
                 # zakres X to ok. -0.2…(col_width - w).
-                col_width_cm = 4.76 if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5') else 5.24
+                col_width_cm = (4.76 if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5')
+                                else 17.0 if template_type == 'CZWORKA'
+                                else 5.24)
                 # Effective right edge (z kompensacją cellMargin po lewej)
                 # Image left edge może być nawet -0.2 (kompensacja), wtedy max w to col_width.
                 # Ale clampujemy x do >= -0.25 żeby nie wszedł za daleko w lewo.
