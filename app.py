@@ -974,17 +974,9 @@ with col_preview:
     # CZWORKA: nowy layout — grafiki w POZIOMIE pod tabelą. W preview robimy uproszczony
     # strip u dołu strony (czworka_strip_html jako flex-row). Pozycje X/Y z image_positions
     # są respektowane w DOCX, ale preview używa proporcjonalnego flex-layoutu.
-    czworka_strip_items = []  # lista (key, html) — w kolejności image_order
+    czworka_strip_items = []  # html chunki dla strip Czwórki
     
-    keys_in_order = list(image_urls.keys())
-    if image_order:
-        # Preserve order from image_order
-        keys_in_order = [k for k in image_order if k in image_urls]
-        for k in image_urls:
-            if k not in keys_in_order:
-                keys_in_order.append(k)
-    
-    for key in keys_in_order:
+    for key in image_urls:
         if key not in image_positions:
             continue
         # Dla Czwórki: pomiń logo3, logo4 (max 2 grafiki)
