@@ -899,7 +899,7 @@ with col_form:
         # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
         default_pos = compute_default_positions([k for k, _ in elements_active],
                                                 logos_aspect=logos_aspect,
-                                                template_type=('TROJKA' if is_trojka else 'IND'))
+                                                template_type=('TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')))
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
         
         image_positions = {}
@@ -924,7 +924,7 @@ with col_form:
         image_positions = compute_default_positions(
             [k for k, _ in elements_active],
             logos_aspect=logos_aspect,
-            template_type=('TROJKA' if is_trojka else 'IND'))
+            template_type=('TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')))
     if 'active_keys_signature' not in dir():
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
     
@@ -997,19 +997,19 @@ with col_preview:
               <div style="text-align:center;"><div style="font-weight:bold;">QR</div></div>
             </div>"""
             inline_div = f"""
-            <div style="width:{min(w_px,22)}px; height:{min(h_px,22)}px;
+            <div style="width:{min(w_px,26)}px; height:{min(h_px,26)}px;
                         background:white; border:1.5px solid #333; flex-shrink:0;
                         display:flex; align-items:center; justify-content:center;
                         font-size:8px; font-weight:bold;">QR</div>"""
         else:
             absolute_div = f"""
-            <img src="{image_urls[key]}" 
+            <img src="{image_urls[key]}"
                  style="position:absolute; left:{x_px}px; top:{y_px}px;
                         width:{w_px}px; height:{h_px}px; object-fit:contain;
                         border:1px dashed #ccc;"/>"""
             inline_div = f"""
-            <img src="{image_urls[key]}" 
-                 style="height:22px; max-width:60px; object-fit:contain;
+            <img src="{image_urls[key]}"
+                 style="height:26px; max-width:80px; object-fit:contain;
                         border:1px dashed #ccc; flex-shrink:0;"/>"""
         if is_czworka:
             # Strip horizontal: używamy inline_div (compact size)
@@ -1205,13 +1205,11 @@ with col_preview:
           <div style="position:absolute; left:0; right:0; bottom:6px; height:38px;
                       border-top:1px dashed #ccc;
                       background:rgba(245,247,250,0.8);
-                      padding:2px 4px;">
-            <div style="position:absolute; left:4px; top:2px;
-                        font-size:9px; font-weight:bold; color:#333;">
+                      display:flex; align-items:center; padding:0 6px; gap:8px;">
+            <span style="font-size:9px; font-weight:bold; color:#333; white-space:nowrap; flex-shrink:0;">
               Wyniki turnieju
-            </div>
-            <div style="position:absolute; left:0; right:0; top:14px; height:24px;
-                        display:flex; gap:6px; align-items:center; padding:0 4px;">
+            </span>
+            <div style="display:flex; flex:1; justify-content:space-evenly; align-items:center; height:100%;">
               {czworka_strip_html}
             </div>
           </div>
