@@ -448,7 +448,7 @@ def fetch_drabinka_phase(sheet_id, target_phase):
     return None, []
 
 
-def detect_drabinka_phases(sheet_id):
+def detect_drabinka_phases(sheet_id, progress_cb=None):
     """
     Wykrywa WSZYSTKIE fazy zaprezentowane w zakładce Drabinka oraz fazę grupową.
     Zwraca dict:
@@ -460,7 +460,16 @@ def detect_drabinka_phases(sheet_id):
             'b':      [{'key', 'full', 'time', 'n_matches'}, ...],
             'all_times': sorted unique list of times across all phases,
         }
+
+    progress_cb: optional callable(pct: int, msg: str) — invoked at milestones for UI progress.
     """
+    def _p(pct, msg):
+        if progress_cb:
+            try:
+                progress_cb(int(pct), msg)
+            except Exception:
+                pass
+
     result = {
         'has_grupowa': False,
         'group_count': 0,
@@ -469,12 +478,18 @@ def detect_drabinka_phases(sheet_id):
         'b': [],
         'all_times': [],
     }
+    _p(2, "🔌 Łączę się z arkuszem…")
     gid_map = get_sheet_gids(sheet_id)
-    
+    _p(8, "📋 Pobrałem listę zakładek")
+
     # Faza grupowa - zakładki Gr. A, Gr. B, ...
+    # Optymalizacja: iterujemy TYLKO po literach faktycznie obecnych w gid_map
+    # (zwykle 4-10 grup zamiast 26 prób × 3 prefixy = 78).
     group_count = 0
     group_matches_total = 0
-    for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+    LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    for li, letter in enumerate(LETTERS):
+        _p(10 + int(35 * li / len(LETTERS)), f"📂 Sprawdzam Gr. {letter}…")
         for prefix in ('Gr. ', 'Gr.', 'Grupa '):
             tab_name = f'{prefix}{letter}'
             try:
@@ -491,7 +506,8 @@ def detect_drabinka_phases(sheet_id):
         result['has_grupowa'] = True
         result['group_count'] = group_count
         result['group_total_matches'] = group_matches_total
-    
+
+    _p(48, "🏆 Wczytuję zakładkę Drabinka…")
     # Drabinka — zbieramy wszystkie wykryte fazy
     drabinka_rows = None
     for tab_name in ('Drabinka', 'drabinka', 'DRABINKA'):
@@ -504,6 +520,7 @@ def detect_drabinka_phases(sheet_id):
             continue
     
     if drabinka_rows:
+        _p(62, "🔎 Skanuję nagłówki faz…")
         # PASS 1 — single full scan: znajdź wszystkie phase block markers
         phase_block_markers = []  # [{'header_row', 'col', 'key', 'full', 'time'}]
         for r_idx, row in enumerate(drabinka_rows):
@@ -526,7 +543,8 @@ def detect_drabinka_phases(sheet_id):
                     'header_row': r_idx, 'col': c_idx, 'col_tor': col_tor,
                     'key': pkey, 'full': pfull, 'time': ptime,
                 })
-        
+
+        _p(75, f"📊 Liczę mecze w {len(phase_block_markers)} fazach…")
         # PASS 2 — dla każdego markera policz mecze schodząc w dół jego kolumny.
         # Dużo szybsze niż wcześniejsze N×parse_drabinka_rows.
         STOP_KWS = ['miejsc', 'finał', 'mecz o', '1/64', '1/32',
@@ -579,18 +597,24 @@ def detect_drabinka_phases(sheet_id):
         if entry['time']:
             all_times.add(entry['time'])
     result['all_times'] = sorted(all_times)
-    
+
+    _p(100, "✅ Gotowe")
     return result
 
 
 # ─────────────────────────────────────────────────────────────────────
 
 
-def get_sheet_names_debug(sheet_id):
+def get_sheet_names_debug(sheet_id, detected=None):
     """Czytelny debug oparty o detect_drabinka_phases: 1 scan, brak duplikatów,
-    grupowanie faz drabinki po godzinie."""
+    grupowanie faz drabinki po godzinie.
+
+    `detected`: opcjonalny pre-policzony wynik detect_drabinka_phases.
+                Jeśli podany — unikamy ponownego skanowania arkusza.
+    """
     info = []
-    detected = detect_drabinka_phases(sheet_id)
+    if detected is None:
+        detected = detect_drabinka_phases(sheet_id)
     
     if not detected['has_grupowa'] and not detected['glowna'] and not detected['b']:
         info.append("❌ Nie znaleziono żadnych grup z meczami ani zakładki Drabinka.")
@@ -1064,12 +1088,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Trójka: 720 dxa (1.27 cm) + zsynchronizowanie tabeli 1 z tabelą 2 (oba 9251 dxa
     # od lewego brzegu marginesu) — bez tego tabela 1 'auto' rozciąga się na całą
     # użyteczną szerokość a tabela 2 zostaje fixed 9251 → rozjazd.
+    # CZWORKA: top=360 (0.63 cm) i bottom=180 (0.32 cm) — łącznie ~1 cm zaoszczędzone
+    # by całość mieściła się na 1 stronie per protokół (zamiast 2 z trojaszką tabeli).
     sectPr_check = body.find(wt('sectPr'))
     if sectPr_check is not None:
         pgMar = sectPr_check.find(wt('pgMar'))
         if pgMar is not None:
-            for side in ('top','bottom','left','right'):
-                pgMar.set(f'{{{W}}}{side}', '720')
+            if template_type == 'CZWORKA':
+                pgMar.set(f'{{{W}}}top', '360')
+                pgMar.set(f'{{{W}}}bottom', '180')
+                pgMar.set(f'{{{W}}}left', '720')
+                pgMar.set(f'{{{W}}}right', '720')
+            else:
+                for side in ('top','bottom','left','right'):
+                    pgMar.set(f'{{{W}}}{side}', '720')
 
     # ── Fonty etykiet: pomniejsz zbyt duże (24→20 dla głównych etykiet,
     # zachowaj 24 dla nagłówków SET 1/SET 2/Wyniki turnieju w tabeli wyników).
@@ -1467,6 +1499,32 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                 w = tcW.get(f'{{{W}}}w')
                                 if w:
                                     tcW.set(f'{{{W}}}w', str(int(int(w) * scale)))
+
+        # Usuń <w:br/> przed "Wyniki turnieju" — szablon ma puste run-y z break
+        # przed tekstem które dodają linijkę odstępu i wypychają stronę 2.
+        # Lokalizujemy paragraph zawierający 'Wyniki turnieju' i usuwamy z niego
+        # wszystkie <w:r> które zawierają TYLKO <w:br/> bez tekstu.
+        for p in body.iter(wt('p')):
+            txts = p.findall(f'.//{wt("t")}')
+            full_text = ''.join((t.text or '') for t in txts)
+            if 'Wyniki turnieju' not in full_text:
+                continue
+            for r in list(p.findall(wt('r'))):
+                # Run zawiera tylko <w:br/> (bez tekstu) — usuwamy
+                if r.find(wt('br')) is not None and not r.findall(wt('t')):
+                    p.remove(r)
+            # Tighten paragraph spacing
+            pPr = p.find(wt('pPr'))
+            if pPr is None:
+                pPr = etree.Element(wt('pPr'))
+                p.insert(0, pPr)
+            spacing = pPr.find(wt('spacing'))
+            if spacing is None:
+                spacing = etree.SubElement(pPr, wt('spacing'))
+            spacing.set(f'{{{W}}}before', '0')
+            spacing.set(f'{{{W}}}after', '0')
+            spacing.set(f'{{{W}}}line', '240')
+            spacing.set(f'{{{W}}}lineRule', 'auto')
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)

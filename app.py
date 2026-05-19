@@ -141,37 +141,50 @@ def compute_default_positions(active_keys, logos_aspect=None,
     is_trojka = (template_type == 'TROJKA')
     is_czworka = (template_type == 'CZWORKA')
     
-    # CZWORKA: nowy layout — QR mały + PFM + do 4 grafik w POZIOMIE pod tabelą.
-    # Pozycje (cm) liczone od pozycji kotwicy R1.tc[0] u góry T1. Y_BASE=22cm spycha
-    # grafiki niżej (poza tabelę, do dolnej części strony pod "Wyniki turnieju").
+    # CZWORKA: layout pod tabelą wynikową:
+    #   LEWA strona: tekst "Wyniki turnieju" (renderowany przez szablon docx jako
+    #                normalny paragraf po tabeli) + QR POD nim.
+    #   PRAWA strona: PFM + do 4 grafik w jednym poziomym rzędzie.
+    # Pozycje (cm) liczone od kotwicy R1.tc[0] u góry T1.
+    # Cell anchor sits at y_abs ~3.45 cm (top margin 540 dxa = 0.95 cm + T1 ~2 cm + T2 header ~0.5 cm).
+    # Useable bottom ~26.84 cm (page 27.16 cm - bottom margin 180 dxa = 0.32 cm).
     if is_czworka:
-        # Pozycje (cm) liczone od pozycji kotwicy R1.tc[0] u góry T1 (~y=6.5cm absolute).
-        # Y_BASE=20 cm spycha grafiki pod "Wyniki turnieju" text (~y=25.5cm absolute)
-        # do dolnej części strony (page bottom ~28.2cm minus 2cm height = 26.2cm safe top).
-        Y_BASE = 20.0
-        ROW_H = 1.7    # wysokość rzędu grafik (kompaktowo by mieścić się pod tekstem)
+        Y_GRAPHICS = 20.5      # rząd grafik na prawo, ~y_abs 24.0 cm (na linii "Wyniki turnieju")
+        Y_QR       = 21.4      # QR niżej, ~y_abs 24.85 cm (pod tekstem "Wyniki turnieju")
+        QR_SIZE    = 1.6       # QR mniejsze (1.6 cm) by zostawić miejsce na tekst u góry
+        ROW_H      = 1.4       # wysokość rzędu grafik
         positions = {}
         if 'qr' in active_keys:
-            positions['qr'] = {'x': 1.0, 'y': Y_BASE, 'w': 2.0, 'h': 2.0}
+            # QR po lewej, pod tekstem "Wyniki turnieju"
+            positions['qr'] = {'x': 0.5, 'y': Y_QR, 'w': QR_SIZE, 'h': QR_SIZE}
+        # Rząd grafik po prawej: PFM + logos, równomiernie w dostępnej szerokości
+        # Lewy 4 cm zarezerwowany na blok "Wyniki turnieju" + QR.
+        GRAPHICS_X_START = 4.0
+        GRAPHICS_X_END   = 17.0
+        graphics_keys = []
         if 'pfm' in active_keys:
-            positions['pfm'] = {'x': 4.0, 'y': Y_BASE, 'w': 2.5, 'h': ROW_H}
-        # Wszystkie 4 grafiki rozmieszczone równomiernie w dostępnej szerokości
-        # Dostępna przestrzeń: od x=7.5 do x=16.5 (margines 0.5 cm od prawej) → 9.0 cm
-        LOGOS_X_START = 7.5
-        LOGOS_X_END = 16.5
-        active_logos = [f'logo{i}' for i in (1, 2, 3, 4) if f'logo{i}' in active_keys]
-        n_logos = len(active_logos)
-        if n_logos > 0:
+            graphics_keys.append('pfm')
+        graphics_keys.extend(f'logo{i}' for i in (1, 2, 3, 4) if f'logo{i}' in active_keys)
+        n = len(graphics_keys)
+        if n > 0:
             GAP = 0.3
-            total_gaps = GAP * (n_logos - 1)
-            logo_w = min(3.5, (LOGOS_X_END - LOGOS_X_START - total_gaps) / n_logos)
-            x_g = LOGOS_X_START
-            for key in active_logos:
-                aspect = (logos_aspect or {}).get(key, 1.5)
+            slot_w = (GRAPHICS_X_END - GRAPHICS_X_START - GAP * (n - 1)) / n
+            x_g = GRAPHICS_X_START
+            for key in graphics_keys:
+                if key == 'pfm':
+                    aspect = pfm_aspect
+                else:
+                    aspect = (logos_aspect or {}).get(key, 1.5)
                 target_h = ROW_H
-                target_w = min(logo_w, target_h * aspect)
-                positions[key] = {'x': x_g, 'y': Y_BASE, 'w': target_w, 'h': target_h}
-                x_g += logo_w + GAP
+                target_w = target_h * aspect
+                if target_w > slot_w:
+                    target_w = slot_w
+                    target_h = target_w / aspect
+                # Wycentruj poziomo w slocie, wyrównaj do góry rzędu pionowo
+                x_centered = x_g + (slot_w - target_w) / 2
+                y_centered = Y_GRAPHICS + (ROW_H - target_h) / 2
+                positions[key] = {'x': x_centered, 'y': y_centered, 'w': target_w, 'h': target_h}
+                x_g += slot_w + GAP
         return positions
     
     # Trójka ma węższy lewy pas niż indywidualny - mniejsze rozmiary domyślne
@@ -336,15 +349,27 @@ with col_form:
         if not sid:
             st.error("Wklej najpierw poprawny link do arkusza.")
         else:
-            with st.spinner("Wczytuję arkusz..."):
-                info = generate_docx.get_sheet_names_debug(sid)
+            # Progress bar z etapami: metadane → grupy → drabinka → fazy.
+            # Bez tego long-running fetch wyglądał jak zacięty spinner.
+            progress_bar = st.progress(0, text="🔌 Łączę z arkuszem…")
+            def _on_progress(pct, msg):
                 try:
-                    detected_info = generate_docx.detect_drabinka_phases(sid)
-                    detected_info['sheet_id'] = sid
-                    st.session_state['detected'] = detected_info
-                except Exception as e:
-                    st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
-                    st.session_state.pop('detected', None)
+                    progress_bar.progress(min(100, max(0, int(pct))), text=msg)
+                except Exception:
+                    pass
+            info = []
+            try:
+                detected_info = generate_docx.detect_drabinka_phases(sid, progress_cb=_on_progress)
+                detected_info['sheet_id'] = sid
+                st.session_state['detected'] = detected_info
+                # Reuse już-policzonego detected — bez ponownego skanowania arkusza.
+                info = generate_docx.get_sheet_names_debug(sid, detected=detected_info)
+            except Exception as e:
+                st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
+                st.session_state.pop('detected', None)
+                info = [f"❌ Błąd: {e}"]
+            finally:
+                progress_bar.empty()
             st.code("\n".join(info))
     
     # Pokaż info o aktywnym cache (jeśli URL match)
@@ -900,10 +925,12 @@ with col_form:
                 elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
         
         # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
+        _tpl_type = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
         default_pos = compute_default_positions([k for k, _ in elements_active],
                                                 logos_aspect=logos_aspect,
-                                                template_type=('TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')))
-        active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
+                                                template_type=_tpl_type)
+        # Template type w sygnaturze: zmiana typu (np. IND→CZWORKA) resetuje sliders do nowych defaultów.
+        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_tpl_type}"
         
         image_positions = {}
         for key in default_pos:
@@ -924,12 +951,14 @@ with col_form:
         if include_pfm_logo:
             elements_active.append(('pfm', 'Logo PFM'))
     if 'image_positions' not in dir():
+        _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
         image_positions = compute_default_positions(
             [k for k, _ in elements_active],
             logos_aspect=logos_aspect,
-            template_type=('TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')))
+            template_type=_tpl_type_fb)
     if 'active_keys_signature' not in dir():
-        active_keys_signature = "|".join(sorted(k for k, _ in elements_active))
+        _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
+        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_tpl_type_fb}"
     
     # ── Apply user slider positions PRZED renderem podglądu ──
     # Suwaki Pozycji grafik (number_input) zapisują wartości w st.session_state pod kluczami
@@ -974,11 +1003,11 @@ with col_preview:
             image_urls[f'logo{i+1}'] = img_to_data_url(f)
 
     elements_html = ""
-    # CZWORKA: nowy layout — grafiki w POZIOMIE pod tabelą. W preview robimy uproszczony
-    # strip u dołu strony (czworka_strip_html jako flex-row). Pozycje X/Y z image_positions
-    # są respektowane w DOCX, ale preview używa proporcjonalnego flex-layoutu.
-    czworka_strip_items = []  # html chunki dla strip Czwórki
-    
+    # CZWORKA: layout strip pod tabelą — LEWA: "Wyniki turnieju" + QR (stack pionowy);
+    # PRAWA: PFM + loga w rzędzie poziomym. Bez nachodzenia.
+    czworka_qr_html = ""        # QR dla bloku lewego
+    czworka_logos_items = []    # PFM + loga dla bloku prawego
+
     for key in image_urls:
         if key not in image_positions:
             continue
@@ -989,15 +1018,16 @@ with col_preview:
         h_px = int(pos['h'] * SCALE)
         if key == 'qr':
             absolute_div = f"""
-            <div style="position:absolute; left:{x_px}px; top:{y_px}px; 
-                        width:{w_px}px; height:{h_px}px; 
+            <div style="position:absolute; left:{x_px}px; top:{y_px}px;
+                        width:{w_px}px; height:{h_px}px;
                         background:white; border:2px solid #333;
                         display:flex; align-items:center; justify-content:center;
                         font-size:11px; color:#333; font-family:monospace;">
               <div style="text-align:center;"><div style="font-weight:bold;">QR</div></div>
             </div>"""
+            # CZWORKA: QR w bloku lewym, pod tekstem — mniejszy żeby zostawić miejsce na tekst
             inline_div = f"""
-            <div style="width:{min(w_px,26)}px; height:{min(h_px,26)}px;
+            <div style="width:24px; height:24px;
                         background:white; border:1.5px solid #333; flex-shrink:0;
                         display:flex; align-items:center; justify-content:center;
                         font-size:8px; font-weight:bold;">QR</div>"""
@@ -1009,15 +1039,17 @@ with col_preview:
                         border:1px dashed #ccc;"/>"""
             inline_div = f"""
             <img src="{image_urls[key]}"
-                 style="height:26px; max-width:80px; object-fit:contain;
+                 style="height:22px; max-width:70px; object-fit:contain;
                         border:1px dashed #ccc; flex-shrink:0;"/>"""
         if is_czworka:
-            # Strip horizontal: używamy inline_div (compact size)
-            czworka_strip_items.append(inline_div)
+            if key == 'qr':
+                czworka_qr_html = inline_div
+            else:
+                czworka_logos_items.append(inline_div)
         else:
             elements_html += absolute_div
-    
-    czworka_strip_html = "".join(czworka_strip_items)
+
+    czworka_logos_html = "".join(czworka_logos_items)
 
     label_y_px = 5
     if include_qr and 'qr' in image_positions:
@@ -1137,9 +1169,10 @@ with col_preview:
           </div>
           
           <!-- Tabela wynikowa (od lewego brzegu) — wysokość dopasowana
-               żeby nie wystawała poza stronę: PAGE_H_PX - top(180px) - margines 4px -->
+               żeby nie wystawała poza stronę: PAGE_H_PX - top(180px) - margines 4px.
+               CZWORKA: dodatkowo zostawiamy 64px na strip "Wyniki turnieju" + grafiki pod tabelą. -->
           <div style="position:absolute; left:0; top:180px;
-                      width:{TROJKA_TBL_W_PX}px; height:{PAGE_H_PX - 184}px;
+                      width:{TROJKA_TBL_W_PX}px; height:{PAGE_H_PX - 184 - (64 if is_czworka else 0)}px;
                       border:1px solid #999;">
             <!-- Lewa kolumna R1.tc[0] na grafiki (2.09 cm) -->
             <div style="position:absolute; left:0; top:0; bottom:0;
@@ -1201,16 +1234,23 @@ with col_preview:
             </div>
           </div>
           {f'''
-          <!-- CZWÓRKA: poziomy strip z grafikami pod tabelą + napis "Wyniki turnieju" -->
-          <div style="position:absolute; left:0; right:0; bottom:6px; height:38px;
+          <!-- CZWÓRKA: strip pod tabelą.
+               LEWY blok: "Wyniki turnieju" tekst + QR pod nim (stack pionowy).
+               PRAWY blok: PFM + loga sponsorów w rzędzie poziomym. -->
+          <div style="position:absolute; left:0; right:0; bottom:6px; height:54px;
                       border-top:1px dashed #ccc;
                       background:rgba(245,247,250,0.8);
-                      display:flex; align-items:center; padding:0 6px; gap:8px;">
-            <span style="font-size:9px; font-weight:bold; color:#333; white-space:nowrap; flex-shrink:0;">
-              Wyniki turnieju
-            </span>
-            <div style="display:flex; flex:1; justify-content:space-evenly; align-items:center; height:100%;">
-              {czworka_strip_html}
+                      display:flex; align-items:flex-start; padding:3px 6px; gap:12px;">
+            <div style="display:flex; flex-direction:column; align-items:center;
+                        gap:2px; flex-shrink:0; padding-top:1px;">
+              <span style="font-size:8px; font-weight:bold; color:#333; white-space:nowrap;">
+                Wyniki turnieju
+              </span>
+              {czworka_qr_html}
+            </div>
+            <div style="display:flex; flex:1; justify-content:space-evenly;
+                        align-items:center; height:100%;">
+              {czworka_logos_html}
             </div>
           </div>
           ''' if is_czworka else ''}
