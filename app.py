@@ -1362,8 +1362,18 @@ with col_preview:
         # Lewa kolumna lub cały lewy obszar (granica do której obraz może sięgać).
         # Trójka: kolumna R1.tc[0] = 4.76 cm (TROJKA_LEFT_AREA_CM).
         # IND: lewy obszar 5.24 cm.
+        # CZWORKA: poziomy strip pod tabelą — grafiki rozłożone w pełnej szerokości
+        # użytecznej strony (~17 cm) i niżej (y do ~25 cm).
         # Z bezpiecznym marginesem 0.1 cm żeby obraz nie dotykał krawędzi kolumny.
-        col_width = TROJKA_LEFT_AREA_CM if is_trojka else 5.24
+        if is_czworka:
+            col_width = 17.0
+            max_y_abs = 25.0
+        elif is_trojka:
+            col_width = TROJKA_LEFT_AREA_CM
+            max_y_abs = 18.0
+        else:
+            col_width = 5.24
+            max_y_abs = 18.0
         SAFE_MARGIN = 0.1
         max_x_abs = col_width - 0.5  # zostaw min. 0.5 cm na obraz
         max_h_abs = 5.0
@@ -1389,8 +1399,9 @@ with col_preview:
                                            min_value=0.0, max_value=max_x_dyn, step=0.1,
                                            key=f"x_{slider_key_base}")
                 with cols[1]:
-                    new_y = st.number_input("Y (cm)", value=float(pos['y']),
-                                           min_value=0.0, max_value=18.0, step=0.1,
+                    cur_y = min(float(pos['y']), max_y_abs)
+                    new_y = st.number_input("Y (cm)", value=cur_y,
+                                           min_value=0.0, max_value=max_y_abs, step=0.1,
                                            key=f"y_{slider_key_base}")
                 with cols[2]:
                     # max_w przeliczone na podstawie świeżego new_x z tej samej tury renderu
