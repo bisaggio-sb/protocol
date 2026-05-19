@@ -141,9 +141,7 @@ def compute_default_positions(active_keys, logos_aspect=None,
     is_trojka = (template_type == 'TROJKA')
     is_czworka = (template_type == 'CZWORKA')
     
-    # CZWORKA: nowy layout — QR mały + PFM + max 2 grafiki w POZIOMIE pod tabelą.
-    # User: "QR generowany pod tabelką i będzie mniejszy, po prawej od niego logo PFM
-    # i dalej po prawej miejsce na 2 grafiki max."
+    # CZWORKA: nowy layout — QR mały + PFM + do 4 grafik w POZIOMIE pod tabelą.
     # Pozycje (cm) liczone od pozycji kotwicy R1.tc[0] u góry T1. Y_BASE=22cm spycha
     # grafiki niżej (poza tabelę, do dolnej części strony pod "Wyniki turnieju").
     if is_czworka:
@@ -157,18 +155,23 @@ def compute_default_positions(active_keys, logos_aspect=None,
             positions['qr'] = {'x': 1.0, 'y': Y_BASE, 'w': 2.0, 'h': 2.0}
         if 'pfm' in active_keys:
             positions['pfm'] = {'x': 4.0, 'y': Y_BASE, 'w': 2.5, 'h': ROW_H}
-        # Max 2 grafiki dla Czwórki (logo3, logo4 ignorowane)
-        x_g = 7.5
-        for i in (1, 2):
-            key = f'logo{i}'
-            if key in active_keys:
+        # Wszystkie 4 grafiki rozmieszczone równomiernie w dostępnej szerokości
+        # Dostępna przestrzeń: od x=7.5 do x=16.5 (margines 0.5 cm od prawej) → 9.0 cm
+        LOGOS_X_START = 7.5
+        LOGOS_X_END = 16.5
+        active_logos = [f'logo{i}' for i in (1, 2, 3, 4) if f'logo{i}' in active_keys]
+        n_logos = len(active_logos)
+        if n_logos > 0:
+            GAP = 0.3
+            total_gaps = GAP * (n_logos - 1)
+            logo_w = min(3.5, (LOGOS_X_END - LOGOS_X_START - total_gaps) / n_logos)
+            x_g = LOGOS_X_START
+            for key in active_logos:
                 aspect = (logos_aspect or {}).get(key, 1.5)
                 target_h = ROW_H
-                target_w = min(3.5, target_h * aspect)
+                target_w = min(logo_w, target_h * aspect)
                 positions[key] = {'x': x_g, 'y': Y_BASE, 'w': target_w, 'h': target_h}
-                x_g += target_w + 0.5
-        # logo3, logo4 — pomijane (Czwórka ma max 2 grafiki)
-        # Pozostawione w aktywnych ale bez pozycji = nie wyświetlane.
+                x_g += logo_w + GAP
         return positions
     
     # Trójka ma węższy lewy pas niż indywidualny - mniejsze rozmiary domyślne
@@ -979,9 +982,6 @@ with col_preview:
     for key in image_urls:
         if key not in image_positions:
             continue
-        # Dla Czwórki: pomiń logo3, logo4 (max 2 grafiki)
-        if is_czworka and key in ('logo3', 'logo4'):
-            continue
         pos = image_positions[key]
         x_px = int(pos['x'] * SCALE)
         y_px = int(pos['y'] * SCALE)
@@ -1379,7 +1379,7 @@ with col_preview:
         max_h_abs = 5.0
         for key, label in elements_active:
             if key not in image_positions:
-                continue  # CZWORKA: logo3/logo4 ignorowane (max 2 grafiki)
+                continue
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
