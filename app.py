@@ -1378,6 +1378,8 @@ with col_preview:
         max_x_abs = col_width - 0.5  # zostaw min. 0.5 cm na obraz
         max_h_abs = 5.0
         for key, label in elements_active:
+            if key not in image_positions:
+                continue  # CZWORKA: logo3/logo4 ignorowane (max 2 grafiki)
             with st.expander(f"📍 {label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
