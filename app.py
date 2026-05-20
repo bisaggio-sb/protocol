@@ -150,8 +150,8 @@ def compute_default_positions(active_keys, logos_aspect=None,
     # ~3 cm dla margines drukarki (większość drukarek ma 1-1.5 cm hardware margin
     # u dołu, ale chcemy bezpiecznie więcej).
     if is_czworka:
-        Y_GRAPHICS = 18.5      # rząd grafik na prawo, ~y_abs 23.5 cm (na linii "Wyniki turnieju")
-        Y_QR       = 19.7      # QR niżej, ~y_abs 24.7 cm (pod tekstem "Wyniki turnieju")
+        Y_QR       = 19.7      # QR po lewej, pod tekstem "Wyniki turnieju"
+        Y_GRAPHICS = Y_QR      # rząd grafik wyrównany TOPEM z QR (zgodnie z feedbackiem)
         QR_SIZE    = 1.6       # QR mniejsze (1.6 cm) by zostawić miejsce na tekst u góry
         ROW_H      = 1.4       # wysokość rzędu grafik
         positions = {}
@@ -934,7 +934,7 @@ with col_form:
         # CZWORKA: bump signature do v2 — zmiana defaultów (Y_GRAPHICS, Y_QR przesunięte
         # wyżej by drukarka nie ucinała). Stare sliderowe wartości użytkownika są
         # invalidate'owane, default się rerenderuje.
-        _sig_tpl = f"{_tpl_type}|cz2" if _tpl_type == 'CZWORKA' else _tpl_type
+        _sig_tpl = f"{_tpl_type}|cz3" if _tpl_type == 'CZWORKA' else _tpl_type
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_sig_tpl}"
         
         image_positions = {}
@@ -963,7 +963,7 @@ with col_form:
             template_type=_tpl_type_fb)
     if 'active_keys_signature' not in dir():
         _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
-        _sig_tpl_fb = f"{_tpl_type_fb}|cz2" if _tpl_type_fb == 'CZWORKA' else _tpl_type_fb
+        _sig_tpl_fb = f"{_tpl_type_fb}|cz3" if _tpl_type_fb == 'CZWORKA' else _tpl_type_fb
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_sig_tpl_fb}"
     
     # ── Apply user slider positions PRZED renderem podglądu ──
@@ -1686,7 +1686,15 @@ if gen_clicked:
         show_name_g = tournament_name.strip() if show_header_on_protocol else ""
         show_date_g = tournament_date if show_header_on_protocol else ""
         
-        with st.spinner(f"Buduję dokument ({total_matches} protokołów)..."):
+        _pw = generate_docx.pluralize(total_matches, 'protokół', 'protokoły', 'protokołów')
+        _multi_pb = st.progress(0.0, text=f"Buduję dokument ({total_matches} {_pw})…")
+        def _on_multi_progress(done, tot, label):
+            try:
+                _multi_pb.progress(min(1.0, done / max(1, tot)),
+                    text=f"Buduję {done}/{tot} — {label}")
+            except Exception:
+                pass
+        try:
             try:
                 docx_bytes = generate_docx.build_document(
                     sid, sheets_url.strip(), all_sheets_data,
@@ -1697,9 +1705,13 @@ if gen_clicked:
                     image_order=image_order or None, image_positions=img_pos or None,
                     hide_grupa_mecz=True,
                     phase_label="",
-                    template_type=template_type)
+                    template_type=template_type,
+                    progress_cb=_on_multi_progress)
             except Exception as e:
                 st.error(f"Błąd budowy dokumentu: {e}"); st.stop()
+        finally:
+            try: _multi_pb.empty()
+            except Exception: pass
         
         # Nazwa pliku + PDF konwersja
         base_name = re.sub(r'[^\w\s-]', '', tournament_name).strip().replace(' ', '_') or "protokoly"
@@ -1841,7 +1853,19 @@ if gen_clicked:
         if total == 0:
             st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
 
-        with st.spinner(f"Generuję {total} protokołów..."):
+        # Progress bar zamiast spinnera — przy 50+ meczach generowanie trwa
+        # parę sekund per mecz (kopiowanie XML, anchor images). User chce widzieć ruch.
+        _pb_word = generate_docx.pluralize(total, 'protokół', 'protokoły', 'protokołów')
+        _gen_progress = st.progress(0.0, text=f"Generuję {total} {_pb_word}…")
+        def _on_gen_progress(done, tot, label):
+            try:
+                pct = done / max(1, tot)
+                _gen_progress.progress(min(1.0, pct),
+                    text=f"Generuję {done}/{tot} — {label}")
+            except Exception:
+                pass
+
+        try:
             logos_bytes, image_order, img_pos = build_image_args()
             show_name = tournament_name.strip() if show_header_on_protocol else ""
             show_date = tournament_date if show_header_on_protocol else ""
@@ -1872,7 +1896,11 @@ if gen_clicked:
                 include_qr=include_qr, include_pfm_logo=include_pfm_logo,
                 image_order=image_order or None, image_positions=img_pos or None,
                 hide_grupa_mecz=is_pucharowa, phase_label=phase_label_short,
-                template_type=template_type)
+                template_type=template_type,
+                progress_cb=_on_gen_progress)
+        finally:
+            try: _gen_progress.empty()
+            except Exception: pass
 
         safe_name = re.sub(r'[^\w\s-]','', tournament_name).strip().replace(' ','_') or "protokoly"
         if is_pucharowa:

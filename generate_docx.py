@@ -488,7 +488,10 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
     }
     _p(2, "🔌 Łączę się z arkuszem…")
     gid_map = get_sheet_gids(sheet_id)
-    _p(8, "📋 Pobrałem listę zakładek")
+    if gid_map:
+        _p(8, f"📋 Pobrałem listę zakładek ({len(gid_map)})")
+    else:
+        _p(8, "⚠️ Lista zakładek niedostępna — skanuję A-Z")
 
     # Faza grupowa - zakładki Gr. A, Gr. B, ...
     # Optymalizacja: filtrujemy LETTERS do tych dla których nazwa zakładki
@@ -512,7 +515,8 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
     group_matches_total = 0
     total = max(1, len(candidate_tabs))
     for li, (letter, tab_name) in enumerate(candidate_tabs):
-        _p(10 + int(35 * li / total), f"📂 Wczytuję {tab_name}…")
+        _p(10 + int(35 * (li + 1) / total),
+           f"📂 Wczytuję {tab_name} ({li + 1}/{total})…")
         try:
             rows = fetch_sheet(sheet_id, tab_name, gid_map)
             if rows:
@@ -1067,7 +1071,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                    include_qr=True, include_pfm_logo=True,
                    image_order=None, image_positions=None,
                    hide_grupa_mecz=False, phase_label=None,
-                   template_type='IND'):
+                   template_type='IND', progress_cb=None):
     """
     `tournament_date`: string (np. "10.05.2026") wyświetlany w nagłówku obok nazwy.
     `tournament_phase_text`: tekst fazy turnieju (np. "Grupowa", "1/16 finału") -
@@ -1727,6 +1731,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     for el in list(body): body.remove(el)
 
     # ── Generuj protokoły
+    total_matches = sum(len(g[1]) for g in sheets_data)
+    done = 0
     first = True
     for group_entry in sheets_data:
         # sheets_data może być listą (group_name, matches) lub
@@ -1743,6 +1749,15 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             if not first:
                 body.append(_make_page_break_para())
             first = False
+            done += 1
+            if progress_cb:
+                try:
+                    label_parts = [str(group_name)]
+                    if match.get('mecz'): label_parts.append(f"mecz {match['mecz']}")
+                    if match.get('tor'):  label_parts.append(f"tor {match['tor']}")
+                    progress_cb(done, total_matches, ' · '.join(label_parts))
+                except Exception:
+                    pass
 
             cloned = [copy.deepcopy(el) for el in template_elements]
 
