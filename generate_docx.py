@@ -120,11 +120,19 @@ def parse_group_rows(rows):
     return matches
 
 def fetch_all_group_sheets(sheet_id):
-    """Skanuje wszystkie zakładki Gr. A do Gr. Z. Zwraca tylko te z meczami."""
+    """Skanuje zakładki Gr. A..Z faktycznie istniejące w arkuszu. Zwraca tylko te z meczami.
+
+    Optymalizacja: gdy gid_map jest dostępne, iterujemy tylko po nazwach które
+    naprawdę istnieją (zazwyczaj 4-10 grup zamiast 26 zbędnych HTTP)."""
     gid_map = get_sheet_gids(sheet_id)
+    if gid_map:
+        candidates = [f"Gr. {L}" for L in string.ascii_uppercase if f"Gr. {L}" in gid_map]
+        if not candidates:
+            candidates = [f"Gr. {L}" for L in string.ascii_uppercase]
+    else:
+        candidates = [f"Gr. {L}" for L in string.ascii_uppercase]
     results = []
-    for letter in string.ascii_uppercase:   # A..Z, nie tylko A..P
-        name = f"Gr. {letter}"
+    for name in candidates:
         try:
             rows = fetch_sheet(sheet_id, name, gid_map)
             if rows is None: continue
@@ -483,25 +491,37 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
     _p(8, "📋 Pobrałem listę zakładek")
 
     # Faza grupowa - zakładki Gr. A, Gr. B, ...
-    # Optymalizacja: iterujemy TYLKO po literach faktycznie obecnych w gid_map
-    # (zwykle 4-10 grup zamiast 26 prób × 3 prefixy = 78).
+    # Optymalizacja: filtrujemy LETTERS do tych dla których nazwa zakładki
+    # FAKTYCZNIE istnieje w gid_map. Zamiast 26 × 3 = 78 prób HTTP (większość
+    # nieudanych), robimy tylko realne zapytania dla istniejących zakładek.
+    # Fallback do pełnego skanu jeśli gid_map jest puste (np. arkusz nieskanowany).
+    LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    candidate_tabs = []  # [(letter, tab_name)]
+    if gid_map:
+        for letter in LETTERS:
+            for prefix in ('Gr. ', 'Gr.', 'Grupa '):
+                tab_name = f'{prefix}{letter}'
+                if tab_name in gid_map:
+                    candidate_tabs.append((letter, tab_name))
+                    break
+    else:
+        # Fallback: bez gid_map skanujemy wszystkie litery (jak poprzednio)
+        candidate_tabs = [(L, f'Gr. {L}') for L in LETTERS]
+
     group_count = 0
     group_matches_total = 0
-    LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    for li, letter in enumerate(LETTERS):
-        _p(10 + int(35 * li / len(LETTERS)), f"📂 Sprawdzam Gr. {letter}…")
-        for prefix in ('Gr. ', 'Gr.', 'Grupa '):
-            tab_name = f'{prefix}{letter}'
-            try:
-                rows = fetch_sheet(sheet_id, tab_name, gid_map)
-                if rows:
-                    matches = parse_group_rows(rows)
-                    if matches:
-                        group_count += 1
-                        group_matches_total += len(matches)
-                        break
-            except Exception:
-                continue
+    total = max(1, len(candidate_tabs))
+    for li, (letter, tab_name) in enumerate(candidate_tabs):
+        _p(10 + int(35 * li / total), f"📂 Wczytuję {tab_name}…")
+        try:
+            rows = fetch_sheet(sheet_id, tab_name, gid_map)
+            if rows:
+                matches = parse_group_rows(rows)
+                if matches:
+                    group_count += 1
+                    group_matches_total += len(matches)
+        except Exception:
+            continue
     if group_count > 0:
         result['has_grupowa'] = True
         result['group_count'] = group_count
@@ -1088,15 +1108,19 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Trójka: 720 dxa (1.27 cm) + zsynchronizowanie tabeli 1 z tabelą 2 (oba 9251 dxa
     # od lewego brzegu marginesu) — bez tego tabela 1 'auto' rozciąga się na całą
     # użyteczną szerokość a tabela 2 zostaje fixed 9251 → rozjazd.
-    # CZWORKA: top=360 (0.63 cm) i bottom=180 (0.32 cm) — łącznie ~1 cm zaoszczędzone
-    # by całość mieściła się na 1 stronie per protokół (zamiast 2 z trojaszką tabeli).
+    # CZWORKA: top=360 (0.63 cm) — zmniejszone z 540, by oszczędzić miejsce.
+    # bottom=540 (0.95 cm) — większy niż w oryginale (180 dxa = 0.32 cm) bo wiele drukarek
+    # ma hardware margin ~0.5-1 cm; przy 0.32 cm dolna część grafik była obcinana.
+    # Łącznie zysk względem oryginału (top 540 + bottom 180 = 720 dxa) jest niewielki
+    # (top 360 + bottom 540 = 900 dxa = +180 dxa), ALE strip jest przeniesiony wyżej
+    # (Y_GRAPHICS=18.5 zamiast 20.5) więc faktycznie zostaje go więcej miejsca do końca strony.
     sectPr_check = body.find(wt('sectPr'))
     if sectPr_check is not None:
         pgMar = sectPr_check.find(wt('pgMar'))
         if pgMar is not None:
             if template_type == 'CZWORKA':
                 pgMar.set(f'{{{W}}}top', '360')
-                pgMar.set(f'{{{W}}}bottom', '180')
+                pgMar.set(f'{{{W}}}bottom', '540')
                 pgMar.set(f'{{{W}}}left', '720')
                 pgMar.set(f'{{{W}}}right', '720')
             else:

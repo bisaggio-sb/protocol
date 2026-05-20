@@ -145,12 +145,13 @@ def compute_default_positions(active_keys, logos_aspect=None,
     #   LEWA strona: tekst "Wyniki turnieju" (renderowany przez szablon docx jako
     #                normalny paragraf po tabeli) + QR POD nim.
     #   PRAWA strona: PFM + do 4 grafik w jednym poziomym rzędzie.
-    # Pozycje (cm) liczone od kotwicy R1.tc[0] u góry T1.
-    # Cell anchor sits at y_abs ~3.45 cm (top margin 540 dxa = 0.95 cm + T1 ~2 cm + T2 header ~0.5 cm).
-    # Useable bottom ~26.84 cm (page 27.16 cm - bottom margin 180 dxa = 0.32 cm).
+    # Pozycje (cm) — Y to offset od kotwicy w R1.tc[0] (~y_abs 5 cm).
+    # Cel: strip ma się skończyć przy ~26 cm absolutnie żeby zostawić zapas
+    # ~3 cm dla margines drukarki (większość drukarek ma 1-1.5 cm hardware margin
+    # u dołu, ale chcemy bezpiecznie więcej).
     if is_czworka:
-        Y_GRAPHICS = 20.5      # rząd grafik na prawo, ~y_abs 24.0 cm (na linii "Wyniki turnieju")
-        Y_QR       = 21.4      # QR niżej, ~y_abs 24.85 cm (pod tekstem "Wyniki turnieju")
+        Y_GRAPHICS = 18.5      # rząd grafik na prawo, ~y_abs 23.5 cm (na linii "Wyniki turnieju")
+        Y_QR       = 19.7      # QR niżej, ~y_abs 24.7 cm (pod tekstem "Wyniki turnieju")
         QR_SIZE    = 1.6       # QR mniejsze (1.6 cm) by zostawić miejsce na tekst u góry
         ROW_H      = 1.4       # wysokość rzędu grafik
         positions = {}
@@ -930,7 +931,11 @@ with col_form:
                                                 logos_aspect=logos_aspect,
                                                 template_type=_tpl_type)
         # Template type w sygnaturze: zmiana typu (np. IND→CZWORKA) resetuje sliders do nowych defaultów.
-        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_tpl_type}"
+        # CZWORKA: bump signature do v2 — zmiana defaultów (Y_GRAPHICS, Y_QR przesunięte
+        # wyżej by drukarka nie ucinała). Stare sliderowe wartości użytkownika są
+        # invalidate'owane, default się rerenderuje.
+        _sig_tpl = f"{_tpl_type}|cz2" if _tpl_type == 'CZWORKA' else _tpl_type
+        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_sig_tpl}"
         
         image_positions = {}
         for key in default_pos:
@@ -958,7 +963,8 @@ with col_form:
             template_type=_tpl_type_fb)
     if 'active_keys_signature' not in dir():
         _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
-        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_tpl_type_fb}"
+        _sig_tpl_fb = f"{_tpl_type_fb}|cz2" if _tpl_type_fb == 'CZWORKA' else _tpl_type_fb
+        active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_sig_tpl_fb}"
     
     # ── Apply user slider positions PRZED renderem podglądu ──
     # Suwaki Pozycji grafik (number_input) zapisują wartości w st.session_state pod kluczami

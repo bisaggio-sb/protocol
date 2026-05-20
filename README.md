@@ -6,47 +6,47 @@ Aplikacja webowa generująca protokoły meczowe (`.docx`) dla turniejów Mölkky
 
 ## Funkcjonalności
 
-- 📊 **Pobieranie danych z arkusza Google Sheets** — automatyczne wczytanie meczów ze wszystkich grup (Gr. A – Gr. P)
-- 📄 **Generowanie protokołów .docx** — jeden protokół na stronę, dokładnie według wzorca PFM
-- 🔗 **Kod QR** — automatycznie generowany z linka do arkusza wyników (do skanowania telefonem z wydrukowanej karty)
-- 🏆 **Logo PFM** — domyślnie dodawane do każdego protokołu (z opcją wyłączenia)
-- 🖼️ **Dodatkowe grafiki** — do 4 logo (np. logo klubu organizującego, sponsora, banner turnieju)
-- 📐 **Edytor pozycji** — dostosuj pozycję X/Y i rozmiar każdej grafiki w protokole
-- 👁️ **Podgląd na żywo** — schemat strony pokazuje rozłożenie elementów przed generowaniem
-- 📅 **Nazwa i data turnieju** — wyświetlane małą czcionką w prawym górnym rogu każdego protokołu
+- 📊 **Pobieranie danych z arkusza Google Sheets** — automatyczne wczytanie meczów z faz grupowych (`Gr. A`–`Gr. Z`) i drabinki pucharowej
+- 📄 **Trzy szablony** — indywidualny, drużynowy 3-osobowy, drużynowy 4-osobowy
+- 🥇 **Faza pucharowa** — detekcja faz z zakładki `Drabinka` (1/8, 1/4, półfinały, finał, mecze o miejsca) + filtr godzinowy
+- 🔗 **Kod QR** — link do arkusza wyników do skanowania telefonem z wydrukowanej karty
+- 🏆 **Logo PFM** + do **4 dodatkowych grafik** (sponsor, klub, banner)
+- 📐 **Edytor pozycji** — X/Y/szerokość/wysokość każdego elementu, z podglądem na żywo
+- 👁️ **Podgląd HTML** — schemat strony pokazuje rozłożenie elementów 1:1 z generowanym docx
+- 📑 **Filtrowanie** — pojedynczy mecz, cała grupa, dany tor, dane okno czasowe, dana faza
 
 ## Jak używać
 
 1. Wejdź na [protocol.streamlit.app](https://protocol.streamlit.app/)
-2. Wpisz nazwę i datę turnieju
-3. Wklej link do arkusza Google Sheets (musi być publiczny)
+2. Wpisz nazwę i datę turnieju, wybierz rodzaj (indywidualny / 3-os. / 4-os.)
+3. Wklej link do publicznego arkusza Google Sheets i kliknij **Wczytaj zakładki**
 4. (Opcjonalnie) Wyłącz QR/logo PFM lub dodaj własne grafiki
-5. Dostosuj pozycje grafik (lub zostaw domyślne)
-6. Kliknij **Generuj protokoły .docx** i pobierz plik
+5. Dostosuj pozycje grafik suwakami pod podglądem (lub zostaw domyślne)
+6. Wybierz fazę i zakres (np. konkretna grupa, godzina, faza pucharu)
+7. Kliknij **Generuj protokoły .docx** i pobierz plik
 
 ## Struktura arkusza Google Sheets
 
 Arkusz musi być **publiczny** ("każdy z linkiem może wyświetlać").
 
-Zakładki z meczami muszą mieć nazwy `Gr. A`, `Gr. B`, ..., do `Gr. P`.
+### Faza grupowa
+Zakładki nazwane `Gr. A`, `Gr. B`, … `Gr. Z` (akceptowane też `Gr.A`, `Grupa A`).
 
-Każda zakładka powinna zawierać kolumny:
+Każda zakładka zawiera nagłówek z kolumnami: `Tor`, `Godzina`, `Mecz #` (lub `#`/`Lp`/`Nr`), `Grupa X` (gdzie X to litera grupy — komórka zawiera nazwy zawodników 1) i 3 kolumny dalej — zawodnik 2.
 
-| # | Godzina | Tor | Grupa X | 1.set | 2.set | _Z2_ | 1.set | 2.set |
-|---|---------|-----|---------|-------|-------|------|-------|-------|
-| 1 | 09:30   | 7   | Jan Kowalski | | | Anna Nowak | | |
+### Faza pucharowa (drabinka)
+Zakładka nazwana `Drabinka` (akceptowane też `drabinka`, `DRABINKA`). W arkuszu wystarczy oznaczyć nagłówki faz tekstem typu `1/8 (10:00)`, `1/4`, `Półfinał`, `Finał`, `Mecz o 3 miejsce` — kod automatycznie:
+- Wykryje wszystkie obecne fazy
+- Pogrupuje je po godzinie (jeśli podana w nawiasie)
+- Zliczy mecze schodząc w dół kolumny od nagłówka
 
-Kolumna z nazwą "Grupa X" zawiera nazwiska zawodnika 1, a kolumna 3 pozycje dalej (po `1.set` i `2.set`) zawiera zawodnika 2.
+## Szablony
 
-## Stan rozwoju
-
-**Obecnie zaimplementowane:**
-- ✅ Turniej indywidualny, faza grupowa (2 sety)
-
-**Planowane (UI już dostępny):**
-- 🔜 Turnieje drużynowe (2-, 3-, 4-osobowe)
-- 🔜 Faza pucharowa: best of 3, best of 5
-- 🔜 Drag & drop pozycjonowania grafik z uchwytami zmiany rozmiaru
+| Rodzaj turnieju | Szablon docx | Faza grupowa | Faza pucharowa |
+|---|---|---|---|
+| Indywidualny | `Grupa_IND.docx` | ✅ | ✅ (Bo3 / Bo5) |
+| Drużynowy 3-os. | `Grupa_TROJKA.docx` | ✅ | ✅ (Bo3 / Bo5) |
+| Drużynowy 4-os. | `Grupa_CZWORKA.docx` | ✅ | 🔜 |
 
 ## Uruchomienie lokalne
 
@@ -59,26 +59,47 @@ streamlit run app.py
 
 Wymagania:
 - Python 3.9+
-- Pliki w katalogu: `Grupa_IND.docx` (szablon protokołu), `assets_pfm_logo.png` (logo federacji)
+- Szablony w katalogu: `Grupa_IND.docx`, `Grupa_TROJKA.docx`, `Grupa_CZWORKA.docx`, `TROJKA_Bo3.docx`, `TROJKA_Bo5.docx`
+- Logo PFM: `assets_pfm_logo.png`
+
+## Branche i workflow
+
+- `main` — produkcja (deployowane na `protocol.streamlit.app`)
+- `develop` — integracja, tu lądują nowe zmiany do testów
+- `claude/*` — efemeryczne branche z sesji Claude Code (po review mergowane do `develop`)
+
+**Przepływ zmiany dev → prod:**
+
+```bash
+git checkout main
+git pull origin main
+git merge develop
+git push origin main
+```
+
+Lub przez PR na GitHubie: `develop → main`, review, merge. Po pushu na `main`: Streamlit Cloud sam odświeży aplikację (zwykle 1-2 min). W razie potrzeby: **Manage app → Reboot app**.
 
 ## Deploy na Streamlit Cloud
 
-1. Fork lub push na GitHub (np. `polska-federacja-molkky/protocol`)
-2. Wejdź na [share.streamlit.io](https://share.streamlit.io)
-3. Połącz repozytorium → wskaż `app.py` jako główny plik → **Deploy**
-
-Po zmianach w repozytorium: **Manage app → Reboot app** żeby wyczyścić cache.
+1. Połącz repozytorium z [share.streamlit.io](https://share.streamlit.io)
+2. Wskaż `app.py` jako entry point
+3. Branch: `main` (produkcja) lub `develop` (preview)
+4. **Deploy**
 
 ## Struktura projektu
 
 ```
 protocol/
-├── app.py                  # Streamlit UI
-├── generate_docx.py        # Logika generowania docx
-├── Grupa_IND.docx          # Szablon protokołu (1 mecz)
+├── app.py                  # Streamlit UI + podgląd HTML
+├── generate_docx.py        # Generowanie docx, pobieranie z Google Sheets, detekcja drabinki
+├── Grupa_IND.docx          # Szablon indywidualny
+├── Grupa_TROJKA.docx       # Szablon 3-osobowy
+├── Grupa_CZWORKA.docx      # Szablon 4-osobowy
+├── TROJKA_Bo3.docx         # Pucharowa Bo3 (3-os.)
+├── TROJKA_Bo5.docx         # Pucharowa Bo5 (3-os.)
 ├── assets_pfm_logo.png     # Logo Polskiej Federacji Mölkky
 ├── requirements.txt        # Zależności Python
-├── .streamlit/config.toml  # Konfiguracja motywu Streamlit
+├── .streamlit/config.toml  # Motyw Streamlit
 └── README.md
 ```
 
