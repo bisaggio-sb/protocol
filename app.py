@@ -1646,21 +1646,21 @@ with st.expander("➕ Pobierz pusty formularz"):
     with cols_blank[0]:
         blank_type = st.selectbox(
             "Typ protokołu",
-            ["Indywidualny", "Drużynowy 3-os.", "Drużynowy 4-os."],
+            ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
             index=0, key="blank_type",
-            help="Określa szablon docx (IND_Grupa.docx / TROJKA_Grupa.docx itd.)."
+            help="Określa szablon docx (IND_Grupa.docx / DWOJKA_Grupa.docx / TROJKA_Grupa.docx / CZWORKA_*.docx)."
         )
     with cols_blank[1]:
-        if blank_type == "Drużynowy 4-os.":
-            # Czwórka — tylko grupowa (brak szablonu Bo3/Bo5)
+        if blank_type == "Drużynowy 2-os.":
+            # Dwójka — tylko grupowa (kopia szablonu TROJKA, brak pucharowych)
             blank_format = st.selectbox(
                 "Format setów",
                 ["2 sety (grupowa)"],
                 index=0, key="blank_format",
-                help="Drużynowy 4-os. — dostępna tylko faza grupowa."
+                help="Drużynowy 2-os. — na razie tylko faza grupowa."
             )
         else:
-            # Indywidualny i 3-os. mają pełen zestaw faz
+            # IND, 3-os, 4-os mają pełen zestaw faz
             blank_format = st.selectbox(
                 "Format setów",
                 ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)"],
@@ -2165,7 +2165,7 @@ if rozp_clicked:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
         else:
-            st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {generate_docx.pluralize(len(schedules), 'zawodnika', 'zawodników', 'zawodników')}")
+            st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {plural}")
             st.download_button(
                 f"⬇️ Pobierz {safe_name}.pdf",
                 data=pdf_bytes, file_name=f"{safe_name}.pdf",
@@ -2173,7 +2173,7 @@ if rozp_clicked:
             )
     else:
         progress_box.empty()
-        st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {generate_docx.pluralize(len(schedules), 'zawodnika', 'zawodników', 'zawodników')}")
+        st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {plural}")
         st.download_button(
             f"⬇️ Pobierz {safe_name}.docx",
             data=docx_bytes, file_name=f"{safe_name}.docx",
@@ -2186,7 +2186,9 @@ if blank_clicked:
         st.error("Wybierz co najmniej jeden format pliku."); st.stop()
     with st.spinner("Generuję pusty formularz..."):
         # Mapowanie blank_type + blank_format → template_type
-        if blank_type == "Drużynowy 3-os.":
+        if blank_type == "Drużynowy 2-os.":
+            blank_template = 'DWOJKA'
+        elif blank_type == "Drużynowy 3-os.":
             if "Best of 3" in blank_format:
                 blank_template = 'TROJKA_Bo3'
             elif "Best of 5" in blank_format:
@@ -2194,7 +2196,12 @@ if blank_clicked:
             else:
                 blank_template = 'TROJKA'
         elif blank_type == "Drużynowy 4-os.":
-            blank_template = 'CZWORKA'
+            if "Best of 3" in blank_format:
+                blank_template = 'CZWORKA_Bo3'
+            elif "Best of 5" in blank_format:
+                blank_template = 'CZWORKA_Bo5'
+            else:
+                blank_template = 'CZWORKA'
         else:  # Indywidualny
             if "Best of 3" in blank_format:
                 blank_template = 'IND_Bo3'

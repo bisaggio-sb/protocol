@@ -123,9 +123,9 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
 
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
-| Indywidualny | ✅ | ✅ |
-| Drużynowy 2-os. | 🔴 | 🔴 |
-| Drużynowy 3-os. | ✅ | ✅ |
+| Indywidualny | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
+| Drużynowy 2-os. | 🟡 (klon TROJKA, tylko blank) | 🔴 |
+| Drużynowy 3-os. | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
 | Drużynowy 4-os. | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
 
 **Rozwiązany problem „linie" (str.2 — wyrównanie tabeli wyników):** tabela `(SET 4)/(SET 5)`
@@ -149,18 +149,34 @@ podajemy ręcznie). Render→PDF: `soffice --headless -env:UserInstallation=file
 w wierszu tabeli (PIL).
 
 ### Co teraz (current focus)
-- CZWORKA Bo3/Bo5: nagłówek („Tor" / „Godzina" / „Mecz #" / instrukcje) wymuszony
-  na Calibri — Tor jednolinijny, instrukcje nie obcięte (poprzednio Aptos Narrow
-  fallback w LO rozszerzał font i powodował wrap/obcięcie).
-- Następne: weryfikacja IND Bo3 i CZWORKA grupowa na realnym arkuszu.
+- Wszystkie 3 typy (IND, TROJKA, CZWORKA) × wszystkie 3 fazy (Grupa, Bo3, Bo5)
+  zweryfikowane wizualnie u usera. Blank-formularze dostępne dla wszystkich 9.
+- DWOJKA_Grupa: klon TROJKA_Grupa.docx jako bazowy szablon. Wystarcza dla
+  blank-formularzy; pełna obsługa real-data (parsing 2-os. składów) — backlog.
 
 ### Backlog (kolejność = priorytet)
 - [x] IND_Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data (xlsx GP2 2026) ✅
 - [x] CZWORKA Bo3/Bo5 — wzorzec templates, poprawny Tor, formatowanie nagłówka ✅
-- [ ] Zweryfikować szablon pucharowy IND **Bo3** — 🟡 → ✅
-- [ ] Drużynowy 2-os.: brak szablonów (grupowa + pucharowa) — 🔴
+- [x] IND_Bo3 + CZWORKA Grupa zweryfikowane wizualnie ✅
+- [x] DWOJKA_Grupa blank — klon TROJKA, dostępny w UI „Pusty formularz" ✅
+- [ ] DWOJKA — real-data fill (parsing 2-osobowych składów drużyn)
+- [ ] DWOJKA Bo3/Bo5 — szablony pucharowe
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-29 — Iteracja statusu + nowości:
+  (a) Wszystkie IND/TROJKA/CZWORKA fazy oznaczone ✅ w tabeli (i README).
+  (b) Pusty formularz: dodane CZWORKA Bo3, CZWORKA Bo5, DWOJKA Grupa do
+  selectbox „Format setów" w sekcji „Pobierz pusty formularz". Mapping
+  blank_type → blank_template rozszerzony.
+  (c) DWOJKA_Grupa.docx: klon TROJKA_Grupa.docx (binary copy) zarejestrowany
+  w `template_files`. Działa dla blank-formularzy; dla real-data fill TROJKA
+  fill code rysuje 3 sloty graczy — adaptacja na 2 graczy = backlog.
+  (d) Rozpiski: auto-shrink mniej agresywny (75 dxa/char zamiast 110).
+  „Warsaw Adventure Team" (21 znaków, bold) mieści się przy default sz=8
+  bez skalowania; tylko naprawdę długie nazwy (>26 znaków) skalują się.
+  (e) Komunikaty „rozpiski dla N zawodników" → „N drużyn" gdy turniej
+  drużynowy (poprawione 2 zapomniane miejsca w app.py — sukces po
+  generacji DOCX i PDF).
 - 2026-05-29 — Trzy fixy z jednej iteracji usera:
   (1) Rozpiski: auto-shrink czcionki w kolumnach drużyna/gracz 1/2 gdy
   tekst się nie mieści w komórce. Heurystyka 110 dxa/char przy sz=16 bold;

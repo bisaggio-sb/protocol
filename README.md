@@ -47,9 +47,9 @@ Legenda: ✅ w pełni zweryfikowane · 🟡 zaimplementowane, w trakcie weryfika
 | Rodzaj turnieju | Faza grupowa | Faza pucharowa (Bo3 / Bo5) | Szablony docx |
 |---|---|---|---|
 | Indywidualny | ✅ | ✅ (Bo3 / Bo5) | `IND_Grupa`, `IND_Bo3`, `IND_Bo5` |
-| Drużynowy 2-os. | 🔴 | 🔴 | — |
+| Drużynowy 2-os. | 🟡 (tylko blank) | 🔴 | `DWOJKA_Grupa` (klon TROJKA) |
 | Drużynowy 3-os. | ✅ | ✅ (Bo3 / Bo5) | `TROJKA_Grupa`, `TROJKA_Bo3`, `TROJKA_Bo5` |
-| Drużynowy 4-os. | ✅ | 🟡 (Bo3 / Bo5) | `CZWORKA_Grupa`, `CZWORKA_Bo3`, `CZWORKA_Bo5` |
+| Drużynowy 4-os. | ✅ | ✅ (Bo3 / Bo5) | `CZWORKA_Grupa`, `CZWORKA_Bo3`, `CZWORKA_Bo5` |
 
 - **Wszystkie typy (poza 2-os.)** obsługują wszystkie fazy: grupowa, drabinka główna (1/64…finał), drabinka B (mecze o miejsca).
 - **4-os. grupowa** ma poziomy strip z QR + logami pod tabelą.

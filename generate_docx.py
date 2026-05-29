@@ -534,12 +534,14 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
                     cell_bold = True
             # Auto-shrink dla długich nazw w kol. gracz/drużyna 1/2 — kiedy bold
             # robi że "Stowarzyszenie Aktywny Orlik" rozjeżdża się na 2 wiersze.
-            # Heurystyka: ~110 dxa/char przy sz=16 bold (zachowawczo, by uniknąć
-            # wrapów). Min sz=12 (6pt) — niżej nieczytelne.
+            # Heurystyka ~75 dxa/char przy sz=16 bold (Calibri/Carlito) — tylko
+            # gdy NAPRAWDĘ się nie mieści. Wcześniejsze 110 przesadnie zmniejszało
+            # nawet "Warsaw Adventure Team" (21 znaków) który spokojnie mieści się
+            # w 1 linii bez skalowania.
             cell_sz_pt = 7 if header else 8
             if not header and i >= 2 and val:
                 usable_dxa = w - 100  # cell width minus tcMar L+R
-                est_dxa = len(val) * 110
+                est_dxa = len(val) * 75
                 if est_dxa > usable_dxa:
                     shrunk_half_pt = max(12, int(16 * usable_dxa / est_dxa))
                     cell_sz_pt = shrunk_half_pt / 2.0
@@ -2042,6 +2044,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'IND': 'IND_Grupa.docx',
         'IND_Bo3': 'IND_Bo3.docx',          # pucharowa indywidualna Best of 3
         'IND_Bo5': 'IND_Bo5.docx',          # pucharowa indywidualna Best of 5
+        'DWOJKA': 'DWOJKA_Grupa.docx',      # 2-osobowa drużyna grupowa (klon TROJKA)
         'TROJKA': 'TROJKA_Grupa.docx',
         'TROJKA_Bo3': 'TROJKA_Bo3.docx',
         'TROJKA_Bo5': 'TROJKA_Bo5.docx',
