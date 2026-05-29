@@ -163,6 +163,15 @@ w wierszu tabeli (PIL).
 - [ ] DWOJKA Bo3/Bo5 — szablony pucharowe
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-29 — Drobne fixy UI: (a) `is_ok_pre` w app.py uwzględnia teraz
+  CZWORKA (drabinka i Drabinka B labelki dostają ✅ zamiast 🟡 dla 4-os.).
+  (b) `fetch_all_player_schedules`: gdy gid_map padnie, fallback A..Z
+  zatrzymuje się po 2 z rzędu pustych zakładkach (jeśli już coś znaleziono),
+  zamiast brnąć przez całe A-Z. (c) Komunikat progresu rozpisek: gdy
+  total jest nieznany (no-gid fallback), nie pokazujemy „/N" — tylko
+  „Pobieram zakładki Gr. * — Gr. A…". Progress bar w tym trybie skaluje się
+  do heurystycznych 8 grup. (d) DWOJKA — user przygotuje szablon
+  samodzielnie; backlog usunięty.
 - 2026-05-29 — Iteracja statusu + nowości:
   (a) Wszystkie IND/TROJKA/CZWORKA fazy oznaczone ✅ w tabeli (i README).
   (b) Pusty formularz: dodane CZWORKA Bo3, CZWORKA Bo5, DWOJKA Grupa do

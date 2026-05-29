@@ -339,7 +339,7 @@ with col_form:
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
     is_czworka_pre = tournament_type == "Drużynowy 4-os."
     is_individual_pre = tournament_type == "Indywidualny"
-    is_ok_pre = is_trojka_pre or is_individual_pre   # zweryfikowane typy
+    is_ok_pre = is_trojka_pre or is_individual_pre or is_czworka_pre   # zweryfikowane typy
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
     st.header("2. Link do arkusza Google Sheets")
@@ -582,12 +582,13 @@ with col_form:
                 "Drabinka B": "✅ Drabinka B (mecze o miejsca)",
             }
         else:
-            # Indywidualny: zweryfikowane ✅. Czwórka: Bo3/Bo5 jeszcze 🟡.
-            _ok = is_individual_pre
+            # IND / CZWORKA: wszystkie fazy zweryfikowane. DWOJKA: 🟡 (blank only).
+            _grp = "🟡" if not is_ok_pre else "✅"
+            _puch = "🟡" if not is_ok_pre else "✅"
             drabinka_options_full = {
-                "Grupowa":    "✅ Faza grupowa",
-                "Główna":     ("✅" if _ok else "🟡") + " Drabinka główna (Bo3/Bo5)",
-                "Drabinka B": ("✅" if _ok else "🟡") + " Drabinka B (Bo3/Bo5)",
+                "Grupowa":    f"{_grp} Faza grupowa",
+                "Główna":     f"{_puch} Drabinka główna (Bo3/Bo5)",
+                "Drabinka B": f"{_puch} Drabinka B (Bo3/Bo5)",
             }
         # Filtruj na podstawie detected + time_filter
         if detected is not None:
@@ -2121,8 +2122,14 @@ if rozp_clicked:
     prog_bar = st.progress(0.0)
     def _on_rozp(done, total, label):
         try:
-            prog_bar.progress(min(1.0, done / max(1, total)))
-            progress_box.info(f"Pobieram zakładki Gr. * — {label} ({done}/{total})")
+            if total > 0:
+                prog_bar.progress(min(1.0, done / total))
+                progress_box.info(f"Pobieram zakładki Gr. * — {label} ({done}/{total})")
+            else:
+                # total nieznany (gid_map padło) — bez „/N" w komunikacie,
+                # progress oscyluje (heurystyka: skala 1/8 jako „typowy" turniej).
+                prog_bar.progress(min(1.0, done / 8.0))
+                progress_box.info(f"Pobieram zakładki Gr. * — {label}…")
         except Exception:
             pass
     try:

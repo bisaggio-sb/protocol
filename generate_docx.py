@@ -268,25 +268,44 @@ def matches_to_player_schedules(matches, group_letter):
 def fetch_all_player_schedules(sheet_id, progress_cb=None):
     """Pobiera rozpiski z wszystkich zakładek Gr. * w arkuszu (przez gviz).
     Reuse parse_group_rows + matches_to_player_schedules.
-    progress_cb(done, total, label): postęp dla UI."""
+    progress_cb(done, total, label): postęp dla UI.
+    Gdy gid_map dostępna — iterujemy tylko po istniejących zakładkach.
+    Gdy nie — probujemy A..Z ale zatrzymujemy się po 2 z rzędu pustych,
+    żeby nie pokazywać A..Z gdy turniej ma np. tylko grupy A-D."""
     gid_map = get_sheet_gids(sheet_id)
     if gid_map:
         candidates = [f"Gr. {L}" for L in string.ascii_uppercase if f"Gr. {L}" in gid_map]
+        # Z gid_map znamy realną liczbę grup → progres pełny.
+        total_for_ui = max(1, len(candidates))
     else:
         candidates = [f"Gr. {L}" for L in string.ascii_uppercase]
+        # Bez gid_map total jest nieznany — sygnalizujemy 0 by UI ukrył „/N".
+        total_for_ui = 0
     all_schedules = []
-    total = max(1, len(candidates))
+    consecutive_empty = 0
     for i, name in enumerate(candidates):
         if progress_cb:
-            try: progress_cb(i + 1, total, name)
+            try: progress_cb(i + 1, total_for_ui, name)
             except Exception: pass
         try:
             rows = fetch_sheet(sheet_id, name, gid_map=gid_map)
         except Exception:
             rows = None
-        if not rows: continue
+        if not rows:
+            # Bez gid_map nie wiemy ile jest grup — early stop po 2 z rzędu.
+            if not gid_map:
+                consecutive_empty += 1
+                if consecutive_empty >= 2 and all_schedules:
+                    break
+            continue
         matches = parse_group_rows(rows)
-        if not matches: continue
+        if not matches:
+            if not gid_map:
+                consecutive_empty += 1
+                if consecutive_empty >= 2 and all_schedules:
+                    break
+            continue
+        consecutive_empty = 0
         # grupa: bierzemy z pierwszego meczu (parse_group_rows wypełnia z headera 'Grupa X')
         letter = matches[0].get('grupa') or name.rsplit(' ', 1)[-1]
         all_schedules.extend(matches_to_player_schedules(matches, letter))
