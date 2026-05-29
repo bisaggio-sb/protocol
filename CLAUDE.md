@@ -161,6 +161,23 @@ w wierszu tabeli (PIL).
 - [ ] Drużynowy 2-os.: brak szablonów (grupowa + pucharowa) — 🔴
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-29 — Trzy fixy z jednej iteracji usera:
+  (1) Rozpiski: auto-shrink czcionki w kolumnach drużyna/gracz 1/2 gdy
+  tekst się nie mieści w komórce. Heurystyka 110 dxa/char przy sz=16 bold;
+  skalujemy proporcjonalnie do min 6pt. Przykład: „Stowarzyszenie Aktywny
+  Orlik" (28 znaków) przy bold rozjeżdżało się na 2 linie — teraz mieści się
+  w 1 linii pomniejszone. `_new_para` przyjmuje float size_pt (round do
+  half-pt) bo wcześniej psuł sz=14.0 jako string.
+  (2) CZWORKA Bo5: usunięcie cienkiej poziomej linii pod instrukcjami
+  („Set przegrany... 0:50."). Row 1 c0 instrukcji ma vMerge=restart
+  bottom=nil, ale row 2 c0 (vMerge cont.) dziedziczył tblBorders
+  top=single — LO rysował linię. Fix: dla wszystkich komórek z `<w:vMerge/>`
+  w tabelach headerowych wymuś top=nil + bottom=nil.
+  (3) CZWORKA Bo5: pominięcie `_fix_pkt_set_cells` dla CZWORKA_Bo5 —
+  poprzednio nasz custom rebuild Pkt SET (sz=20) był nadpisywany przez
+  `_fix_pkt_set_cells` (sz=16 dla cw<800), przez co Pkt SET 1-5 robiły się
+  mniejsze niż Wygr.sety / Podpis (sz=20). Po skipie wszystkie 7 komórek
+  nagłówka (Pkt SET 1-5 + Wygr + Podpis) renderują się tym samym sz=20.
 - 2026-05-29 — Rozpiski meczowe rozszerzone na turnieje drużynowe
   (3-os i 4-os). UI expander pokazuje się też dla drużynowych; label
   „zawodników"/„drużyn" dobierany dynamicznie. `build_player_schedules_doc`
