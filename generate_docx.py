@@ -321,8 +321,9 @@ def _new_para(text='', *, bold=False, italic=False, size_pt=None, align=None,
         if color:
             c = etree.SubElement(rPr, wt('color')); c.set(wt('val'), color)
         if size_pt:
-            sz = etree.SubElement(rPr, wt('sz')); sz.set(wt('val'), str(size_pt * 2))
-            szCs = etree.SubElement(rPr, wt('szCs')); szCs.set(wt('val'), str(size_pt * 2))
+            sz_val = str(int(round(size_pt * 2)))
+            sz = etree.SubElement(rPr, wt('sz')); sz.set(wt('val'), sz_val)
+            szCs = etree.SubElement(rPr, wt('szCs')); szCs.set(wt('val'), sz_val)
         t = etree.SubElement(r, wt('t'))
         t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
         t.text = text
@@ -531,9 +532,20 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
                 cell_italic = False
                 if own_name and i >= 2 and val == own_name:
                     cell_bold = True
+            # Auto-shrink dla długich nazw w kol. gracz/drużyna 1/2 — kiedy bold
+            # robi że "Stowarzyszenie Aktywny Orlik" rozjeżdża się na 2 wiersze.
+            # Heurystyka: ~110 dxa/char przy sz=16 bold (zachowawczo, by uniknąć
+            # wrapów). Min sz=12 (6pt) — niżej nieczytelne.
+            cell_sz_pt = 7 if header else 8
+            if not header and i >= 2 and val:
+                usable_dxa = w - 100  # cell width minus tcMar L+R
+                est_dxa = len(val) * 110
+                if est_dxa > usable_dxa:
+                    shrunk_half_pt = max(12, int(16 * usable_dxa / est_dxa))
+                    cell_sz_pt = shrunk_half_pt / 2.0
             cell.append(_new_para(val, bold=(header or cell_bold),
                                   italic=cell_italic,
-                                  size_pt=7 if header else 8,
+                                  size_pt=cell_sz_pt,
                                   align=align, after_pt=0))
         return tr
 
@@ -2654,6 +2666,26 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                     fonts.set(f'{{{W}}}{a}', 'Calibri')
 
+            # Usuń poziomą linię między row 1 a row 2 w komórce instrukcji
+            # (vMerge). Row 1 c0 (restart) ma bottom=nil, ale row 2 c0 (cont.)
+            # dziedziczy tblBorders top=single → LO rysuje cienką linię
+            # pod tekstem instrukcji ("Set przegrany... wynik 0:50.").
+            # Fix: wymuś top=nil i bottom=nil na komórkach vMerge w tej kolumnie.
+            for tr in htbl.findall(wt('tr')):
+                for tc in tr.findall(wt('tc')):
+                    vm = tc.find(f'{wt("tcPr")}/{wt("vMerge")}')
+                    if vm is None:
+                        continue
+                    tcPr = tc.find(wt('tcPr'))
+                    bdr = tcPr.find(wt('tcBorders'))
+                    if bdr is None:
+                        bdr = etree.SubElement(tcPr, wt('tcBorders'))
+                    for side in ('top', 'bottom'):
+                        b = bdr.find(wt(side))
+                        if b is None:
+                            b = etree.SubElement(bdr, wt(side))
+                        b.set(f'{{{W}}}val', 'nil')
+
         # Bo5: komórki "Pkt SET N" w nagłówku są wąskie (720-745 dxa) i 1-liniowy
         # "Pkt. SET 1" nie mieści się — różnie wrapuje (c7 ma '. ', c8-c11 ma '.' +
         # ' SET '), więc renderują się niespójnie. Plus poprzednio nuclear block
@@ -3006,7 +3038,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # etykietach tabel wynikowych (IMIONA/SUMA/WYNIK krzywe przez Aptos Narrow).
     if template_type in ('IND_Bo3', 'IND_Bo5', 'TROJKA_Bo3', 'TROJKA_Bo5',
                          'CZWORKA_Bo3', 'CZWORKA_Bo5'):
-        _fix_pkt_set_cells(body)
+        # CZWORKA_Bo5: pomijamy _fix_pkt_set_cells — komórki Pkt SET są już
+        # zbudowane wcześniej w bloku CZWORKA z sz=20 (zgodnie z Wygr/Podpis).
+        # Inaczej fix_pkt_set_cells zobaczyłby <w:br/> i przebudował ponownie
+        # z narrow='16' (cw<800), przez co Pkt SET znów byłyby mniejsze.
+        if template_type != 'CZWORKA_Bo5':
+            _fix_pkt_set_cells(body)
         _force_calibri_score_labels(body)
 
     # ── IND_Bo5: wyrównaj tabelę wyników str.2 ((SET 4)/(SET 5)) do lewej, do tego
