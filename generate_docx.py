@@ -2624,15 +2624,24 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                             fonts.set(f'{{{W}}}{a}', 'Calibri')
 
-        # Pierwsza tabela (header: Tor/Godzina/Mecz# + instrukcje + nazwy drużyn):
+        # Tabele headerowe (Tor/Godzina/Mecz# + instrukcje + nazwy drużyn):
         # wymuś Calibri na WSZYSTKICH runach. Bez Aptos/Aptos Narrow LO bierze szeroki
         # fallback, przez co (a) "Tor" w wąskiej kol. 536 dxa zawija na 2 linie, (b) text
         # instrukcji (jc=right, sz=20) przelewa się poza komórkę i jest obcinany z lewej.
         # Calibri (Carlito) mieści się — Tor jednolinijny, instrukcje nie obcięte.
+        # Bo5 ma 2 takie tabele (header str.1 + header str.2 — tbl[0] i tbl[2]),
+        # Bo3 tylko 1 (tbl[0]). Wykrywamy po obecności "Tor" w pierwszym wierszu.
         tbls = list(body.findall(wt('tbl')))
-        if tbls:
-            first_tbl = tbls[0]
-            for run in first_tbl.iter(wt('r')):
+        header_tbls = []
+        for tbl in tbls:
+            first_row = tbl.find(wt('tr'))
+            if first_row is None:
+                continue
+            row_text = ''.join((t.text or '') for t in first_row.iter(wt('t')))
+            if 'Tor' in row_text and ('Mecz' in row_text or 'Godzina' in row_text):
+                header_tbls.append(tbl)
+        for htbl in header_tbls:
+            for run in htbl.iter(wt('r')):
                 rPr = run.find(wt('rPr'))
                 if rPr is None:
                     rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
@@ -2641,6 +2650,67 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     fonts = etree.SubElement(rPr, wt('rFonts'))
                 for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                     fonts.set(f'{{{W}}}{a}', 'Calibri')
+
+        # Bo5: komórki "Pkt SET N" w nagłówku są wąskie (720-745 dxa) i 1-liniowy
+        # "Pkt. SET 1" nie mieści się — różnie wrapuje (c7 ma '. ', c8-c11 ma '.' +
+        # ' SET '), więc renderują się niespójnie. Plus poprzednio nuclear block
+        # wymuszał sz=16, a Wygr.sety/Podpis zostawały sz=20 → wizualna niespójność.
+        # Fix: rebuild WSZYSTKICH komórek "Pkt SET N" w wąskich (cw<900) do 2 linii
+        # "Pkt" + "SET N" przy sz=20 (zgodnie z Wygr/Podpis).
+        if template_type == 'CZWORKA_Bo5':
+            import re as _re
+            XMLSPACE = '{http://www.w3.org/XML/1998/namespace}space'
+            for htbl in header_tbls:
+                for tc in htbl.iter(wt('tc')):
+                    full = ''.join((t.text or '') for t in tc.iter(wt('t')))
+                    m = _re.search(r'(Punkty|Pkt)\.?\s*SET\s*(\d)', full.replace('\n', ''))
+                    if not m:
+                        continue
+                    tcW = tc.find(f'{wt("tcPr")}/{wt("tcW")}')
+                    cw = int(tcW.get(f'{{{W}}}w', '990')) if tcW is not None else 990
+                    if cw >= 900:
+                        continue
+                    prefix, setnum = m.group(1), m.group(2)
+                    ps = tc.findall(wt('p'))
+                    if not ps:
+                        continue
+                    p = ps[0]
+                    for extra in ps[1:]:
+                        tc.remove(extra)
+                    for r in p.findall(wt('r')):
+                        p.remove(r)
+                    pPr = p.find(wt('pPr'))
+                    if pPr is None:
+                        pPr = etree.Element(wt('pPr')); p.insert(0, pPr)
+                    jc = pPr.find(wt('jc'))
+                    if jc is None:
+                        jc = etree.SubElement(pPr, wt('jc'))
+                    jc.set(f'{{{W}}}val', 'center')
+
+                    def _mkrun(txt, with_break):
+                        r = etree.SubElement(p, wt('r'))
+                        rPr = etree.SubElement(r, wt('rPr'))
+                        fonts = etree.SubElement(rPr, wt('rFonts'))
+                        for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                            fonts.set(f'{{{W}}}{a}', 'Calibri')
+                        for tag in ('b', 'bCs'):
+                            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '1')
+                        for tag in ('sz', 'szCs'):
+                            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '20')
+                        if with_break:
+                            etree.SubElement(r, wt('br'))
+                        t = etree.SubElement(r, wt('t'))
+                        t.text = txt
+                        t.set(XMLSPACE, 'preserve')
+
+                    _mkrun(f'{prefix}.', False)
+                    _mkrun(f'SET {setnum}', True)
+                    tcPr = tc.find(wt('tcPr'))
+                    if tcPr is not None:
+                        vA = tcPr.find(wt('vAlign'))
+                        if vA is None:
+                            vA = etree.SubElement(tcPr, wt('vAlign'))
+                        vA.set(f'{{{W}}}val', 'center')
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)

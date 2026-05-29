@@ -126,7 +126,7 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
 | Indywidualny | ✅ | ✅ |
 | Drużynowy 2-os. | 🔴 | 🔴 |
 | Drużynowy 3-os. | ✅ | ✅ |
-| Drużynowy 4-os. | ✅ | ✅ |
+| Drużynowy 4-os. | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
 
 **Rozwiązany problem „linie" (str.2 — wyrównanie tabeli wyników):** tabela `(SET 4)/(SET 5)`
 na str.2 renderowała się (a) wyśrodkowana (lewa x≈197 zamiast 110) ORAZ (b) za wąska
@@ -161,6 +161,17 @@ w wierszu tabeli (PIL).
 - [ ] Drużynowy 2-os.: brak szablonów (grupowa + pucharowa) — 🔴
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-29 — CZWORKA Bo5: dwa fixy nagłówka. (1) Calibri-force rozszerzony
+  z tylko `tbls[0]` na WSZYSTKIE tabele headerowe (heurystyka: 'Tor' + 'Mecz'
+  /'Godzina' w pierwszym wierszu). Bo5 ma 2 takie tabele (str.1 + str.2) —
+  bez tego na str.2 Tor/Godzina/Mecz# znów wrapowały w Aptos-fallback.
+  (2) Komórki Pkt SET 1-5 w Bo5 są wąskie (720-745 dxa), 1-liniowy
+  „Pkt. SET N" nie mieści się — c7 ('Pkt'+'. '+'SET 1') i c8-c11
+  ('Pkt'+'.'+' SET '+'N') wrapowały NIESPÓJNIE (różny układ runów ⇒ różne
+  miejsca łamania). Plus nuclear block forsował sz=16, a Wygr.sety/Podpis
+  zostawały sz=20 ⇒ wizualnie różnej wielkości. Fix: dla CZWORKA_Bo5
+  rebuilduję komórki w nagłówku (cw<900) do CZYSTYCH 2 linii „Pkt." +
+  „SET N" przy sz=20 — zgodnie z Wygr.sety/Podpis.
 - 2026-05-29 — Rozpiski zawodników: zagęszczone do 10 kart/stronę (2×5
   zamiast 2×4). Header tabeli „godzina"→„godz." (mieści się w 1 linii
   w wąskiej kol.), nazwisko 14pt→12pt, subtitle 8pt→7pt, body 10/9pt→8/7pt,
