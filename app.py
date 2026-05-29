@@ -1686,14 +1686,19 @@ with st.expander("➕ Pobierz pusty formularz"):
 # z arkusza.
 rozp_clicked = False
 rozp_fmt = 'PDF'
-if is_individual:
-    with st.expander("🃏 Rozpiski meczowe dla zawodników (do druku i rozdania)"):
+rozp_is_team = not is_individual
+rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
+rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'
+rozp_side = 'drużyna' if rozp_is_team else 'gracz'
+if is_individual or is_trojka or is_czworka:
+    with st.expander(f"🃏 Rozpiski meczowe dla {rozp_entity} (do druku i rozdania)"):
         st.caption(
-            "Generuje **karty A4 z rozpiskami meczowymi** każdego zawodnika "
-            "(godzina · tor · gracz 1 · gracz 2). 2 kolumny kart na stronę — "
-            "do wycięcia i rozdania zawodnikom przed turniejem. Dane czytane "
-            "z normalnych zakładek `Gr. *` (te same kolumny co przy generowaniu "
-            "protokołów). **Tylko dla turniejów indywidualnych.**"
+            f"Generuje **karty A4 z rozpiskami meczowymi** każdej "
+            f"{'drużyny' if rozp_is_team else 'osoby'} "
+            f"(godzina · tor · {rozp_side} 1 · {rozp_side} 2). 2 kolumny kart na stronę — "
+            f"do wycięcia i rozdania {rozp_entity_dla} przed turniejem. Dane czytane "
+            f"z normalnych zakładek `Gr. *` (te same kolumny co przy generowaniu "
+            f"protokołów)."
         )
         cols_rozp = st.columns([1, 1])
         with cols_rozp[0]:
@@ -1701,7 +1706,7 @@ if is_individual:
                                 key="rozp_fmt",
                                 help="PDF do druku, DOCX do dalszej edycji.")
         with cols_rozp[1]:
-            rozp_clicked = st.button("🃏 Generuj rozpiski zawodników",
+            rozp_clicked = st.button(f"🃏 Generuj rozpiski {rozp_entity}",
                                      use_container_width=True, key="rozp_btn",
                                      type="secondary")
 
@@ -2127,14 +2132,19 @@ if rozp_clicked:
         st.error(f"Błąd pobierania arkusza: {e}"); st.stop()
     prog_bar.empty()
     if not schedules:
-        progress_box.error("Nie znaleziono żadnych zawodników. Sprawdź czy arkusz jest publiczny i ma zakładki `Gr. A`/`Gr. B`/…")
+        progress_box.error(f"Nie znaleziono żadnych {rozp_entity}. Sprawdź czy arkusz jest publiczny i ma zakładki `Gr. A`/`Gr. B`/…")
         st.stop()
-    progress_box.info(f"Buduję rozpiski dla {len(schedules)} {generate_docx.pluralize(len(schedules), 'zawodnika', 'zawodników', 'zawodników')}…")
+    if rozp_is_team:
+        plural = generate_docx.pluralize(len(schedules), 'drużyny', 'drużyn', 'drużyn')
+    else:
+        plural = generate_docx.pluralize(len(schedules), 'zawodnika', 'zawodników', 'zawodników')
+    progress_box.info(f"Buduję rozpiski dla {len(schedules)} {plural}…")
     try:
         docx_bytes = generate_docx.build_player_schedules_doc(
             schedules,
             tournament_name=tournament_name.strip() or None,
             tournament_date=tournament_date.strip() or None,
+            is_team=rozp_is_team,
         )
     except Exception as e:
         progress_box.error(f"Błąd budowania rozpisek: {e}"); st.stop()
