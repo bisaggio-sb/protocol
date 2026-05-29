@@ -362,7 +362,8 @@ def _set_cell_margins(tc, top=80, left=120, bottom=80, right=120):
 
 def build_player_schedules_doc(schedules, *, tournament_name=None,
                                 tournament_date=None,
-                                cols=2, rows_per_page=5):
+                                cols=2, rows_per_page=5,
+                                is_team=False):
     """Buduje docx z gridem kart zawodników (do druku + wycinania).
     schedules: lista z parse_player_schedules / fetch_all_player_schedules.
     Returns: bytes (docx).
@@ -445,7 +446,8 @@ def build_player_schedules_doc(schedules, *, tournament_name=None,
             tcW.set(wt('w'), str(card_w_dxa)); tcW.set(wt('type'), 'dxa')
             if idx < len(schedules):
                 _fill_player_card_tc(tc, schedules[idx], tournament_name,
-                                     tournament_date, card_w_dxa)
+                                     tournament_date, card_w_dxa,
+                                     is_team=is_team)
             else:
                 # Pusta komórka — ramka kropkowana (linia cięcia placeholder)
                 _set_cell_borders(tc, all_val='dashed', sz='4', color='AAAAAA')
@@ -460,7 +462,7 @@ def _save_doc_to_bytes(doc):
     return buf.getvalue()
 
 
-def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dxa):
+def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dxa, *, is_team=False):
     """Wypełnia istniejący <w:tc> zawartością karty zawodnika.
     Layout: header (imię) → subtitle (Grupa/turniej/data) → tabela 4 kolumny
     (godzina | tor | gracz 1 | gracz 2). Własne nazwisko w wierszach pogrubione
@@ -535,7 +537,8 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
                                   align=align, after_pt=0))
         return tr
 
-    _add_row('godz.', 'tor', 'gracz 1', 'gracz 2', header=True)
+    side_label = 'drużyna' if is_team else 'gracz'
+    _add_row('godz.', 'tor', f'{side_label} 1', f'{side_label} 2', header=True)
     for idx, m in enumerate(player['matches']):
         _add_row(m.get('godzina', '') or '—',
                  (m.get('tor') or '—'),

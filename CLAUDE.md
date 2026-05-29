@@ -161,6 +161,13 @@ w wierszu tabeli (PIL).
 - [ ] Drużynowy 2-os.: brak szablonów (grupowa + pucharowa) — 🔴
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-29 — Rozpiski meczowe rozszerzone na turnieje drużynowe
+  (3-os i 4-os). UI expander pokazuje się też dla drużynowych; label
+  „zawodników"/„drużyn" dobierany dynamicznie. `build_player_schedules_doc`
+  ma nowy flag `is_team` — header tabeli „gracz 1/2" → „drużyna 1/2".
+  Pogrubienie nazwy własnej drużyny w wierszach działa tak samo jak dla
+  zawodników (matches_to_player_schedules nie zmienia logiki — bierze
+  z1/z2 jak są).
 - 2026-05-29 — CZWORKA Bo5: dwa fixy nagłówka. (1) Calibri-force rozszerzony
   z tylko `tbls[0]` na WSZYSTKIE tabele headerowe (heurystyka: 'Tor' + 'Mecz'
   /'Godzina' w pierwszym wierszu). Bo5 ma 2 takie tabele (str.1 + str.2) —
