@@ -1,0 +1,10 @@
+[theme]
+primaryColor = "#E8511A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F5"
+textColor = "#1A1A1A"
+font = "sans serif"
+
+[server]
+# Logo upload max 5 MB — wystarcza na PNG/JPG, eliminuje sensowny abuse 200MB.
+maxUploadSize = 5
