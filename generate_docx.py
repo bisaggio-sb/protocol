@@ -171,8 +171,12 @@ def parse_group_rows(rows):
         if _gm:
             godz = _gm.group(1)
         if not _is_valid_match_row(tor,godz,z1,z2): continue
+        mecz_raw = g(col_mecz)
+        # Mecz # bywa float ("1.0") gdy arkusz formatuje kolumnę jako liczbę.
+        if re.match(r'^\d+\.0+$', mecz_raw):
+            mecz_raw = mecz_raw.split('.')[0]
         matches.append({'tor':tor,'godz':godz,'grupa':grupa,
-                        'mecz':g(col_mecz),'z1':z1,'z2':z2})
+                        'mecz':mecz_raw,'z1':z1,'z2':z2})
     return matches
 
 def fetch_all_group_sheets(sheet_id, progress_cb=None):
@@ -2082,18 +2086,18 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         sheets_data = filtered
 
     template_files = {
-        'IND': 'IND_Grupa.docx',
-        'IND_Bo3': 'IND_Bo3.docx',          # pucharowa indywidualna Best of 3
-        'IND_Bo5': 'IND_Bo5.docx',          # pucharowa indywidualna Best of 5
-        'DWOJKA': 'DWOJKA_Grupa.docx',      # 2-osobowa drużyna grupowa (klon TROJKA)
-        'TROJKA': 'TROJKA_Grupa.docx',
-        'TROJKA_Bo3': 'TROJKA_Bo3.docx',
-        'TROJKA_Bo5': 'TROJKA_Bo5.docx',
-        'CZWORKA': 'CZWORKA_Grupa.docx',    # 4-osobowa drużyna grupowa
-        'CZWORKA_Bo3': 'CZWORKA_Bo3.docx',  # 4-osobowa pucharowa Best of 3
-        'CZWORKA_Bo5': 'CZWORKA_Bo5.docx',  # 4-osobowa pucharowa Best of 5
+        'IND': 'IND Grupa.docx',
+        'IND_Bo3': 'IND Bo3.docx',           # pucharowa indywidualna Best of 3
+        'IND_Bo5': 'IND Bo5.docx',           # pucharowa indywidualna Best of 5
+        'DWOJKA': 'DWÓJKA Grupa.docx',       # 2-osobowa drużyna grupowa (klon TRÓJKA)
+        'TROJKA': 'TRÓJKA Grupa.docx',
+        'TROJKA_Bo3': 'TRÓJKA Bo3.docx',
+        'TROJKA_Bo5': 'TRÓJKA Bo5.docx',
+        'CZWORKA': 'CZWÓRKA Grupa.docx',     # 4-osobowa drużyna grupowa
+        'CZWORKA_Bo3': 'CZWÓRKA Bo3.docx',   # 4-osobowa pucharowa Best of 3
+        'CZWORKA_Bo5': 'CZWÓRKA Bo5.docx',   # 4-osobowa pucharowa Best of 5
     }
-    tpl_filename = template_files.get(template_type, 'IND_Grupa.docx')
+    tpl_filename = template_files.get(template_type, 'IND Grupa.docx')
     tpl_path = os.path.join(os.path.dirname(__file__), tpl_filename)
     with open(tpl_path, 'rb') as f:
         tpl_bytes = f.read()
@@ -2152,7 +2156,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
-    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5'):
+    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA'):
         # Bo2 i Bo3/Bo5 mają wspólny zestaw etykiet, ale Bo3/Bo5 NIE potrzebują
         # normalizacji fontu dla 'SET 1/2/3/4/5' / '(SET N)' bo w nowym szablonie
         # te etykiety są inaczej zbudowane (różne run-e) i normalizacja powoduje
@@ -3409,7 +3413,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Trójka: kolumna 4.76 cm. IND: kolumna 5.24 cm. Kompensacja
                 # cellMargin (-0.185 cm) ze strony app.py oznacza że dopuszczalny
                 # zakres X to ok. -0.2…(col_width - w).
-                col_width_cm = (4.76 if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5')
+                col_width_cm = (4.76 if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA')
                                 else 18.46 if template_type == 'CZWORKA'
                                 else anchor_col_cm)
                 # Effective right edge (z kompensacją cellMargin po lewej)

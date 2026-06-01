@@ -119,14 +119,22 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
 > z `README.md`.
 
 ### Status szablonów
-✅ zweryfikowane · 🟡 w trakcie weryfikacji · 🔴 niedostępne
+Konwencja ikon (zmiana 2026-05-30): zielonych ✅ NIE używamy — działające
+typy są BEZ ikony. 🟡 = budujemy/testujemy. 🔴 = niedostępne (wkrótce).
 
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
-| Indywidualny | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
-| Drużynowy 2-os. | 🟡 (klon TROJKA, tylko blank) | 🔴 |
-| Drużynowy 3-os. | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
-| Drużynowy 4-os. | ✅ | ✅ (Bo3 ✅, Bo5 ✅) |
+| Indywidualny | działa | działa (Bo3, Bo5; w tym 1/32 i 1/64) |
+| Drużynowy 2-os. | 🟡 w testach | 🔴 wkrótce |
+| Drużynowy 3-os. | działa | działa (Bo3, Bo5) |
+| Drużynowy 4-os. | działa | działa (Bo3, Bo5) |
+
+**Nazewnictwo plików** (zgodne z PFM SharePoint, od 2026-05-30): `IND Grupa.docx`,
+`IND Bo3.docx`, `IND Bo5.docx`, `DWÓJKA Grupa.docx`, `TRÓJKA Grupa.docx`,
+`TRÓJKA Bo3.docx`, `TRÓJKA Bo5.docx`, `CZWÓRKA Grupa.docx`, `CZWÓRKA Bo3.docx`,
+`CZWÓRKA Bo5.docx`. Kod używa stałych `IND` / `IND_Bo3` / `DWOJKA` / `TROJKA*`
+/ `CZWORKA*` w identyfikatorach Python, ale mapuje je na nowe nazwy plików
+przez dict `template_files`.
 
 **Rozwiązany problem „linie" (str.2 — wyrównanie tabeli wyników):** tabela `(SET 4)/(SET 5)`
 na str.2 renderowała się (a) wyśrodkowana (lewa x≈197 zamiast 110) ORAZ (b) za wąska
@@ -149,20 +157,42 @@ podajemy ręcznie). Render→PDF: `soffice --headless -env:UserInstallation=file
 w wierszu tabeli (PIL).
 
 ### Co teraz (current focus)
-- Wszystkie 3 typy (IND, TROJKA, CZWORKA) × wszystkie 3 fazy (Grupa, Bo3, Bo5)
-  zweryfikowane wizualnie u usera. Blank-formularze dostępne dla wszystkich 9.
-- DWOJKA_Grupa: klon TROJKA_Grupa.docx jako bazowy szablon. Wystarcza dla
-  blank-formularzy; pełna obsługa real-data (parsing 2-os. składów) — backlog.
+- DWÓJKA Grupa: real-data fill DZIAŁA na xlsx TMP 2026 (Gr. A-E, 5 grup, po
+  15-21 meczów). Reuse build_document path TROJKA (template = identyczny klon
+  TRÓJKA Grupa.docx, struktura komórek z1/z2 ta sama). Status = 🟡 (testujemy
+  szczegóły wizualne, nie ma realnego użycia produkcyjnego).
+- DWÓJKA puchar (Bo3/Bo5): jeszcze nie. Planowane: gdy faza grupowa zostanie
+  zatwierdzona przez usera, dorobimy szablony + drabinka 1/16 / 1/32.
 
 ### Backlog (kolejność = priorytet)
-- [x] IND_Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data (xlsx GP2 2026) ✅
-- [x] CZWORKA Bo3/Bo5 — wzorzec templates, poprawny Tor, formatowanie nagłówka ✅
-- [x] IND_Bo3 + CZWORKA Grupa zweryfikowane wizualnie ✅
-- [x] DWOJKA_Grupa blank — klon TROJKA, dostępny w UI „Pusty formularz" ✅
-- [ ] DWOJKA — real-data fill (parsing 2-osobowych składów drużyn)
-- [ ] DWOJKA Bo3/Bo5 — szablony pucharowe
+- [x] IND Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data
+- [x] CZWÓRKA Bo3/Bo5 — szablony, Tor, formatowanie nagłówka
+- [x] IND Bo3 + CZWÓRKA Grupa zweryfikowane wizualnie
+- [x] DWÓJKA Grupa real-data fill (TMP 2026 xlsx) — 🟡 testy wizualne u usera
+- [x] Renaming plików docx na konwencję PFM SharePoint („IND Grupa.docx" itp.)
+- [ ] DWÓJKA Bo3/Bo5 — szablony pucharowe (1/16, 1/32)
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-30 — Iteracja użytkownika TMP 2026: (a) **DWÓJKA Grupa real-data
+  fill** działa na xlsx TMP 2026. Istniejący `parse_group_rows` już radzi
+  sobie z layoutem 2-os. (każdy mecz = 1 wiersz: tor/godz/z1/score/z2/score)
+  — nazwa drużyny w kolumnie z1/z2, brak listy graczy w arkuszu. Build
+  ścieżka: DWOJKA dodany do branchy `if template_type in ('TROJKA', …)`
+  bo template = identyczny klon TRÓJKA Grupa.docx (font normalizacja,
+  skalowanie tabel — wszystko TROJKA). (b) **Bug fix `Mecz # = "1.0"`**:
+  arkusz formatuje kolumnę # jako liczbę → gviz/openpyxl daje "1.0". Dodany
+  cleanup `r'^\d+\.0+$'` przed wstawieniem do match dict (analogicznie do
+  tor). (c) **Rename plików docx** zgodnie z konwencją PFM SharePoint:
+  spacje zamiast podkreślników, polskie znaki w nazwach typów drużynowych
+  („CZWÓRKA Bo3.docx", „TRÓJKA Grupa.docx", „DWÓJKA Grupa.docx"). Stałe
+  Python (IND, TROJKA, DWOJKA…) zostały bez zmian — tylko mapping w
+  `template_files` zaktualizowany. (d) **Wywalenie zielonych ✅ ikon**
+  z UI: rodzaj turnieju, drabinka, faza, format — wszystkie selectboxy
+  pokazują działające opcje BEZ ikony, 🟡 dla testowanych (DWÓJKA Grupa),
+  🔴 dla niedostępnych (DWÓJKA puchar). `st.success(…)` z ✅ zostają bo to
+  potwierdzenia akcji, nie etykiety statusu. (e) Weryfikacja IND 1/32 i 1/64
+  — działają (regex `1/(\d+)` matchuje, parser zwraca poprawne mecze; xlsx
+  FMC 2026 ma 24 mecze w 1/32 = 32 par minus 8 bye, czyli OK).
 - 2026-05-30 — KRYTYCZNY fix: faza rozbita na KILKA bloków nagłówkowych.
   Bug FMC 2026: „MIEJSCA 5-8" (drabinka o miejsca, 4 zawodników = 2 półfinały)
   była zapisana jako DWA osobne bloki „MIEJSCA 5-8 (16:45)" w tej samej kolumnie
