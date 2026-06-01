@@ -42,14 +42,14 @@ Zakładka nazwana `Drabinka` (akceptowane też `drabinka`, `DRABINKA`). W arkusz
 
 ## Szablony i status
 
-Legenda: ✅ w pełni zweryfikowane · 🟡 zaimplementowane, w trakcie weryfikacji · 🔴 niedostępne
+Legenda: bez ikony = działa · 🟡 w testach · 🔴 niedostępne
 
 | Rodzaj turnieju | Faza grupowa | Faza pucharowa (Bo3 / Bo5) | Szablony docx |
 |---|---|---|---|
-| Indywidualny | ✅ | ✅ (Bo3 / Bo5) | `IND_Grupa`, `IND_Bo3`, `IND_Bo5` |
-| Drużynowy 2-os. | 🟡 (tylko blank) | 🔴 | `DWOJKA_Grupa` (klon TROJKA) |
-| Drużynowy 3-os. | ✅ | ✅ (Bo3 / Bo5) | `TROJKA_Grupa`, `TROJKA_Bo3`, `TROJKA_Bo5` |
-| Drużynowy 4-os. | ✅ | ✅ (Bo3 / Bo5) | `CZWORKA_Grupa`, `CZWORKA_Bo3`, `CZWORKA_Bo5` |
+| Indywidualny | działa | działa (Bo3 / Bo5) | `IND Grupa`, `IND Bo3`, `IND Bo5` |
+| Drużynowy 2-os. | 🟡 w testach | 🔴 wkrótce | `DWÓJKA Grupa` |
+| Drużynowy 3-os. | działa | działa (Bo3 / Bo5) | `TRÓJKA Grupa`, `TRÓJKA Bo3`, `TRÓJKA Bo5` |
+| Drużynowy 4-os. | działa | działa (Bo3 / Bo5) | `CZWÓRKA Grupa`, `CZWÓRKA Bo3`, `CZWÓRKA Bo5` |
 
 - **Wszystkie typy (poza 2-os.)** obsługują wszystkie fazy: grupowa, drabinka główna (1/64…finał), drabinka B (mecze o miejsca).
 - **4-os. grupowa** ma poziomy strip z QR + logami pod tabelą.
@@ -65,7 +65,7 @@ streamlit run app.py
 
 Wymagania:
 - Python 3.9+
-- Szablony w katalogu: `IND_Grupa.docx`, `IND_Bo3.docx`, `IND_Bo5.docx`, `TROJKA_Grupa.docx`, `TROJKA_Bo3.docx`, `TROJKA_Bo5.docx`, `CZWORKA_Grupa.docx`, `CZWORKA_Bo3.docx`, `CZWORKA_Bo5.docx`
+- Szablony w katalogu: `IND Grupa.docx`, `IND Bo3.docx`, `IND Bo5.docx`, `DWÓJKA Grupa.docx`, `TRÓJKA Grupa.docx`, `TRÓJKA Bo3.docx`, `TRÓJKA Bo5.docx`, `CZWÓRKA Grupa.docx`, `CZWÓRKA Bo3.docx`, `CZWÓRKA Bo5.docx`
 - Logo PFM: `assets_pfm_logo.png`
 
 ## Branche i workflow
@@ -98,15 +98,16 @@ Lub przez PR na GitHubie: `develop → main`, review, merge. Po pushu na `main`:
 protocol/
 ├── app.py                  # Streamlit UI + podgląd HTML
 ├── generate_docx.py        # Generowanie docx, pobieranie z Google Sheets, detekcja drabinki
-├── IND_Grupa.docx          # Szablon indywidualny (grupowa)
-├── IND_Bo3.docx            # Indywidualny pucharowa Best of 3
-├── IND_Bo5.docx            # Indywidualny pucharowa Best of 5
-├── TROJKA_Grupa.docx       # Szablon 3-osobowy (grupowa)
-├── TROJKA_Bo3.docx         # 3-os. pucharowa Best of 3
-├── TROJKA_Bo5.docx         # 3-os. pucharowa Best of 5
-├── CZWORKA_Grupa.docx      # Szablon 4-osobowy (grupowa)
-├── CZWORKA_Bo3.docx        # 4-os. pucharowa Best of 3
-├── CZWORKA_Bo5.docx        # 4-os. pucharowa Best of 5
+├── IND Grupa.docx          # Szablon indywidualny (grupowa)
+├── IND Bo3.docx            # Indywidualny pucharowa Best of 3
+├── IND Bo5.docx            # Indywidualny pucharowa Best of 5
+├── DWÓJKA Grupa.docx       # Szablon 2-osobowy (grupowa) — w testach
+├── TRÓJKA Grupa.docx       # Szablon 3-osobowy (grupowa)
+├── TRÓJKA Bo3.docx         # 3-os. pucharowa Best of 3
+├── TRÓJKA Bo5.docx         # 3-os. pucharowa Best of 5
+├── CZWÓRKA Grupa.docx      # Szablon 4-osobowy (grupowa)
+├── CZWÓRKA Bo3.docx        # 4-os. pucharowa Best of 3
+├── CZWÓRKA Bo5.docx        # 4-os. pucharowa Best of 5
 ├── assets_pfm_logo.png     # Logo Polskiej Federacji Mölkky
 ├── requirements.txt        # Zależności Python
 ├── .streamlit/config.toml  # Motyw Streamlit

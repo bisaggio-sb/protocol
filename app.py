@@ -323,17 +323,17 @@ with col_form:
     tournament_date = tournament_date_d.strftime("%d.%m.%Y") if tournament_date_d else ""
     with cols_t1[2]:
         rodzaj_options = {
-            "Indywidualny":     "✅ Indywidualny",
-            "Drużynowy 2-os.":  "🔴 Drużynowy 2-os. (wkrótce)",
-            "Drużynowy 3-os.":  "✅ Drużynowy 3-os.",
-            "Drużynowy 4-os.":  "✅ Drużynowy 4-os.",
+            "Indywidualny":     "Indywidualny",
+            "Drużynowy 2-os.":  "🟡 Drużynowy 2-os. (w testach)",
+            "Drużynowy 3-os.":  "Drużynowy 3-os.",
+            "Drużynowy 4-os.":  "Drużynowy 4-os.",
         }
         tournament_type = st.selectbox(
             "Rodzaj",
             list(rodzaj_options.keys()),
             format_func=lambda k: rodzaj_options[k],
             index=0,
-            help="✅ = w pełni zweryfikowane, 🟡 = zaimplementowane lecz niezweryfikowane, 🔴 = w trakcie przygotowywania"
+            help="bez ikony = w pełni działa, 🟡 = w testach, 🔴 = niedostępne"
         )
     
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
@@ -575,20 +575,20 @@ with col_form:
     
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
-        if is_trojka_pre:
+        is_dwojka_pre = tournament_type == "Drużynowy 2-os."
+        if is_dwojka_pre:
+            # DWÓJKA: Grupa = 🟡 (testujemy), Bo3/Bo5 = 🔴 (jeszcze nie ma).
             drabinka_options_full = {
-                "Grupowa":    "✅ Faza grupowa",
-                "Główna":     "✅ Drabinka główna",
-                "Drabinka B": "✅ Drabinka B (mecze o miejsca)",
+                "Grupowa":    "🟡 Faza grupowa",
+                "Główna":     "🔴 Drabinka główna (wkrótce)",
+                "Drabinka B": "🔴 Drabinka B (wkrótce)",
             }
         else:
-            # IND / CZWORKA: wszystkie fazy zweryfikowane. DWOJKA: 🟡 (blank only).
-            _grp = "🟡" if not is_ok_pre else "✅"
-            _puch = "🟡" if not is_ok_pre else "✅"
+            # IND / TROJKA / CZWORKA — wszystkie fazy zweryfikowane, bez ikon.
             drabinka_options_full = {
-                "Grupowa":    f"{_grp} Faza grupowa",
-                "Główna":     f"{_puch} Drabinka główna (Bo3/Bo5)",
-                "Drabinka B": f"{_puch} Drabinka B (Bo3/Bo5)",
+                "Grupowa":    "Faza grupowa",
+                "Główna":     "Drabinka główna",
+                "Drabinka B": "Drabinka B (mecze o miejsca)",
             }
         # Filtruj na podstawie detected + time_filter
         if detected is not None:
@@ -640,7 +640,6 @@ with col_form:
         elif drabinka == "Grupowa":
             tournament_phase = "Grupowa"
             st.selectbox("Faza", ["Faza grupowa"],
-                         format_func=lambda k: f"✅ {k}",
                          index=0, disabled=True,
                          help="Wybrano fazę grupową — nie ma podfaz.")
         elif drabinka == "Główna":
@@ -663,30 +662,35 @@ with col_form:
                         if n == '2':   label = "1/2 finału (Półfinał)"
                         elif n == '4': label = "1/4 finału (Ćwierćfinał)"
                         else:          label = f"1/{n} finału"
-                    badge = ("🔴" if (pkey == '1/16' and is_trojka_pre)
-                             else ("✅" if is_ok_pre else "🟡"))
+                    # Badge: 🔴 dla niedostępnych, '' dla działających.
+                    badge = ''
+                    if pkey == '1/16' and is_trojka_pre:
+                        badge = '🔴 '
+                    elif is_dwojka_pre:
+                        badge = '🔴 '
                     n_m = entry['n_matches']
                     t = entry['time']
                     suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
                     if t: suffix += f"  ·  {t}"
-                    faza_options[ui_key] = f"{badge} {label}{suffix}"
+                    faza_options[ui_key] = f"{badge}{label}{suffix}"
             elif is_trojka_pre:
                 faza_options = {
-                    "Pucharowa 1/8":  "✅ 1/8 finału",
-                    "Pucharowa 1/4":  "✅ 1/4 finału (Ćwierćfinał)",
-                    "Pucharowa 1/2":  "✅ 1/2 finału (Półfinał)",
-                    "Finał":          "✅ Finał",
+                    "Pucharowa 1/8":  "1/8 finału",
+                    "Pucharowa 1/4":  "1/4 finału (Ćwierćfinał)",
+                    "Pucharowa 1/2":  "1/2 finału (Półfinał)",
+                    "Finał":          "Finał",
                 }
             else:
-                _b = "✅" if is_ok_pre else "🟡"
+                # DWÓJKA — puchar jeszcze niedostępny (🔴); IND/CZWÓRKA — bez ikony.
+                _b = "🔴 " if is_dwojka_pre else ""
                 faza_options = {
-                    "Pucharowa 1/64": f"{_b} 1/64 finału",
-                    "Pucharowa 1/32": f"{_b} 1/32 finału",
-                    "Pucharowa 1/16": f"{_b} 1/16 finału",
-                    "Pucharowa 1/8":  f"{_b} 1/8 finału",
-                    "Pucharowa 1/4":  f"{_b} 1/4 finału (Ćwierćfinał)",
-                    "Pucharowa 1/2":  f"{_b} 1/2 finału (Półfinał)",
-                    "Finał":          f"{_b} Finał",
+                    "Pucharowa 1/64": f"{_b}1/64 finału",
+                    "Pucharowa 1/32": f"{_b}1/32 finału",
+                    "Pucharowa 1/16": f"{_b}1/16 finału",
+                    "Pucharowa 1/8":  f"{_b}1/8 finału",
+                    "Pucharowa 1/4":  f"{_b}1/4 finału (Ćwierćfinał)",
+                    "Pucharowa 1/2":  f"{_b}1/2 finału (Półfinał)",
+                    "Finał":          f"{_b}Finał",
                 }
             if faza_options:
                 tournament_phase = st.selectbox(
@@ -724,25 +728,25 @@ with col_form:
                         if not m: continue
                         n = m.group(1)
                         ui_key = f"Mecz o {n}. miejsce"
-                    badge = "✅" if is_ok_pre else "🟡"
+                    badge = "🔴 " if is_dwojka_pre else ""
                     n_m = entry['n_matches']
                     t = entry['time']
                     suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
                     if t: suffix += f"  ·  {t}"
-                    faza_options[ui_key] = f"{badge} {ui_key}{suffix}"
+                    faza_options[ui_key] = f"{badge}{ui_key}{suffix}"
             else:
                 # Fallback bez cache — pełna lista
                 miejsca_ranges = [(5,8),(9,12),(9,16),(13,16),(17,20),(17,24),
                                   (17,32),(21,24),(25,28),(25,32),(29,32)]
                 miejsca_sorted_pairs = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
                 mecze_o_n = list(range(3, 32, 2))
-                badge_def = "✅" if is_ok_pre else "🟡"
+                badge_def = "🔴 " if is_dwojka_pre else ""
                 for a, b in miejsca_sorted_pairs:
                     k = f"Miejsca {a}-{b}"
-                    faza_options[k] = f"{badge_def} {k}"
+                    faza_options[k] = f"{badge_def}{k}"
                 for n in mecze_o_n:
                     k = f"Mecz o {n}. miejsce"
-                    faza_options[k] = f"{badge_def} {k}"
+                    faza_options[k] = f"{badge_def}{k}"
             
             if faza_options:
                 tournament_phase = st.selectbox(
@@ -761,22 +765,19 @@ with col_form:
         # Główna / Odpadów (pucharowe) → tylko Bo3 / Bo5 (2 sety NIE jest opcją)
         if drabinka == "Grupowa":
             sets_format = st.selectbox("Format", ["2 sety"],
-                format_func=lambda k: f"✅ {k}",
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            is_trojka_now = tournament_type == "Drużynowy 3-os."
-            is_ind_now = tournament_type == "Indywidualny"
-            if is_trojka_now or is_ind_now:
+            is_dwojka_now = tournament_type == "Drużynowy 2-os."
+            if is_dwojka_now:
                 bo_options = {
-                    "Best of 3": "✅ Best of 3",
-                    "Best of 5": "✅ Best of 5",
+                    "Best of 3": "🔴 Best of 3 (wkrótce)",
+                    "Best of 5": "🔴 Best of 5 (wkrótce)",
                 }
             else:
-                # CZWORKA: Bo3/Bo5 jeszcze polerujemy
                 bo_options = {
-                    "Best of 3": "🟡 Best of 3 (WIP)",
-                    "Best of 5": "🟡 Best of 5 (WIP)",
+                    "Best of 3": "Best of 3",
+                    "Best of 5": "Best of 5",
                 }
             # Default: Bo3 dla 1/8, Bo5 dla 1/4 i wyżej (zgodnie z FAQ)
             default_idx = 0
@@ -1649,7 +1650,7 @@ with st.expander("➕ Pobierz pusty formularz"):
             "Typ protokołu",
             ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
             index=0, key="blank_type",
-            help="Określa szablon docx (IND_Grupa.docx / DWOJKA_Grupa.docx / TROJKA_Grupa.docx / CZWORKA_*.docx)."
+            help="Określa szablon docx (IND Grupa.docx / DWÓJKA Grupa.docx / TRÓJKA Grupa.docx / CZWÓRKA *.docx)."
         )
     with cols_blank[1]:
         if blank_type == "Drużynowy 2-os.":
