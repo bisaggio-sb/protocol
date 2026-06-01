@@ -173,6 +173,14 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo3/Bo5 — szablony pucharowe (1/16, 1/32)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 (fix) — **DWÓJKA Grupa.docx: 2 fixy wizualne w szablonie.**
+  (1) „Wyniki turnieju" miało font `Aptos Narrow` → LO bez Aptos brał serif
+  fallback. Podmieniony run na `Calibri` (Carlito w prod). (2) Ostatnia
+  kolumna `SUMA` (tbl[1] r2 c13) miała tylko `right` border sz=12; trzy
+  pozostałe SUMA (c4/c7/c10) mają top+bottom borders. Dodane top sz=12 +
+  bottom sz=4 do c13 — pogrubione obramowanie spójne z resztą. Patch
+  binarny `word/document.xml` (regex + str.replace, dokładnie 1 trafienie
+  per fix).
 - 2026-06-01 (fix) — **KRYTYCZNY: DWÓJKA ładowała szablon IND.** Oba bloki
   wyboru `template_type` w app.py (grupowy ~1811, pucharowy/uniwersalny ~2058)
   NIE miały gałęzi DWÓJKI — `else` spychał 2-os. na `'IND'` (przy fazie
