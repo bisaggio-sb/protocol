@@ -2088,19 +2088,21 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             filtered.append((gname, kept, phase_override) if phase_override is not None else (gname, kept))
         sheets_data = filtered
 
+    # Nazwy plików: konwencja PFM SharePoint z UNDERSCOREM (IND_Grupa.docx itp.)
     template_files = {
-        'IND': 'IND Grupa.docx',
-        'IND_Bo3': 'IND Bo3.docx',           # pucharowa indywidualna Best of 3
-        'IND_Bo5': 'IND Bo5.docx',           # pucharowa indywidualna Best of 5
-        'DWOJKA': 'DWÓJKA Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
-        'TROJKA': 'TRÓJKA Grupa.docx',
-        'TROJKA_Bo3': 'TRÓJKA Bo3.docx',
-        'TROJKA_Bo5': 'TRÓJKA Bo5.docx',
-        'CZWORKA': 'CZWÓRKA Grupa.docx',     # 4-osobowa drużyna grupowa
-        'CZWORKA_Bo3': 'CZWÓRKA Bo3.docx',   # 4-osobowa pucharowa Best of 3
-        'CZWORKA_Bo5': 'CZWÓRKA Bo5.docx',   # 4-osobowa pucharowa Best of 5
+        'IND': 'IND_Grupa.docx',
+        'IND_Bo3': 'IND_Bo3.docx',           # pucharowa indywidualna Best of 3
+        'IND_Bo5': 'IND_Bo5.docx',           # pucharowa indywidualna Best of 5
+        'DWOJKA': 'DWÓJKA_Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
+        'DWOJKA_Bo3': 'DWÓJKA_Bo3.docx',     # 2-osobowa pucharowa Best of 3
+        'TROJKA': 'TRÓJKA_Grupa.docx',
+        'TROJKA_Bo3': 'TRÓJKA_Bo3.docx',
+        'TROJKA_Bo5': 'TRÓJKA_Bo5.docx',
+        'CZWORKA': 'CZWÓRKA_Grupa.docx',     # 4-osobowa drużyna grupowa
+        'CZWORKA_Bo3': 'CZWÓRKA_Bo3.docx',   # 4-osobowa pucharowa Best of 3
+        'CZWORKA_Bo5': 'CZWÓRKA_Bo5.docx',   # 4-osobowa pucharowa Best of 5
     }
-    tpl_filename = template_files.get(template_type, 'IND Grupa.docx')
+    tpl_filename = template_files.get(template_type, 'IND_Grupa.docx')
     tpl_path = os.path.join(os.path.dirname(__file__), tpl_filename)
     with open(tpl_path, 'rb') as f:
         tpl_bytes = f.read()
@@ -2159,7 +2161,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
-    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA'):
+    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA', 'DWOJKA_Bo3'):
         # Bo2 i Bo3/Bo5 mają wspólny zestaw etykiet, ale Bo3/Bo5 NIE potrzebują
         # normalizacji fontu dla 'SET 1/2/3/4/5' / '(SET N)' bo w nowym szablonie
         # te etykiety są inaczej zbudowane (różne run-e) i normalizacja powoduje
@@ -2240,7 +2242,29 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         tbls = body.findall(wt('tbl'))
         if len(tbls) >= 2:
             t1, t2 = tbls[0], tbls[1]
-            
+
+            # ── Wymiary DYNAMICZNE dla wariantów grupowych (TROJKA/DWOJKA) ──
+            # Szablony grupowe różnią się szerokościami (DWÓJKA Grupa ma inny
+            # layout niż TRÓJKA Grupa). Hardcode 9026/9251/1186 pasował tylko
+            # do TRÓJKI → DWÓJKA dostawała ZŁY ORIG_LEFT_COL_DXA, przez co
+            # warunek dopasowania komórki lewej (poniżej) nie trafiał i tcW
+            # col0 NIE było poszerzane do 2700, mimo że gridCol BYŁO. Efekt:
+            # PDF (LibreOffice czyta gridCol) OK, ale DOCX (Word czyta tcW per
+            # komórka) miał wąską kolumnę → grafiki nachodziły na tabelę.
+            # Czytamy realne wymiary z szablonu — działa dla obu.
+            if template_type in ('TROJKA', 'DWOJKA', 'DWOJKA_Bo3'):
+                g1 = t1.find(wt('tblGrid'))
+                if g1 is not None:
+                    _w1 = [int(gc.get(f'{{{W}}}w')) for gc in g1.findall(wt('gridCol')) if gc.get(f'{{{W}}}w')]
+                    if _w1:
+                        ORIG_T1_TOTAL = sum(_w1)
+                g2 = t2.find(wt('tblGrid'))
+                if g2 is not None:
+                    _w2 = [int(gc.get(f'{{{W}}}w')) for gc in g2.findall(wt('gridCol')) if gc.get(f'{{{W}}}w')]
+                    if _w2:
+                        ORIG_T2_TOTAL = sum(_w2)
+                        ORIG_LEFT_COL_DXA = _w2[0]
+
             # Tabela 1: skaluj wszystkie kolumny proporcjonalnie
             scale_t1 = TARGET_WIDTH / ORIG_T1_TOTAL
             tblPr_t1 = t1.find(wt('tblPr'))
@@ -2314,8 +2338,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # - TROJKA (Bo2): lewa kolumna powiększona do 2700 dxa (na grafiki)
             # - TROJKA_Bo3/Bo5: jednorodne skalowanie (puchar trójki nie używa
             #   grafik — col0 zostaje wąska, nie poszerzamy)
-            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
-                NEW_LEFT_COL_DXA = ORIG_LEFT_COL_DXA  # zostaje wąsko (~393 dxa)
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3'):
+                # Puchar nie używa grafik (is_no_graphics=True) — col0 zostaje
+                # wąska, cała szerokość idzie na tabelę wyników (inaczej 2-cyfrowe
+                # numery wierszy 10-18 zawijały się w za wąskiej kolumnie).
+                NEW_LEFT_COL_DXA = ORIG_LEFT_COL_DXA
             else:
                 NEW_LEFT_COL_DXA = 2700  # 4.76 cm — większy obszar na grafiki
             NEW_REST_TOTAL = TARGET_WIDTH - NEW_LEFT_COL_DXA
@@ -2358,8 +2385,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             w = tcW.get(f'{{{W}}}w')
                             if w:
                                 w_int = int(w)
-                                if i == 0 and w_int == ORIG_LEFT_COL_DXA:
+                                if i == 0 and abs(w_int - ORIG_LEFT_COL_DXA) <= 50:
                                     # To jest komórka lewa (R1.tc[0] etc) — daj nową szer.
+                                    # TOLERANCJA 50 dxa: gridCol i tcW komórek bywają
+                                    # o kilka dxa różne (DWÓJKA: grid 1191 vs tcW 1192).
+                                    # Exact == gubił DWÓJKĘ → tcW col0 nie szło na 2700
+                                    # → grafiki nachodziły na tabelę w Wordzie (PDF OK).
                                     tcW.set(f'{{{W}}}w', str(NEW_LEFT_COL_DXA))
                                 else:
                                     tcW.set(f'{{{W}}}w', str(int(w_int * scale_rest)))

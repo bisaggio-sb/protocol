@@ -324,7 +324,7 @@ with col_form:
     with cols_t1[2]:
         rodzaj_options = {
             "Indywidualny":     "Indywidualny",
-            "Drużynowy 2-os.":  "🟡 Drużynowy 2-os. (w testach)",
+            "Drużynowy 2-os.":  "Drużynowy 2-os.",
             "Drużynowy 3-os.":  "Drużynowy 3-os.",
             "Drużynowy 4-os.":  "Drużynowy 4-os.",
         }
@@ -576,20 +576,13 @@ with col_form:
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
         is_dwojka_pre = tournament_type == "Drużynowy 2-os."
-        if is_dwojka_pre:
-            # DWÓJKA: Grupa = 🟡 (testujemy), Bo3/Bo5 = 🔴 (jeszcze nie ma).
-            drabinka_options_full = {
-                "Grupowa":    "🟡 Faza grupowa",
-                "Główna":     "🔴 Drabinka główna (wkrótce)",
-                "Drabinka B": "🔴 Drabinka B (wkrótce)",
-            }
-        else:
-            # IND / TROJKA / CZWORKA — wszystkie fazy zweryfikowane, bez ikon.
-            drabinka_options_full = {
-                "Grupowa":    "Faza grupowa",
-                "Główna":     "Drabinka główna",
-                "Drabinka B": "Drabinka B (mecze o miejsca)",
-            }
+        # DWÓJKA: Grupa działa, puchar Bo3 dostępny (Bo5 blokowany na poziomie
+        # formatu setów) → drabinki bez ikon, jak pozostałe typy.
+        drabinka_options_full = {
+            "Grupowa":    "Faza grupowa",
+            "Główna":     "Drabinka główna",
+            "Drabinka B": "Drabinka B (mecze o miejsca)",
+        }
         # Filtruj na podstawie detected + time_filter
         if detected is not None:
             drabinka_options = {}
@@ -663,10 +656,9 @@ with col_form:
                         elif n == '4': label = "1/4 finału (Ćwierćfinał)"
                         else:          label = f"1/{n} finału"
                     # Badge: 🔴 dla niedostępnych, '' dla działających.
+                    # DWÓJKA puchar Bo3 jest już dostępna → bez 🔴 (Bo5 blokuje format).
                     badge = ''
                     if pkey == '1/16' and is_trojka_pre:
-                        badge = '🔴 '
-                    elif is_dwojka_pre:
                         badge = '🔴 '
                     n_m = entry['n_matches']
                     t = entry['time']
@@ -681,8 +673,8 @@ with col_form:
                     "Finał":          "Finał",
                 }
             else:
-                # DWÓJKA — puchar jeszcze niedostępny (🔴); IND/CZWÓRKA — bez ikony.
-                _b = "🔴 " if is_dwojka_pre else ""
+                # IND/CZWÓRKA/DWÓJKA — fazy bez ikony (DWÓJKA Bo3 dostępna).
+                _b = ""
                 faza_options = {
                     "Pucharowa 1/64": f"{_b}1/64 finału",
                     "Pucharowa 1/32": f"{_b}1/32 finału",
@@ -728,7 +720,7 @@ with col_form:
                         if not m: continue
                         n = m.group(1)
                         ui_key = f"Mecz o {n}. miejsce"
-                    badge = "🔴 " if is_dwojka_pre else ""
+                    badge = ""
                     n_m = entry['n_matches']
                     t = entry['time']
                     suffix = f"  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
@@ -740,7 +732,7 @@ with col_form:
                                   (17,32),(21,24),(25,28),(25,32),(29,32)]
                 miejsca_sorted_pairs = sorted(miejsca_ranges, key=lambda r: (r[0], -(r[1] - r[0])))
                 mecze_o_n = list(range(3, 32, 2))
-                badge_def = "🔴 " if is_dwojka_pre else ""
+                badge_def = ""
                 for a, b in miejsca_sorted_pairs:
                     k = f"Miejsca {a}-{b}"
                     faza_options[k] = f"{badge_def}{k}"
@@ -771,7 +763,7 @@ with col_form:
             is_dwojka_now = tournament_type == "Drużynowy 2-os."
             if is_dwojka_now:
                 bo_options = {
-                    "Best of 3": "🔴 Best of 3 (wkrótce)",
+                    "Best of 3": "Best of 3",
                     "Best of 5": "🔴 Best of 5 (wkrótce)",
                 }
             else:
@@ -799,8 +791,9 @@ with col_form:
     is_trojka = tournament_type == "Drużynowy 3-os."
     is_czworka = tournament_type == "Drużynowy 4-os."
     is_dwojka = tournament_type == "Drużynowy 2-os."
-    # Wszystkie typy (poza Drużynowy 2-os.) obsługują wszystkie fazy: grupowa + Bo3/Bo5.
-    is_supported_type = is_individual or is_trojka or is_czworka
+    # Wszystkie typy obsługują grupową; puchar: IND/TRÓJKA/CZWÓRKA Bo3+Bo5,
+    # DWÓJKA na razie tylko Bo3 (Bo5 wkrótce — patrz guard niżej).
+    is_supported_type = is_individual or is_trojka or is_czworka or is_dwojka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
     # is_drabinka_b: dowolny mecz o N miejsce LUB mini-turniej Miejsca X-Y.
@@ -849,6 +842,12 @@ with col_form:
                    "Dostępne: Indywidualny (wszystkie fazy), Drużynowy 3-os. (wszystkie fazy), "
                    "Drużynowy 4-os. (tylko grupowa).")
     
+    # DWÓJKA puchar: na razie tylko Bo3 (szablon DWÓJKA_Bo3.docx). Bo5 wkrótce.
+    if is_dwojka and is_pucharowa and sets_format == "Best of 5":
+        st.warning("⚠️ **DWÓJKA — puchar Best of 5** jest jeszcze w przygotowaniu. "
+                   "Dostępny jest już **Best of 3**. Wybierz Best of 3, aby wygenerować protokół.")
+        st.stop()
+
     if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
     # ─── 4. Domyślne elementy ───────────────────────────────────────────
@@ -969,7 +968,10 @@ with col_form:
                 elements_active.append((f'logo{i+1}', f'Grafika {i+1}'))
         
         # Pozycje (uwzględniając typ szablonu - trójka ma węższy lewy pasek)
-        _tpl_type = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
+        # DWÓJKA dzieli layout tabeli z TRÓJKĄ (lewa kolumna 2700 dxa = 4.76 cm),
+        # więc używa TEJ SAMEJ geometrii grafik — inaczej (jako IND) logo PFM
+        # nachodziło na napis „Wyniki turnieju".
+        _tpl_type = 'TROJKA' if (is_trojka or is_dwojka) else ('CZWORKA' if is_czworka else 'IND')
         default_pos = compute_default_positions([k for k, _ in elements_active],
                                                 logos_aspect=logos_aspect,
                                                 template_type=_tpl_type)
@@ -1001,13 +1003,13 @@ with col_form:
         if include_pfm_logo:
             elements_active.append(('pfm', 'Logo PFM'))
     if 'image_positions' not in dir():
-        _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
+        _tpl_type_fb = 'TROJKA' if (is_trojka or is_dwojka) else ('CZWORKA' if is_czworka else 'IND')
         image_positions = compute_default_positions(
             [k for k, _ in elements_active],
             logos_aspect=logos_aspect,
             template_type=_tpl_type_fb)
     if 'active_keys_signature' not in dir():
-        _tpl_type_fb = 'TROJKA' if is_trojka else ('CZWORKA' if is_czworka else 'IND')
+        _tpl_type_fb = 'TROJKA' if (is_trojka or is_dwojka) else ('CZWORKA' if is_czworka else 'IND')
         _sig_tpl_fb = {'CZWORKA': f'{_tpl_type_fb}|cz5', 'IND': f'{_tpl_type_fb}|v2'}.get(_tpl_type_fb, _tpl_type_fb)
         active_keys_signature = "|".join(sorted(k for k, _ in elements_active)) + f"|{_sig_tpl_fb}"
     
@@ -1651,16 +1653,16 @@ with st.expander("➕ Pobierz pusty formularz"):
             "Typ protokołu",
             ["Indywidualny", "Drużynowy 2-os.", "Drużynowy 3-os.", "Drużynowy 4-os."],
             index=0, key="blank_type",
-            help="Określa szablon docx (IND Grupa.docx / DWÓJKA Grupa.docx / TRÓJKA Grupa.docx / CZWÓRKA *.docx)."
+            help="Określa szablon docx (IND_Grupa.docx / DWÓJKA_Grupa.docx / TRÓJKA_Grupa.docx / CZWÓRKA_*.docx)."
         )
     with cols_blank[1]:
         if blank_type == "Drużynowy 2-os.":
-            # Dwójka — tylko grupowa (kopia szablonu TROJKA, brak pucharowych)
+            # Dwójka — grupowa + Bo3 (puchar). Bo5 wkrótce.
             blank_format = st.selectbox(
                 "Format setów",
-                ["2 sety (grupowa)"],
+                ["2 sety (grupowa)", "Best of 3 (puchar)"],
                 index=0, key="blank_format",
-                help="Drużynowy 2-os. — na razie tylko faza grupowa."
+                help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 (Bo5 wkrótce)."
             )
         else:
             # IND, 3-os, 4-os mają pełen zestaw faz
@@ -2053,6 +2055,8 @@ if gen_clicked:
                 template_type = 'CZWORKA_Bo3'
             elif is_czworka and is_pucharowa and sets_format == "Best of 5":
                 template_type = 'CZWORKA_Bo5'
+            elif is_dwojka and is_pucharowa and sets_format == "Best of 3":
+                template_type = 'DWOJKA_Bo3'
             elif is_czworka:
                 template_type = 'CZWORKA'
             elif is_trojka:
@@ -2200,7 +2204,7 @@ if blank_clicked:
     with st.spinner("Generuję pusty formularz..."):
         # Mapowanie blank_type + blank_format → template_type
         if blank_type == "Drużynowy 2-os.":
-            blank_template = 'DWOJKA'
+            blank_template = 'DWOJKA_Bo3' if "Best of 3" in blank_format else 'DWOJKA'
         elif blank_type == "Drużynowy 3-os.":
             if "Best of 3" in blank_format:
                 blank_template = 'TROJKA_Bo3'
@@ -2254,6 +2258,8 @@ if blank_clicked:
         'IND': 'indywidualny_2sety',
         'IND_Bo3': 'indywidualny_Bo3',
         'IND_Bo5': 'indywidualny_Bo5',
+        'DWOJKA': 'dwojka_grupowa',
+        'DWOJKA_Bo3': 'dwojka_Bo3',
         'TROJKA': 'trojka_2sety',
         'TROJKA_Bo3': 'trojka_Bo3',
         'TROJKA_Bo5': 'trojka_Bo5',
