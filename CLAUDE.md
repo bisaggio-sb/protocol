@@ -173,6 +173,20 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo3/Bo5 — szablony pucharowe (1/16, 1/32)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 (fix) — **KRYTYCZNY: DWÓJKA ładowała szablon IND.** Oba bloki
+  wyboru `template_type` w app.py (grupowy ~1811, pucharowy/uniwersalny ~2058)
+  NIE miały gałęzi DWÓJKI — `else` spychał 2-os. na `'IND'` (przy fazie
+  grupowej) → produkcja renderowała szablon indywidualny (IMIONA, 1 kolumna)
+  zamiast nowego DWÓJKA (DRUŻYNY pion, 2 kolumny/drużynę, 4 SUMA/SET).
+  Mój wcześniejszy test fałszywie „przechodził" bo wołałem `build_document`
+  z `template_type='DWOJKA'` ręcznie, omijając mapowanie z app.py. Fix:
+  dodane `elif is_dwojka: template_type = 'DWOJKA'` w OBU blokach. Generator
+  już był OK (`template_files['DWOJKA']` + branch TROJKA). Zweryfikowane
+  renderem przez ścieżkę 'DWOJKA' (DMP 2026): poprawny layout DRUŻYNY.
+- 2026-06-01 (fix) — **Rozpiski pomijają placeholder „X".** `_is_placeholder_name`
+  rozpoznaje teraz lone `X` (sentinel pustej drużyny, obok `bye`/`Gracz N`);
+  `matches_to_player_schedules` filtruje go, więc drużyna „X" nie dostaje
+  karty rozpiski. Działa też dla protokołów (skip_placeholders).
 - 2026-06-01 — (a) Podmieniony **DWÓJKA Grupa.docx** na właściwy szablon
   użytkownika (poprzedni był klonem TRÓJKA Grupa; nowy ma osobny layout
   tabeli wyników: 14 kolumn, 4 SUMA per SET, etykieta „DRUŻYNY" pionowo
