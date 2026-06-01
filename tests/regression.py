@@ -123,6 +123,61 @@ except Exception as e:
     failures.append(f'gviz drabinka symulacja: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# ── Faza rozbita na KILKA bloków nagłówkowych (split phase) ──
+# Bug produkcyjny FMC 2026: "MIEJSCA 5-8" (drabinka o miejsca, 4 zawodników,
+# 2 półfinały) była zapisana jako DWA osobne bloki "MIEJSCA 5-8 (16:45)" w tej
+# samej kolumnie, każdy z 1 meczem, oddzielone pustym wierszem. Stary parser brał
+# tylko pierwszy blok → 1 mecz zamiast 2. Test reprodukuje strukturę.
+_split_rows = [
+    ['Tor', 'MIEJSCA 5-8 (16:45)', 'Set 1', 'Set 2', 'Set 3', 'SETY'],
+    ['13',  'Marcin Czech',        '0',  '50', '50', '2'],
+    ['',    'Rafał Wesołowski',    '50', '20', '40', '1'],
+    ['',    '',                    '',   '',   '',   ''],
+    ['Tor', 'MIEJSCA 5-8 (16:45)', 'Set 1', 'Set 2', 'Set 3', 'SETY'],
+    ['14',  'Sebastian Bisaga',    '30', '34', '',   '0'],
+    ['',    'Mateusz Walasik',     '50', '50', '',   '2'],
+    ['',    '',                    '',   '',   '',   ''],
+]
+try:
+    _, _, m_split = g.parse_drabinka_rows(_split_rows, target_phase='Miejsca 5-8')
+    if len(m_split) != 2:
+        failures.append(
+            f'parse_drabinka_rows (split phase MIEJSCA 5-8): {len(m_split)} meczów, '
+            f'oczek. 2 (bug produkcyjny FMC 2026 — 2 bloki nagłówkowe tej samej fazy)')
+    else:
+        tors_split = [m['tor'] for m in m_split]
+        z1_split = [m['z1'] for m in m_split]
+        if tors_split != ['13', '14']:
+            failures.append(f'split phase: Tor={tors_split}, oczek. [13, 14]')
+        if z1_split != ['Marcin Czech', 'Sebastian Bisaga']:
+            failures.append(f'split phase: z1={z1_split}')
+except Exception as e:
+    failures.append(f'split phase drabinka: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
+# ── Dedup: przypadkowo zduplikowany nagłówek+treść (błąd arkusza) ──
+# Gdy autor arkusza przez pomyłkę skopiuje ten SAM mecz pod drugim nagłówkiem
+# tej samej fazy, nie chcemy 2 identycznych protokołów. Para zawodników w fazie
+# knockout jest unikalna → dedup po nieuporządkowanej parze.
+_dup_rows = [
+    ['Tor', 'MIEJSCA 5-8 (16:45)', 'Set 1', 'Set 2', 'SETY'],
+    ['13',  'Marcin Czech',        '0',  '50', '2'],
+    ['',    'Rafał Wesołowski',    '50', '20', '1'],
+    ['',    '',                    '',   '',   ''],
+    ['Tor', 'MIEJSCA 5-8 (16:45)', 'Set 1', 'Set 2', 'SETY'],
+    ['13',  'Marcin Czech',        '0',  '50', '2'],
+    ['',    'Rafał Wesołowski',    '50', '20', '1'],
+]
+try:
+    _, _, m_dup = g.parse_drabinka_rows(_dup_rows, target_phase='Miejsca 5-8')
+    if len(m_dup) != 1:
+        failures.append(
+            f'parse_drabinka_rows (dedup zduplikowanego meczu): {len(m_dup)} meczów, '
+            f'oczek. 1 (ta sama para Czech/Wesołowski pod 2 nagłówkami)')
+except Exception as e:
+    failures.append(f'dedup drabinka: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
 # ── Rozpiski meczowe per zawodnik (IND) ──
 # Test: parse_group_rows → matches_to_player_schedules → build_player_schedules_doc.
 # Grupa 4-osobowa → każdy ma N-1=3 mecze.
@@ -158,5 +213,5 @@ if failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + rozpiski')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + split-phase + rozpiski')
 sys.exit(0)

@@ -163,6 +163,22 @@ w wierszu tabeli (PIL).
 - [ ] DWOJKA Bo3/Bo5 — szablony pucharowe
 
 ### Log zmian (najnowsze u góry)
+- 2026-05-30 — KRYTYCZNY fix: faza rozbita na KILKA bloków nagłówkowych.
+  Bug FMC 2026: „MIEJSCA 5-8" (drabinka o miejsca, 4 zawodników = 2 półfinały)
+  była zapisana jako DWA osobne bloki „MIEJSCA 5-8 (16:45)" w tej samej kolumnie
+  (puste wiersze między nimi). Stary `parse_drabinka_rows` brał TYLKO pierwszy
+  blok (KROK 2 wybierał 1 `chosen`), czytał do nagłówka drugiego (stop-keyword)
+  → 1 mecz zamiast 2. Podobnie `detect_drabinka_phases` PASS 2 dedupował po
+  `seen_keys` → UI pokazywało „1 mecz". FIX: (1) KROK 2/3 zbiera WSZYSTKIE bloki
+  o danym phase_key (`chosen_blocks`) i skleja mecze; (2) PASS 2 sumuje n_matches
+  po kluczu zamiast dedupować markery. ROBUSTNOŚĆ (na życzenie usera — błąd
+  arkusza, ale uodparniamy): dedup par zawodników w obrębie fazy (frozenset
+  z1/z2) — przypadkowo zduplikowany nagłówek+treść daje 1 mecz, nie 2 kopie;
+  legit split (2 różne półfinały) nietknięty bo pary się różnią. Hard-cap
+  (expected = (Y-X+1)//2 dla MIEJSCA) bez zmian. Weryfikacja: xlsx FMC 2026
+  — MIEJSCA 5-8 = 2 mecze (Czech/Wesołowski tor13, Bisaga/Walasik tor14),
+  pozostałe fazy bez regresji (1/32=24 z bye, 9-16=4, 17-32=8). Test regresji:
+  `_split_rows` + `_dup_rows` w tests/regression.py.
 - 2026-05-29 — Drobne fixy UI: (a) `is_ok_pre` w app.py uwzględnia teraz
   CZWORKA (drabinka i Drabinka B labelki dostają ✅ zamiast 🟡 dla 4-os.).
   (b) `fetch_all_player_schedules`: gdy gid_map padnie, fallback A..Z
