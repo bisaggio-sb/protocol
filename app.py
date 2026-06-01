@@ -1807,6 +1807,8 @@ if gen_clicked:
             template_type = 'CZWORKA_Bo5'
         elif is_czworka:
             template_type = 'CZWORKA'
+        elif is_dwojka:
+            template_type = 'DWOJKA'
         else:
             template_type = 'TROJKA' if is_trojka else 'IND'
         
@@ -2055,6 +2057,8 @@ if gen_clicked:
                 template_type = 'CZWORKA'
             elif is_trojka:
                 template_type = 'TROJKA'
+            elif is_dwojka:
+                template_type = 'DWOJKA'
             else:
                 template_type = 'IND'
             docx_bytes = generate_docx.build_document(

@@ -34,6 +34,8 @@ def _is_placeholder_name(name):
     s = str(name).strip()
     if s.lower() == 'bye':
         return True
+    if s.upper() == 'X':  # sentinel pustej drużyny/zawodnika (np. DWÓJKA bez kompletu)
+        return True
     if _PLACEHOLDER_GRACZ_RE.match(s):
         return True
     return False
@@ -254,6 +256,7 @@ def matches_to_player_schedules(matches, group_letter):
         for who in (m.get('z1', ''), m.get('z2', '')):
             who = (who or '').strip()
             if not who: continue
+            if _is_placeholder_name(who): continue  # nie rób rozpiski dla 'X'/'bye'/'Gracz N'
             by_player.setdefault(who, []).append(m)
     out = []
     for name in sorted(by_player.keys(), key=lambda s: s.lower()):
@@ -2089,7 +2092,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'IND': 'IND Grupa.docx',
         'IND_Bo3': 'IND Bo3.docx',           # pucharowa indywidualna Best of 3
         'IND_Bo5': 'IND Bo5.docx',           # pucharowa indywidualna Best of 5
-        'DWOJKA': 'DWÓJKA Grupa.docx',       # 2-osobowa drużyna grupowa (klon TRÓJKA)
+        'DWOJKA': 'DWÓJKA Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
         'TROJKA': 'TRÓJKA Grupa.docx',
         'TROJKA_Bo3': 'TRÓJKA Bo3.docx',
         'TROJKA_Bo5': 'TRÓJKA Bo5.docx',
