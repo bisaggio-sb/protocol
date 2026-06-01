@@ -173,6 +173,15 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo3/Bo5 — szablony pucharowe (1/16, 1/32)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 — (a) Podmieniony **DWÓJKA Grupa.docx** na właściwy szablon
+  użytkownika (poprzedni był klonem TRÓJKA Grupa; nowy ma osobny layout
+  tabeli wyników: 14 kolumn, 4 SUMA per SET, etykieta „DRUŻYNY" pionowo
+  zamiast „IMIONA"). Build path bez zmian — TROJKA branch obsługuje
+  skalowanie po istniejących gridCol/tcW, więc działa od razu.
+  (b) **Rozpiski meczowe** rozszerzone na DWÓJKĘ — dodany flag `is_dwojka`
+  do bramki `if is_individual or is_trojka or is_czworka` w app.py.
+  Builder już wcześniej przyjmował `is_team=True` dla drużynowych —
+  nazwy drużyn pogrubione po swojej stronie.
 - 2026-05-30 — Iteracja użytkownika TMP 2026: (a) **DWÓJKA Grupa real-data
   fill** działa na xlsx TMP 2026. Istniejący `parse_group_rows` już radzi
   sobie z layoutem 2-os. (każdy mecz = 1 wiersz: tor/godz/z1/score/z2/score)

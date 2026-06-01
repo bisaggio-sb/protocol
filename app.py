@@ -798,6 +798,7 @@ with col_form:
     is_individual = tournament_type == "Indywidualny"
     is_trojka = tournament_type == "Drużynowy 3-os."
     is_czworka = tournament_type == "Drużynowy 4-os."
+    is_dwojka = tournament_type == "Drużynowy 2-os."
     # Wszystkie typy (poza Drużynowy 2-os.) obsługują wszystkie fazy: grupowa + Bo3/Bo5.
     is_supported_type = is_individual or is_trojka or is_czworka
     is_2_sety = sets_format == "2 sety"
@@ -1692,7 +1693,7 @@ rozp_is_team = not is_individual
 rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
 rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'
 rozp_side = 'drużyna' if rozp_is_team else 'gracz'
-if is_individual or is_trojka or is_czworka:
+if is_individual or is_trojka or is_czworka or is_dwojka:
     with st.expander(f"🃏 Rozpiski meczowe dla {rozp_entity} (do druku i rozdania)"):
         st.caption(
             f"Generuje **karty A4 z rozpiskami meczowymi** każdej "
