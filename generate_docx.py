@@ -774,168 +774,172 @@ def parse_drabinka_rows(rows, target_phase=None):
     if not phase_blocks:
         return None, None, []
     
-    # ── KROK 2: wybór bloku pasującego do target_phase ──
+    # ── KROK 2: wybór bloku(ów) pasujących do target_phase ──
     # Używamy detect_phase() do parsowania target_phase (np. "Pucharowa 1/4 finału",
-    # "Mecz o 9. miejsce", "Miejsca 17-20"). Potem szukamy bloku którego phase_key
-    # == target_key, ALBO którego phase_full pasuje (np. 'półfinał' z arkusza i '1/2'
-    # z UI oba mapują na '1/2 FINAŁU').
-    chosen = None
+    # "Mecz o 9. miejsce", "Miejsca 17-20"). Potem szukamy WSZYSTKICH bloków których
+    # phase_key == target_key, ALBO których phase_full pasuje (np. 'półfinał' z arkusza
+    # i '1/2' z UI oba mapują na '1/2 FINAŁU').
+    #
+    # WAŻNE: jedna faza może być ROZBITA na KILKA bloków nagłówkowych ułożonych
+    # pionowo w tej samej kolumnie (np. "MIEJSCA 5-8" = 2 półfinały drabinki
+    # o miejsca 5-8, każdy z własnym nagłówkiem "MIEJSCA 5-8 (16:45)" i pustym
+    # wierszem między nimi). Wcześniej braliśmy TYLKO pierwszy blok i czytaliśmy
+    # do nagłówka drugiego (stop-keyword) → gubiliśmy połowę meczów. Teraz
+    # zbieramy mecze ze WSZYSTKICH bloków tej fazy i sklejamy.
+    chosen_blocks = []
     target_key = None
     target_full = None
     if target_phase:
         target_key, target_full = detect_phase(target_phase)
         if target_key:
-            # Bezpośrednie: blok ma identyczny phase_key
-            for block in phase_blocks:
-                if block['phase_key'] == target_key:
-                    chosen = block
-                    break
-            # Pośrednie: blok ma ten sam phase_full (np. PÓŁFINAŁY i 1/2 FINAŁU)
-            if not chosen:
-                for block in phase_blocks:
-                    if block['phase_full'] == target_full:
-                        chosen = block
-                        break
+            chosen_blocks = [b for b in phase_blocks if b['phase_key'] == target_key]
+            if not chosen_blocks:
+                chosen_blocks = [b for b in phase_blocks if b['phase_full'] == target_full]
             # Jeśli target_phase ma sens ale brak takiego bloku w arkuszu —
             # zwracamy pustą listę z poprawnym phase_full_name. User dostanie
             # czytelny komunikat "Nie znaleziono fazy".
-            if not chosen:
+            if not chosen_blocks:
                 return target_full, None, []
-    
+
     # target_phase=None lub niezrozumiały → fallback do pierwszego bloku
-    if not chosen:
-        chosen = phase_blocks[0]
-    
-    col_player = chosen['col']
-    col_grupa = chosen['col_grupa']
-    # AGGRESSIVE: jeśli col_grupa znalezione, ZAWSZE używamy col_grupa-1 jako tor.
-    # W arkuszach Mölkky układ to ZAWSZE "Tor Grupa Phase" — to deterministyczna prawda.
-    # Wcześniej preferowałem wyniki in-row search 'Tor', ale czasem one trafiały w niewłaściwą
-    # kolumnę (np. col 0 jako numeric seed mylony z tor).
-    if col_grupa is not None and col_grupa > 0:
-        col_tor = col_grupa - 1
-    else:
-        col_tor = chosen['col_tor']
-    # Brak etykiety 'Tor' → gviz (tqx=out:csv) typuje kolumnę z numerami torów jako
-    # LICZBOWĄ i GUBI tekstowy nagłówek "Tor" (kolumna ma same liczby + scalenia).
-    # Wtedy wykrywanie po etykiecie zawodzi. Tor jest tuż na lewo od kolumny gracza,
-    # ALE BEZPOŚREDNIO PRZED player może być kolumna z seed ID (np. "A1"/"B4" w arkuszu
-    # M4U 2026) — wtedy col_player-1 = seed col, a Tor jest col_player-2.
-    # Fix: scan leftward, użyj _looks_like_tor_col by odrzucić kolumny z seed IDs.
-    # Górne ograniczenie: 3 kolumny (Tor jest blisko player; szerszy skan łapał
-    # SETY z sąsiedniej fazy).
-    if col_tor is None:
-        header_idx_tmp = chosen['header_row']
-        for offset in (1, 2, 3):
-            ci = col_player - offset
-            if ci < 0:
-                break
-            n_ok = 0
-            n_bad = 0
-            for ri in range(header_idx_tmp + 1, min(header_idx_tmp + 10, len(rows))):
-                if ci >= len(rows[ri]):
-                    continue
-                v = rows[ri][ci].strip()
-                if not v:
-                    continue
-                if re.match(r'^\d{1,2}(\.0+)?$', v):
-                    n_ok += 1
-                elif re.match(r'^[A-Z]+\d+$', v):
-                    n_bad += 1
-            if n_ok > n_bad and n_ok > 0:
-                col_tor = ci
-                break
-        if col_tor is None:
-            col_tor = max(0, col_player - 1)
-    phase_full_name = chosen['phase_full']
-    phase_time = chosen['time']
-    header_idx = chosen['header_row']
-    
-    # ── KROK 3: czytanie meczów z wybranego bloku ──
-    matches = []
-    data_rows = rows[header_idx + 1:]
-    
+    if not chosen_blocks:
+        chosen_blocks = [phase_blocks[0]]
+
+    # Bloki w kolejności wystąpienia (scan jest row-major, więc już posortowane).
+    chosen_blocks = sorted(chosen_blocks, key=lambda b: (b['header_row'], b['col']))
+
+    phase_full_name = chosen_blocks[0]['phase_full']
+    phase_time = chosen_blocks[0]['time']
+
     def g(row, c):
         if c is None or c >= len(row): return ''
         return row[c].strip()
-    
-    i = 0
+
+    # Słowa-stop dla section headers (pod-nagłówek = koniec bieżącego bloku)
+    # — zdefiniowane wyżej jako stop_keywords.
+
+    # ── KROK 3: czytanie meczów ze WSZYSTKICH wybranych bloków ──
+    matches = []
     match_num = 1
-    empty_streak = 0
-    last_known_tor = ''  # cache dla scalonych komórek tora
-    while i < len(data_rows):
-        row1 = data_rows[i]
-        # Patrzymy TYLKO na kolumnę zawodnika i tora — inne fazy w tym samym
-        # wierszu nie mają znaczenia (są w innych kolumnach).
-        z1_raw = g(row1, col_player)
-        z1_lower = z1_raw.lower()
-        
-        # Pusta komórka zawodnika? Sprawdź następny wiersz lub stop.
-        if not z1_raw:
-            empty_streak += 1
-            if empty_streak >= 5:
-                break  # 5+ pustych = koniec bloku (więcej tolerancji
-                # na luki między sekcjami w arkuszu z wieloma fazami obok siebie)
-            i += 1
-            continue
-        empty_streak = 0
-        
-        # Czy ta komórka to nagłówek nowej sekcji (np. "MIEJSCA 17-24" pod 1/8)?
-        if any(kw in z1_lower for kw in stop_keywords):
-            break
-        
-        # Drugi zawodnik w następnym wierszu
-        row2 = data_rows[i+1] if i+1 < len(data_rows) else []
-        z2_raw = g(row2, col_player)
-        z2_lower = z2_raw.lower()
-        
-        # Tor: hierarchia źródeł
-        # 1) Wartość w komórce row1 lub row2 (numer LUB tekst typu "TBC5")
-        # 2) Empty → fallback: last_known_tor+1 (typowy wzorzec merged cells)
-        # 3) Brak last_known → fallback: match_num
-        tor_raw = g(row1, col_tor) or g(row2, col_tor)
-        if tor_raw:
-            tor = tor_raw.strip()
-            # gviz/arkusz potrafi zwrócić numer toru jako float "1.0" zamiast "1"
-            # (zależnie od formatu komórki) → "Tor 1.0" w protokole. Czyścimy ".0".
-            if re.match(r'^\d+\.0+$', tor):
-                tor = tor.split('.')[0]
-            # TBA/TBC/placeholder → pusty tor (mecz jeszcze nie ma przypisanego toru).
-            # User: "jak widzisz TBA z czymś tam to daj Tor pusty".
-            if 'TBA' in tor.upper() or tor == '?':
-                tor = ''
-            elif tor.isdigit():
-                last_known_tor = tor  # pamiętaj numer do fallback
-        elif last_known_tor and last_known_tor.isdigit():
-            # Pusta komórka (np. merged), inkrementujemy ostatni znany numer
-            tor = str(int(last_known_tor) + 1)
-            last_known_tor = tor
+    # Dedup par zawodników w obrębie fazy. W drabince (knockout) każda para gra
+    # raz na fazę, więc identyczna para = duplikat (np. arkusz z przypadkowo
+    # zduplikowanym nagłówkiem+treścią). Klucz nieuporządkowany (kolejność z1/z2
+    # bez znaczenia). To uodparnia na błędy w przygotowaniu arkusza — gdy split
+    # bloków to dwa RÓŻNE mecze (legit półfinały), pary się różnią i nic nie ginie.
+    seen_pairs = set()
+    for chosen in chosen_blocks:
+        col_player = chosen['col']
+        col_grupa = chosen['col_grupa']
+        # AGGRESSIVE: jeśli col_grupa znalezione, ZAWSZE używamy col_grupa-1 jako tor.
+        # W arkuszach Mölkky układ to ZAWSZE "Tor Grupa Phase" — deterministyczna prawda.
+        if col_grupa is not None and col_grupa > 0:
+            col_tor = col_grupa - 1
         else:
-            # Brak danych o torze — zostaw pusty (NIE zgaduj match_num,
-            # bo to dawało błędne "Tor 1" gdy kolumna tora była nieprawidłowa).
-            tor = ''
-        
-        # Grupa: czytamy z col_grupa jeśli istnieje (np. CZWORKA drabinka z kolumną
-        # informacyjną „Grupa" pomiędzy Tor a fazą — pokazuje skąd zawodnik wyszedł).
-        grupa_v = ''
-        if col_grupa is not None:
-            grupa_v = (g(row1, col_grupa) or g(row2, col_grupa)).strip()
-        # Walidacja: oba nazwiska niepuste, sensowna długość, brak stop-keywords
-        if z1_raw and z2_raw and len(z1_raw) >= 3 and len(z2_raw) >= 3:
-            has_stop = any(kw in z1_lower or kw in z2_lower for kw in stop_keywords)
-            if not has_stop and any(c.isupper() for c in z1_raw) and any(c.isupper() for c in z2_raw):
-                matches.append({
-                    'tor': tor,
-                    'godz': phase_time or '',
-                    'grupa': grupa_v,
-                    'mecz': str(match_num),
-                    'z1': z1_raw,
-                    'z2': z2_raw,
-                })
-                match_num += 1
-        
-        i += 2  # przeskakujemy 2 wiersze (mecz)
-    
+            col_tor = chosen['col_tor']
+        # Brak etykiety 'Tor' → gviz typuje kolumnę torów jako LICZBOWĄ i GUBI nagłówek.
+        # Tor jest tuż na lewo od kolumny gracza, ALE bezpośrednio przed player może
+        # być kolumna z seed ID (np. "A1"/"B4") — wtedy Tor jest col_player-2.
+        # Fix: scan leftward, użyj numeric-vs-seed heurystyki by odrzucić seed IDs.
+        if col_tor is None:
+            header_idx_tmp = chosen['header_row']
+            for offset in (1, 2, 3):
+                ci = col_player - offset
+                if ci < 0:
+                    break
+                n_ok = 0
+                n_bad = 0
+                for ri in range(header_idx_tmp + 1, min(header_idx_tmp + 10, len(rows))):
+                    if ci >= len(rows[ri]):
+                        continue
+                    v = rows[ri][ci].strip()
+                    if not v:
+                        continue
+                    if re.match(r'^\d{1,2}(\.0+)?$', v):
+                        n_ok += 1
+                    elif re.match(r'^[A-Z]+\d+$', v):
+                        n_bad += 1
+                if n_ok > n_bad and n_ok > 0:
+                    col_tor = ci
+                    break
+            if col_tor is None:
+                col_tor = max(0, col_player - 1)
+
+        header_idx = chosen['header_row']
+        data_rows = rows[header_idx + 1:]
+
+        i = 0
+        empty_streak = 0
+        last_known_tor = ''  # cache dla scalonych komórek tora
+        while i < len(data_rows):
+            row1 = data_rows[i]
+            # Patrzymy TYLKO na kolumnę zawodnika i tora — inne fazy w tym samym
+            # wierszu nie mają znaczenia (są w innych kolumnach).
+            z1_raw = g(row1, col_player)
+            z1_lower = z1_raw.lower()
+
+            # Pusta komórka zawodnika? Sprawdź następny wiersz lub stop.
+            if not z1_raw:
+                empty_streak += 1
+                if empty_streak >= 5:
+                    break  # 5+ pustych = koniec bloku
+                i += 1
+                continue
+            empty_streak = 0
+
+            # Czy ta komórka to nagłówek nowej sekcji (np. drugi "MIEJSCA 5-8"
+            # albo "MIEJSCA 17-24" pod 1/8)? To koniec bieżącego bloku — kolejny
+            # blok tej samej fazy zostanie obsłużony w następnej iteracji pętli.
+            if any(kw in z1_lower for kw in stop_keywords):
+                break
+
+            # Drugi zawodnik w następnym wierszu
+            row2 = data_rows[i+1] if i+1 < len(data_rows) else []
+            z2_raw = g(row2, col_player)
+            z2_lower = z2_raw.lower()
+
+            # Tor: hierarchia źródeł
+            tor_raw = g(row1, col_tor) or g(row2, col_tor)
+            if tor_raw:
+                tor = tor_raw.strip()
+                if re.match(r'^\d+\.0+$', tor):
+                    tor = tor.split('.')[0]
+                if 'TBA' in tor.upper() or tor == '?':
+                    tor = ''
+                elif tor.isdigit():
+                    last_known_tor = tor
+            elif last_known_tor and last_known_tor.isdigit():
+                tor = str(int(last_known_tor) + 1)
+                last_known_tor = tor
+            else:
+                tor = ''
+
+            # Grupa: czytamy z col_grupa jeśli istnieje
+            grupa_v = ''
+            if col_grupa is not None:
+                grupa_v = (g(row1, col_grupa) or g(row2, col_grupa)).strip()
+            # Walidacja: oba nazwiska niepuste, sensowna długość, brak stop-keywords
+            if z1_raw and z2_raw and len(z1_raw) >= 3 and len(z2_raw) >= 3:
+                has_stop = any(kw in z1_lower or kw in z2_lower for kw in stop_keywords)
+                pair_key = frozenset((z1_raw.strip().lower(), z2_raw.strip().lower()))
+                is_dup = pair_key in seen_pairs
+                if not has_stop and not is_dup \
+                   and any(c.isupper() for c in z1_raw) and any(c.isupper() for c in z2_raw):
+                    seen_pairs.add(pair_key)
+                    matches.append({
+                        'tor': tor,
+                        'godz': phase_time or '',
+                        'grupa': grupa_v,
+                        'mecz': str(match_num),
+                        'z1': z1_raw,
+                        'z2': z2_raw,
+                    })
+                    match_num += 1
+
+            i += 2  # przeskakujemy 2 wiersze (mecz)
+
+    # Do hard-capu używamy phase_key pierwszego bloku.
+    chosen = chosen_blocks[0]
+
     # ── HARD CAP ── parser czasem łapie więcej meczów niż powinno (np. brak
     # nagłówka "MECZE O MIEJSCA" oddzielającego 1/8 finału od meczów o miejsca
     # 17-32). Liczba meczów w fazie jest deterministyczna:
@@ -1120,15 +1124,20 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
         # Dużo szybsze niż wcześniejsze N×parse_drabinka_rows.
         STOP_KWS = ['miejsc', 'finał', 'mecz o', '1/64', '1/32',
                     '1/16', '1/8', '1/4', '1/2', 'półfinał']
-        seen_keys = set()
+        # WAŻNE: jedna faza może być rozbita na KILKA bloków nagłówkowych w tej
+        # samej kolumnie (np. "MIEJSCA 5-8" = 2 półfinały, każdy z własnym
+        # nagłówkiem). Wcześniejszy `seen_keys` dedup liczył TYLKO pierwszy blok
+        # → UI pokazywało np. „1 mecz" zamiast „2 mecze". Teraz SUMUJEMY mecze
+        # ze wszystkich bloków tej samej fazy (po phase_key).
+        agg_entries = {}  # key -> entry dict (ref współdzielony z result['b']/['glowna'])
+        pairs_by_key = {}  # key -> set nieuporządkowanych par (dedup, spójne z parserem)
         for marker in phase_block_markers:
-            if marker['key'] in seen_keys:
-                continue
-            seen_keys.add(marker['key'])
+            key = marker['key']
             col = marker['col']
             i = marker['header_row'] + 1
             n_matches = 0
             empty_streak = 0
+            seen_pairs = pairs_by_key.setdefault(key, set())
             while i < len(drabinka_rows):
                 row1 = drabinka_rows[i]
                 z1 = row1[col].strip() if col < len(row1) else ''
@@ -1147,20 +1156,33 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
                 z2 = row2[col].strip() if col < len(row2) else ''
                 if z1 and z2 and len(z1) >= 3 and len(z2) >= 3 \
                    and any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
-                    n_matches += 1
+                    # Dedup po nieuporządkowanej parze — spójnie z parse_drabinka_rows,
+                    # żeby liczba w UI = liczba realnie wygenerowanych protokołów.
+                    pair_key = frozenset((z1.lower(), z2.lower()))
+                    if pair_key not in seen_pairs:
+                        seen_pairs.add(pair_key)
+                        n_matches += 1
                 i += 2
-            
+
             if n_matches > 0:
-                entry = {
-                    'key': marker['key'],
-                    'full': marker['full'],
-                    'time': marker['time'] or '',
-                    'n_matches': n_matches,
-                }
-                if marker['key'].startswith('miejsca ') or marker['key'].startswith('mecz o '):
-                    result['b'].append(entry)
+                if key in agg_entries:
+                    # Kolejny blok tej samej fazy — dodaj mecze do istniejącego wpisu.
+                    agg_entries[key]['n_matches'] += n_matches
+                    # Czas: jeśli pierwszy blok nie miał czasu, weź z tego.
+                    if not agg_entries[key]['time'] and marker['time']:
+                        agg_entries[key]['time'] = marker['time']
                 else:
-                    result['glowna'].append(entry)
+                    entry = {
+                        'key': key,
+                        'full': marker['full'],
+                        'time': marker['time'] or '',
+                        'n_matches': n_matches,
+                    }
+                    agg_entries[key] = entry
+                    if key.startswith('miejsca ') or key.startswith('mecz o '):
+                        result['b'].append(entry)
+                    else:
+                        result['glowna'].append(entry)
     
     # Wszystkie wykryte godziny (do filtra czasowego)
     all_times = set()
