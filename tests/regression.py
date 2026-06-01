@@ -1,6 +1,6 @@
 """Smoke regression for generate_docx.build_document.
 
-Buduje wszystkie 9 szablonów na danych syntetycznych. Test filtra placeholderów
+Buduje wszystkie 11 szablonów na danych syntetycznych. Test filtra placeholderów
 dla IND. Exit 0 jeśli wszystko OK, 1 jeśli jakikolwiek crash/anomalia.
 """
 import sys
@@ -15,6 +15,7 @@ DATA = [("Grupa A", [
      'z1': 'Marek Rogalski', 'z2': 'Konrad Rudnik'},
 ])]
 TEMPLATES = ['IND', 'IND_Bo3', 'IND_Bo5',
+             'DWOJKA', 'DWOJKA_Bo3',
              'TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5',
              'CZWORKA', 'CZWORKA_Bo3', 'CZWORKA_Bo5']
 

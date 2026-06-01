@@ -125,16 +125,16 @@ typy są BEZ ikony. 🟡 = budujemy/testujemy. 🔴 = niedostępne (wkrótce).
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
 | Indywidualny | działa | działa (Bo3, Bo5; w tym 1/32 i 1/64) |
-| Drużynowy 2-os. | 🟡 w testach | 🔴 wkrótce |
+| Drużynowy 2-os. | działa | Bo3 działa; Bo5 🔴 wkrótce |
 | Drużynowy 3-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 4-os. | działa | działa (Bo3, Bo5) |
 
-**Nazewnictwo plików** (zgodne z PFM SharePoint, od 2026-05-30): `IND Grupa.docx`,
-`IND Bo3.docx`, `IND Bo5.docx`, `DWÓJKA Grupa.docx`, `TRÓJKA Grupa.docx`,
-`TRÓJKA Bo3.docx`, `TRÓJKA Bo5.docx`, `CZWÓRKA Grupa.docx`, `CZWÓRKA Bo3.docx`,
-`CZWÓRKA Bo5.docx`. Kod używa stałych `IND` / `IND_Bo3` / `DWOJKA` / `TROJKA*`
-/ `CZWORKA*` w identyfikatorach Python, ale mapuje je na nowe nazwy plików
-przez dict `template_files`.
+**Nazewnictwo plików** (zgodne z PFM SharePoint, UNDERSCORE od 2026-06-01):
+`IND_Grupa.docx`, `IND_Bo3.docx`, `IND_Bo5.docx`, `DWÓJKA_Grupa.docx`,
+`DWÓJKA_Bo3.docx`, `TRÓJKA_Grupa.docx`, `TRÓJKA_Bo3.docx`, `TRÓJKA_Bo5.docx`,
+`CZWÓRKA_Grupa.docx`, `CZWÓRKA_Bo3.docx`, `CZWÓRKA_Bo5.docx`. Kod używa stałych
+`IND` / `IND_Bo3` / `DWOJKA` / `DWOJKA_Bo3` / `TROJKA*` / `CZWORKA*` w
+identyfikatorach Python, ale mapuje je na nazwy plików przez dict `template_files`.
 
 **Rozwiązany problem „linie" (str.2 — wyrównanie tabeli wyników):** tabela `(SET 4)/(SET 5)`
 na str.2 renderowała się (a) wyśrodkowana (lewa x≈197 zamiast 110) ORAZ (b) za wąska
@@ -157,22 +157,51 @@ podajemy ręcznie). Render→PDF: `soffice --headless -env:UserInstallation=file
 w wierszu tabeli (PIL).
 
 ### Co teraz (current focus)
-- DWÓJKA Grupa: real-data fill DZIAŁA na xlsx TMP 2026 (Gr. A-E, 5 grup, po
-  15-21 meczów). Reuse build_document path TROJKA (template = identyczny klon
-  TRÓJKA Grupa.docx, struktura komórek z1/z2 ta sama). Status = 🟡 (testujemy
-  szczegóły wizualne, nie ma realnego użycia produkcyjnego).
-- DWÓJKA puchar (Bo3/Bo5): jeszcze nie. Planowane: gdy faza grupowa zostanie
-  zatwierdzona przez usera, dorobimy szablony + drabinka 1/16 / 1/32.
+- DWÓJKA Grupa: DZIAŁA (zatwierdzone — status bez ikony). Własny szablon
+  `DWÓJKA_Grupa.docx` (DRUŻYNY pion, 4 SUMA/SET). Fix grafik w DOCX zrobiony
+  (patrz log 2026-06-01 col0).
+- DWÓJKA Bo3 (puchar): DZIAŁA. Szablon `DWÓJKA_Bo3.docx` (SET 1/2/(SET 3),
+  6 SUMA). Routing w app.py (puchar + Bo3), format Bo3 odblokowany, fazy
+  drabinki bez ikon. Col0 wąska (jak TRÓJKA_Bo3 — puchar bez grafik).
+- DWÓJKA Bo5 (puchar): jeszcze nie — guard w app.py blokuje wybór (st.stop
+  + warning „wkrótce"). Format Bo5 oznaczony 🔴.
 
 ### Backlog (kolejność = priorytet)
 - [x] IND Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data
 - [x] CZWÓRKA Bo3/Bo5 — szablony, Tor, formatowanie nagłówka
 - [x] IND Bo3 + CZWÓRKA Grupa zweryfikowane wizualnie
-- [x] DWÓJKA Grupa real-data fill (TMP 2026 xlsx) — 🟡 testy wizualne u usera
-- [x] Renaming plików docx na konwencję PFM SharePoint („IND Grupa.docx" itp.)
-- [ ] DWÓJKA Bo3/Bo5 — szablony pucharowe (1/16, 1/32)
+- [x] DWÓJKA Grupa real-data fill (TMP 2026 xlsx) — zatwierdzone
+- [x] Renaming plików docx na konwencję PFM SharePoint z UNDERSCORE
+- [x] DWÓJKA Bo3 — szablon pucharowy, routing, format/fazy odblokowane
+- [ ] DWÓJKA Bo5 — szablon pucharowy (zdjąć guard po dodaniu)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 — **DWÓJKA Bo3 + rename UNDERSCORE + KRYTYCZNY fix grafik DOCX.**
+  (a) **Rename plików docx** ze spacji na underscore (konwencja PFM SharePoint
+  z ostatniego skrina): `IND Grupa.docx` → `IND_Grupa.docx` itd. (git mv ×10).
+  Zmieniony tylko `template_files` (jedyne źródło nazw) + help/README.
+  (b) **DWÓJKA Bo3** dodana: nowy szablon `DWÓJKA_Bo3.docx` (od usera, SET
+  1/2/(SET 3), DRUŻYNY pion, 6 SUMA). Routing app.py: `elif is_dwojka and
+  is_pucharowa and Best of 3 → 'DWOJKA_Bo3'`. Format Bo3 odblokowany (Bo5
+  🔴 wkrótce + guard st.stop). Fazy drabinki dla dwójki bez ikon. is_supported_type
+  += is_dwojka. Blank-form: dodany Bo3. generate_docx: DWOJKA_Bo3 przez branch
+  TROJKA (font, dynamiczne wymiary), ale lewa kolumna WĄSKA jak TRÓJKA_Bo3
+  (puchar bez grafik — inaczej 2-cyfrowe numery 10-18 zawijały się).
+  (c) **TRÓJKA_Bo3.docx** odświeżony (nowy plik od usera). Regresja 11/11 OK.
+  (d) **KRYTYCZNY BUG grafiki w DOCX (DWÓJKA Grupa):** w PDF OK, w Wordzie logo
+  nachodziło na tabelę. Przyczyna: blok skalowania ustawiał `tblGrid` col0=2700,
+  ale per-komórkowe `tcW` col0 tylko gdy `w_int == ORIG_LEFT_COL_DXA` (hardcode
+  1186 z TRÓJKI). DWÓJKA ma col0=1192 → warunek nie trafiał → tcW zostawało ~1148.
+  LibreOffice (PDF) czyta gridCol (szeroko, OK), Word czyta tcW per komórka
+  (wąsko) → tabela przesunięta, grafiki nachodzą. FIX: (1) wymiary
+  ORIG_T1/T2_TOTAL + ORIG_LEFT_COL_DXA czytane DYNAMICZNIE z szablonu dla
+  TROJKA/DWOJKA/DWOJKA_Bo3; (2) dopasowanie komórki lewej z TOLERANCJĄ 50 dxa
+  (grid vs tcW bywają o kilka dxa różne). Audyt wszystkich 11 szablonów:
+  brak mismatchu grid-vs-tcW na komórkach bez gridSpan.
+  (e) **Logo PFM nachodziło na „Wyniki turnieju"** (DWÓJKA Grupa): `compute_default_positions`
+  dostawała `_tpl_type='IND'` dla dwójki (geometria IND), choć tabela jest
+  TRÓJKA-style (kolumna 4.76 cm). Fix: `is_dwojka → 'TROJKA'` w obliczaniu
+  `_tpl_type` (3 miejsca). Teraz QR → „Wyniki turnieju" → logo bez kolizji.
 - 2026-06-01 (fix) — **DWÓJKA Grupa.docx: 2 fixy wizualne w szablonie.**
   (1) „Wyniki turnieju" miało font `Aptos Narrow` → LO bez Aptos brał serif
   fallback. Podmieniony run na `Calibri` (Carlito w prod). (2) Ostatnia
