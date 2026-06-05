@@ -174,8 +174,23 @@ w wierszu tabeli (PIL).
 - [x] Renaming plików docx na konwencję PFM SharePoint z UNDERSCORE
 - [x] DWÓJKA Bo3 — szablon pucharowy, routing, format/fazy odblokowane
 - [ ] DWÓJKA Bo5 — szablon pucharowy (zdjąć guard po dodaniu)
+- [ ] IND Bo7 — szablon pucharowy (po Bo5 dwójki)
+- [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 (fix) — **DWÓJKA_Bo3 v2: Mecz # label + custom fill + font.**
+  (a) Nowy plik usera `DWÓJKA_Bo3.docx` z prawdziwą etykietą „Mecz #"
+  w nagłówku (poprzedni nie miał labelki — pokazywała się sama liczba).
+  Layout r0 = 9 komórek z gridSpan: [Tor | Tor-val | Godzina | Godz-val(2) |
+  filler(2)×3 | Mecz # | Mecz-val(2)]. Standardowy fill kasował etykietę
+  „Mecz #" bo pisał wartość do tcs[7] (label cell). FIX: dedykowana gałąź
+  `if template_type == 'DWOJKA_Bo3'` w `_fill_protocol` — wartości lecą do
+  właściwych komórek (tor→tcs[1], godz→tcs[3], mecz→tcs[8], drużyny→r3/r4 c0).
+  (b) Font normalizacji: DWOJKA_Bo3 przeniesione do gałęzi Bo3/Bo5
+  (`PunktySET 1/2/3`, `(SET 3)`, `Mecz`, `#`, `DRUŻYNY` itp. wymuszone na
+  Calibri). Wcześniej padało do else-branchu z mniejszym zestawem etykiet,
+  przez co „Punkty SET 3" + „(SET 3)" wisiały w Aptos → szeryfowy fallback
+  w LO. Po fixie cały nagłówek jednolicie Calibri.
 - 2026-06-01 — **DWÓJKA Bo3 + rename UNDERSCORE + KRYTYCZNY fix grafik DOCX.**
   (a) **Rename plików docx** ze spacji na underscore (konwencja PFM SharePoint
   z ostatniego skrina): `IND Grupa.docx` → `IND_Grupa.docx` itd. (git mv ×10).
