@@ -120,10 +120,11 @@ LEFT_AREA_CM = 4.75    # Indywidualny: szerokość lewej kolumny tabeli wynikowe
 # Zostawiamy 0.3 cm marginesu od prawej (kolumny numerków 1-18).
 TROJKA_LEFT_AREA_CM = 4.76    # pełna szerokość komórki R1.tc[0] - obrazy idealnie wyśrodkowane
 TROJKA_GRAPHIC_W_CM = 2.7     # max szer logo w trójce (zbliżona do PFM domyślnego ~2.18 - spójność wizualna)
-TROJKA_AREA_HEIGHT_CM = 15.0  # Trójka: wysokość lewej kolumny tabeli widoczna w podglądzie
-# (preview container = PAGE_H_PX - 184 = ~250 px = ~15.6 cm; 15.0 zostawia margines bezpieczeństwa).
-# Wcześniej 18.5 powodowało że 4 grafika lądowała pozycyjnie pod widocznym obszarem
-# i była ucinana przez overflow:hidden lewego paska.
+TROJKA_AREA_HEIGHT_CM = 17.5  # Trójka/Dwójka grupowa: pełna wysokość lewej kolumny tabeli
+# (od „Wyniki turnieju" do PKT). Wcześniej 15.0 — 4+ grafik kończyło się powyżej PKT
+# (user uznał za regresję: grafiki MAJĄ rozciągać się na całą tabelę w każdym szablonie
+# grupowym). 17.5 obejmuje cały obszar; preview overflow:hidden teraz tolerowany —
+# kosmetyka podglądu vs realna pozycja w DOCX, faktyczna pozycja w DOCX jest priorytetem.
 
 
 def compute_default_positions(active_keys, logos_aspect=None,

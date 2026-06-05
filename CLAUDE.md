@@ -178,6 +178,23 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-01 (fix) — **DWÓJKA_Bo3 SET 3 column + 4-grafik pełna wysokość.**
+  (a) Punkty SET 3 wyglądała szerzej + lekko inaczej niż SET 1/2. Przyczyna:
+  w szablonie tblGrid + tcW dawały c1=991, c2=1035, c3=1173 dxa (różnica
+  ~18% między c1 a c3). Plus tekst SET 3 był rozbity na 2 runy „SET "+„3"
+  zamiast jednego „SET 3" jak SET 1/2 — co przy braku Aptos w LO mogło
+  dawać subtelne różnice odstępów. FIX (patch binarny `word/document.xml`):
+  grid[7] 675→631, grid[9] 810→628 (każdy traci tyle by c2/c3 miały 991);
+  zaoszczędzone 226 dxa wpada do grid[10] (Wygrane sety col1) 355→581.
+  tcW c1/c2/c3 w r2-r4 wyrównane do 991, c4 (Wygrane sety) do 1591.
+  Runy SET „SET "+„3" zmergowane w jedno „SET 3" (regex single match).
+  (b) **TROJKA_AREA_HEIGHT_CM 15.0 → 17.5.** Z 4-5 grafikami logi kończyły
+  się ok. wiersza 14 zamiast PKT. Wcześniejszy komentarz „18.5 ucinało
+  4-grafikę przez overflow:hidden" dotyczył PODGLĄDU HTML w streamlitcie,
+  nie realnego DOCX. 17.5 obejmuje pełną wysokość tabeli wynikowej; w
+  podglądzie ostatnia grafika może wystawać poza overflow:hidden — to
+  kosmetyka, realna pozycja w DOCX/PDF priorytetem. Dotyczy DWÓJKI Grupa
+  i TRÓJKI Grupa (CZWORKA ma strip pod tabelą, IND własną geometrię).
 - 2026-06-01 (fix) — **DWÓJKA_Bo3 v2: Mecz # label + custom fill + font.**
   (a) Nowy plik usera `DWÓJKA_Bo3.docx` z prawdziwą etykietą „Mecz #"
   w nagłówku (poprzedni nie miał labelki — pokazywała się sama liczba).
