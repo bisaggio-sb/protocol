@@ -1623,6 +1623,29 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _lock_row(trows[2])  # tylko R2 (długa nazwa zespołu) — w nim było puchnięcie
         return  # CZWÓRKA Bo3/Bo5 ma własną logikę
 
+    # ── DWÓJKA_Bo3: layout r0 = [Tor | Tor-val | Godzina | Godz-val(span2) |
+    #    filler×3 (span2 each) | Mecz # | Mecz-val(span2)]. Drużyny w r3/r4 c0.
+    if template_type == 'DWOJKA_Bo3':
+        if len(rows) >= 1:
+            tcs = rows[0].findall(wt('tc'))
+            tor_val = match.get('tor', '').strip()
+            godz_val = match.get('godz', '').strip()
+            mecz_val = match.get('mecz', '').strip()
+            if len(tcs) > 1 and tor_val:
+                _set_cell_value(tcs[1], tor_val, size=28, bold=True)
+            if len(tcs) > 3 and godz_val:
+                _set_cell_value(tcs[3], godz_val, size=28, bold=True)
+            if len(tcs) > 8 and mecz_val:
+                _set_cell_value(tcs[8], mecz_val, size=28, bold=True)
+        # Drużyny w r3.c0 i r4.c0
+        if len(rows) > 3:
+            tcs = rows[3].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], match.get('z1', ''), size=24, align='right')
+        if len(rows) > 4:
+            tcs = rows[4].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], match.get('z2', ''), size=24, align='right')
+        return
+
     if template_type in ('TROJKA_Bo3',):
         # Bo3 template R1 cells (TROJKA i CZWORKA mają identyczny layout header):
         #   tc[0] "Tor" 5.24 cm — label + value w jednej komórce
@@ -2166,12 +2189,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # normalizacji fontu dla 'SET 1/2/3/4/5' / '(SET N)' bo w nowym szablonie
         # te etykiety są inaczej zbudowane (różne run-e) i normalizacja powoduje
         # niespójność (np. SET 2 robi się grubsze niż SET 1/(SET 3)).
-        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
-            TROJKA_LABELS = {'Tor','Godz.','Godzina','Mecz','Runda',
+        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3'):
+            TROJKA_LABELS = {'Tor','Godz.','Godzina','Grupa','Mecz','#','Runda',
                              'PunktySET 1','PunktySET 2','PunktySET 3',
                              'PunktySET 4','PunktySET 5',
+                             'Punkty','SET 1','SET 2','SET 3','(SET 3)','SET','3',
                              'PktSET 1','PktSET 2','PktSET 3','PktSET 4','PktSET 5',
-                             'Punkty','Pkt','Wygrane','sety','Podpis','Wygranesety'}
+                             'Pkt','Wygrane','sety','Podpis','Wygranesety','DRUŻYNY'}
         else:
             TROJKA_LABELS = {'Tor','Godzina','Godz.','Grupa','Mecz','#','Runda',
                              'Punkty','SET 1','SET 2','SET 3','(SET 3)',
