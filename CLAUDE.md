@@ -178,7 +178,33 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
 
 ### Log zmian (najnowsze u góry)
-- 2026-06-01 (fix) — **DWÓJKA_Bo3 SET 3 column + 4-grafik pełna wysokość.**
+- 2026-06-14 (fix) — **6 problemów zgłoszonych przez usera w jednej iteracji:**
+  (#1) **IND grupowa 240 vs 230 protokołów**: NIE bug — `skip_placeholders=True`
+  (default dla IND) filtruje mecze z „Gracz N" po którejkolwiek stronie. 10
+  meczów z niepełnej grupy zostało pominiętych. Wyjaśnione, bez zmiany kodu.
+  (#2) **Brak nagłówka „turniej · data · faza" na str.2 IND_Bo5**: gałąź
+  inserting hp_page2 obejmowała tylko TROJKA_Bo5/CZWORKA_Bo5. Dodane IND_Bo5
+  — szablon ma 4 tabele (header str.1, score str.1, header str.2, score str.2),
+  wstawiamy hp_page2 przed `cloned_tbls[2]`. Zweryfikowane renderem.
+  (#3) **PFM logo mniejsze niż inne** w DWÓJCE Grupa (gdy user wgrywa PFM jako
+  logo1..4): `PFM_TARGET_W = QR_W*1.09 = 2.18 cm` vs `OTHER_MAX_W = 2.7 cm`.
+  Wyrównane: `PFM_TARGET_W = OTHER_MAX_W = 2.7 cm` w trybie TROJKA. Teraz
+  „system" PFM i „user" PFM mają tę samą szerokość docelową.
+  (#4) **Ostatnia kolumna SUMA w DWÓJCE Grupa**: po build_document c13 miała
+  top/bottom usuwane SZERZEJ niż c4/c7/c10 — w R3 (pierwszy data row) c4/c7/c10
+  miały top=4-8 (pasujące do bottom SUMA-label), c13 miało top usunięte. W
+  R20 (ostatni data) c4/c7/c10 miały bottom=12 (gruba krawędź ramy SUMA), c13
+  bottom usunięte. Naprawione: zamiast usuwać tcBorders z c13, kopiujemy z
+  REFERENCYJNEJ SUMA-cell (drugiej — suma_indices[1]) i dodajemy right=12 do
+  ostatniej. Generalizacja: znajdujemy WSZYSTKIE SUMA-cells w R2 i normalizujemy
+  każdą do tej samej ramki — działa dla DWÓJKI Bo3 (6 SUMA) i Grupa (4 SUMA).
+  (#5) **Ostatnie 3 SUMA w DWÓJCE Bo3**: c13/c16/c19 miały top=4-6, bottom=4-6
+  w wierszach danych (poziome linie wewnątrz kolumny SUMA), inne SUMA czyste.
+  Naprawione tą samą generalną normalizacją (#4). User podesłał też nowy
+  szablon `DWÓJKA_Bo3.docx` z poprawionymi szerokościami kolumn.
+  (#6) **Punkty SET 3 inne wyrównanie**: c3 w R2 nie miało `<w:tcMar>` podczas
+  gdy c1/c2/c4/c5 miały `<w:tcMar w:left="105" w:right="105"/>`. Padded text
+  centrowanie różniło się. Patch binarny — wstrzyknięte tcMar.
   (a) Punkty SET 3 wyglądała szerzej + lekko inaczej niż SET 1/2. Przyczyna:
   w szablonie tblGrid + tcW dawały c1=991, c2=1035, c3=1173 dxa (różnica
   ~18% między c1 a c3). Plus tekst SET 3 był rozbity na 2 runy „SET "+„3"
