@@ -2419,30 +2419,64 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                 else:
                                     tcW.set(f'{{{W}}}w', str(int(w_int * scale_rest)))
             
-            # ── Normalizacja ramek w ostatniej kolumnie tabeli wyników ──────────
-            # PROBLEM: w obu szablonach trójki ostatnia kolumna SUMA miała pełne
-            # ramki (top+bottom+left+right), podczas gdy inne kolumny SUMA mają
-            # tylko left+right. Efekt: w ostatniej kolumnie widać poziome linie
-            # między wierszami (wygląda na "pogrubione"), w innych nie.
-            # FIX: w wierszach DANYCH (od R4 do przedostatniego) usuń top/bottom
-            # ramki w OSTATNIEJ komórce, żeby kolumna była "czysta" jak inne SUMA.
+            # ── Normalizacja ramek kolumn SUMA w tabeli wyników ──────────
+            # PROBLEM: w szablonach DWÓJKI (Grupa i Bo3) niektóre kolumny SUMA
+            # miały niepasujące ramki vs inne: dodatkowe top/bottom (sz 4 lub 6)
+            # w wierszach danych dawały widoczne poziome linie WEWNĄTRZ kolumny,
+            # podczas gdy inne SUMA były „czyste" (tylko L/R). Skutek: ta jedna
+            # kolumna wyglądała na pogrubioną/ze szczeblami, inne nie.
+            # FIX: znajdź wszystkie SUMA-cells w R2 (label row); w każdym wierszu
+            # DANYCH skopiuj borders z pierwszej SUMA-cell (c7 — pewnie czysty
+            # styl: L=12, R=12, no T/B) do pozostałych SUMA-cells. Ostatnia SUMA
+            # dostaje dodatkowo grube prawe border (krawędź tabeli).
             t2_rows = t2.findall(wt('tr'))
-            for r_idx, tr in enumerate(t2_rows):
-                # Pomijamy: R1 (SET headers), R2 (SUMA labels), R3 (continuation
-                # vMerge), oraz ostatni wiersz (PKT/WYNIK).
-                if r_idx < 3 or r_idx == len(t2_rows) - 1:
-                    continue
-                cells = tr.findall(wt('tc'))
-                if not cells: continue
-                last_tc = cells[-1]
-                tcPr = last_tc.find(wt('tcPr'))
-                if tcPr is None: continue
-                tcBorders = tcPr.find(wt('tcBorders'))
-                if tcBorders is None: continue
-                for side in ('top', 'bottom'):
-                    b = tcBorders.find(wt(side))
-                    if b is not None:
-                        tcBorders.remove(b)
+            from copy import deepcopy
+            # Krok 1: zidentyfikuj indeksy SUMA-cells w r2 (label row)
+            suma_indices = []
+            r2_cells = t2_rows[2].findall(wt('tc')) if len(t2_rows) > 2 else []
+            for ci, c in enumerate(r2_cells):
+                txt = ''.join((t_el.text or '') for t_el in c.iter(wt('t'))).strip()
+                if txt == 'SUMA':
+                    suma_indices.append(ci)
+            # Krok 2: w każdym wierszu danych skopiuj borders z REFERENCYJNEJ SUMA
+            # (drugiej — bo pierwsza ma top=4/8 podpięte do nagłówka R2, ale i tak
+            # gwarantuje to spójny wygląd; wybieramy drugą bo c4 czasem ma top=8
+            # specjalnie pasujące do bottom=8 z r2 — kopiowanie tego do dalszych
+            # SUMA jest bezpieczne wizualnie).
+            if len(suma_indices) >= 2:
+                ref_idx = suma_indices[1]  # druga SUMA (np. c7 w DWÓJCE)
+                last_idx = suma_indices[-1]
+                for r_idx, tr in enumerate(t2_rows):
+                    if r_idx < 3 or r_idx == len(t2_rows) - 1:
+                        continue
+                    cells = tr.findall(wt('tc'))
+                    if ref_idx >= len(cells): continue
+                    ref_tc = cells[ref_idx]
+                    ref_tcPr = ref_tc.find(wt('tcPr'))
+                    if ref_tcPr is None: continue
+                    ref_borders = ref_tcPr.find(wt('tcBorders'))
+                    if ref_borders is None: continue
+                    for tgt_idx in suma_indices:
+                        if tgt_idx == ref_idx or tgt_idx >= len(cells):
+                            continue
+                        tgt_tc = cells[tgt_idx]
+                        tgt_tcPr = tgt_tc.find(wt('tcPr'))
+                        if tgt_tcPr is None: continue
+                        # Usuń istniejące borders
+                        old_b = tgt_tcPr.find(wt('tcBorders'))
+                        if old_b is not None:
+                            tgt_tcPr.remove(old_b)
+                        new_borders = deepcopy(ref_borders)
+                        # Ostatnia SUMA: grube prawe border (krawędź tabeli)
+                        if tgt_idx == last_idx:
+                            right_el = new_borders.find(wt('right'))
+                            if right_el is None:
+                                right_el = etree.SubElement(new_borders, wt('right'))
+                            right_el.set(f'{{{W}}}val', 'single')
+                            right_el.set(f'{{{W}}}sz', '12')
+                            right_el.set(f'{{{W}}}space', '0')
+                            right_el.set(f'{{{W}}}color', 'auto')
+                        tgt_tcPr.insert(0, new_borders)
         
         # ── BO5: dodatkowo skalujemy tabele 3 i 4 (strona 3 — extension sheet) ──
         # T3 (header s.3) skalujemy proporcjonalnie do tej samej szerokości co T1.
@@ -3382,15 +3416,19 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # IND_Bo5 POMINIĘTE: nowy szablon ma nagłówek str.2 (Tor/Godz/Runda)
                 # wbudowany w T1, a podział strony jest WEWNĄTRZ T1 — wstawianie hp_page2
                 # przed T2 trafiłoby w środek str.2 (między nagłówek a SET 4/5).
-                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5'):
+                # Bo5: header też na drugiej stronie. Włączone dla IND_Bo5
+                # również — szablon ma 4 tabele (str.1 header, str.1 score,
+                # str.2 header, str.2 score), więc wstawiamy hp_page2 przed
+                # tbls[2] (header str.2) — zgodnie z TROJKA_Bo5 / CZWORKA_Bo5.
+                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5'):
                     cloned_tbls = [el for el in cloned if el.tag == wt('tbl')]
                     if len(cloned_tbls) >= 3:
                         t3_in_cloned = cloned_tbls[2]
                         from copy import deepcopy
                         hp_page2 = deepcopy(hp)
-                        # pageBreakBefore — gwarantuje że str.2 zaczyna się na nowej stronie
-                        # (bez tego LO wkleja break ŚRODKIEM TBL2 między R0 i R1, R0 wycieka
-                        # na koniec str.1).
+                        # pageBreakBefore — gwarantuje że str.2 zaczyna się na nowej stronie.
+                        # IND_Bo5 ma już wbudowany page break w paragrafie; dodanie
+                        # pageBreakBefore jest idempotentne (LO i Word obsłużą poprawnie).
                         hpPr2 = hp_page2.find(wt('pPr'))
                         if hpPr2 is None:
                             hpPr2 = etree.Element(wt('pPr'))

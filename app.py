@@ -200,8 +200,11 @@ def compute_default_positions(active_keys, logos_aspect=None,
         area_width_cm = TROJKA_LEFT_AREA_CM  # 4.76 cm - pełna komórka R1.tc[0]
         area_height_cm = TROJKA_AREA_HEIGHT_CM
         QR_W = 2.0  # mniej niż w IND (2.4) ale wystarczająco czytelne
-        PFM_TARGET_W = QR_W * 1.09  # ~2.18 cm
-        OTHER_MAX_W = TROJKA_GRAPHIC_W_CM  # 4.0
+        # PFM teraz dostaje tę samą szerokość docelową co inne logosy — user
+        # użalał się że gdy wgra PFM jako jedno z logo1..4, pierwsze PFM (system)
+        # jest wyraźnie mniejsze od drugiego (user). Wyrównanie do OTHER_MAX_W.
+        OTHER_MAX_W = TROJKA_GRAPHIC_W_CM  # 2.7
+        PFM_TARGET_W = OTHER_MAX_W
         SPACE_AFTER_QR = 0.4
     else:
         QR_W = 2.4
