@@ -1646,6 +1646,62 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             if tcs: _set_cell_value(tcs[0], match.get('z2', ''), size=24, align='right')
         return
 
+    # ── DWÓJKA_Bo5: layout TROJKA_Bo5-style ale z 8 komórkami w r0:
+    #    c0=Tor (label+val w jednej szerokiej komórce 2991dxa = 5.27 cm)
+    #    c1=Godz. (label, 850dxa)  c2=godz-value (850dxa)
+    #    c3..c5 i c6: pustego spacingu
+    #    c7=Mecz # (1890dxa, label+val w jednej komórce)
+    # Drużyny: r3.c0 (z1), r4.c0 (z2). T2 (str.2 header) ma identyczną strukturę,
+    # wypełniany analogicznie. r1 ma 8 etykiet Pkt SET 1..5 + Wygrane sety + Podpis
+    # — bez wartości do wstawiania.
+    if template_type == 'DWOJKA_Bo5':
+        tor_val = match.get('tor', '').strip()
+        godz_val = match.get('godz', '').strip()
+        mecz_val = match.get('mecz', '').strip()
+        z1 = match.get('z1', '')
+        z2 = match.get('z2', '')
+        # Strona 1 (T1)
+        if len(rows) >= 1:
+            tcs = rows[0].findall(wt('tc'))
+            if len(tcs) > 0 and tor_val:
+                _set_cell_label(tcs[0], f'Tor  {tor_val}')
+            if len(tcs) > 2 and godz_val:
+                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+            if len(tcs) >= 8:
+                if mecz_val:
+                    _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
+                else:
+                    _set_cell_label(tcs[-1], '')
+        if len(rows) > 2:
+            tcs = rows[2].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
+        if len(rows) > 3:
+            tcs = rows[3].findall(wt('tc'))
+            if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
+        # Strona 2 (T3, czyli tbls[2]) — identyczny layout
+        all_tbls = [el for el in elements if el.tag == wt('tbl')]
+        if len(all_tbls) >= 3:
+            t3 = all_tbls[2]
+            t3_rows = t3.findall(wt('tr'))
+            if t3_rows:
+                tcs = t3_rows[0].findall(wt('tc'))
+                if len(tcs) > 0 and tor_val:
+                    _set_cell_label(tcs[0], f'Tor  {tor_val}')
+                if len(tcs) > 2 and godz_val:
+                    _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                if len(tcs) >= 8:
+                    if mecz_val:
+                        _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
+                    else:
+                        _set_cell_label(tcs[-1], '')
+            if len(t3_rows) > 2:
+                tcs = t3_rows[2].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
+            if len(t3_rows) > 3:
+                tcs = t3_rows[3].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
+        return
+
     if template_type in ('TROJKA_Bo3',):
         # Bo3 template R1 cells (TROJKA i CZWORKA mają identyczny layout header):
         #   tc[0] "Tor" 5.24 cm — label + value w jednej komórce
@@ -2118,6 +2174,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'IND_Bo5': 'IND_Bo5.docx',           # pucharowa indywidualna Best of 5
         'DWOJKA': 'DWÓJKA_Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
         'DWOJKA_Bo3': 'DWÓJKA_Bo3.docx',     # 2-osobowa pucharowa Best of 3
+        'DWOJKA_Bo5': 'DWÓJKA_Bo5.docx',     # 2-osobowa pucharowa Best of 5
         'TROJKA': 'TRÓJKA_Grupa.docx',
         'TROJKA_Bo3': 'TRÓJKA_Bo3.docx',
         'TROJKA_Bo5': 'TRÓJKA_Bo5.docx',
@@ -2184,16 +2241,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Wygrane sety/Podpis). Bez tego LibreOffice (i Word bez Aptos) używa fallback
     # który jest znacznie szerszy i wszystko rozjeżdża się na 2 wiersze.
     # Zachowujemy oryginalne size (24) - Calibri w tym rozmiarze mieści się normalnie.
-    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA', 'DWOJKA_Bo3'):
+    if template_type in ('TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA', 'DWOJKA_Bo3', 'DWOJKA_Bo5'):
         # Bo2 i Bo3/Bo5 mają wspólny zestaw etykiet, ale Bo3/Bo5 NIE potrzebują
         # normalizacji fontu dla 'SET 1/2/3/4/5' / '(SET N)' bo w nowym szablonie
         # te etykiety są inaczej zbudowane (różne run-e) i normalizacja powoduje
         # niespójność (np. SET 2 robi się grubsze niż SET 1/(SET 3)).
-        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3'):
+        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3', 'DWOJKA_Bo5'):
             TROJKA_LABELS = {'Tor','Godz.','Godzina','Grupa','Mecz','#','Runda',
                              'PunktySET 1','PunktySET 2','PunktySET 3',
                              'PunktySET 4','PunktySET 5',
-                             'Punkty','SET 1','SET 2','SET 3','(SET 3)','SET','3',
+                             'Punkty','SET 1','SET 2','SET 3','SET 4','SET 5','(SET 3)','SET','3',
                              'PktSET 1','PktSET 2','PktSET 3','PktSET 4','PktSET 5',
                              'Pkt','Wygrane','sety','Podpis','Wygranesety','DRUŻYNY'}
         else:
@@ -2276,7 +2333,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # PDF (LibreOffice czyta gridCol) OK, ale DOCX (Word czyta tcW per
             # komórka) miał wąską kolumnę → grafiki nachodziły na tabelę.
             # Czytamy realne wymiary z szablonu — działa dla obu.
-            if template_type in ('TROJKA', 'DWOJKA', 'DWOJKA_Bo3'):
+            if template_type in ('TROJKA', 'DWOJKA', 'DWOJKA_Bo3', 'DWOJKA_Bo5'):
                 g1 = t1.find(wt('tblGrid'))
                 if g1 is not None:
                     _w1 = [int(gc.get(f'{{{W}}}w')) for gc in g1.findall(wt('gridCol')) if gc.get(f'{{{W}}}w')]
@@ -2362,7 +2419,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # - TROJKA (Bo2): lewa kolumna powiększona do 2700 dxa (na grafiki)
             # - TROJKA_Bo3/Bo5: jednorodne skalowanie (puchar trójki nie używa
             #   grafik — col0 zostaje wąska, nie poszerzamy)
-            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3'):
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3', 'DWOJKA_Bo5'):
                 # Puchar nie używa grafik (is_no_graphics=True) — col0 zostaje
                 # wąska, cała szerokość idzie na tabelę wyników (inaczej 2-cyfrowe
                 # numery wierszy 10-18 zawijały się w za wąskiej kolumnie).
@@ -2477,7 +2534,50 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             right_el.set(f'{{{W}}}space', '0')
                             right_el.set(f'{{{W}}}color', 'auto')
                         tgt_tcPr.insert(0, new_borders)
-        
+
+            # ── Jednolita PRAWA KRAWĘDŹ tabeli wynikowej ──────────────────────
+            # PROBLEM (mierzone w px na renderze 300dpi): wiersze danych z JAWNYM
+            # `tcBorders right=12` renderują się 7px (grubo), ale wiersz nagłówka
+            # SET (r0, last cell gridSpan=6, BEZ tcBorders) polegał na `tblBorders
+            # right=12` — a LibreOffice rysuje krawędź zewnętrzną z tblBorders
+            # CIENKO (2px), ignorując sz. Stąd: prawa krawędź gruba w środku,
+            # cienka u góry (SET header) — user: „przy sumie inna niż reszta".
+            # FIX: jawny `tcBorders right sz=12` na OSTATNIEJ komórce KAŻDEGO
+            # wiersza (r0..r21). Jawne per-cell borders LO renderuje poprawnie
+            # (7px), więc cała krawędź jest jednolita od góry do dołu.
+            for tr in t2_rows:
+                cells = tr.findall(wt('tc'))
+                if not cells: continue
+                last_tc = cells[-1]
+                tcPr = last_tc.find(wt('tcPr'))
+                if tcPr is None:
+                    tcPr = etree.Element(wt('tcPr'))
+                    last_tc.insert(0, tcPr)
+                tcBorders = tcPr.find(wt('tcBorders'))
+                if tcBorders is None:
+                    # tcBorders MUSI iść we właściwym miejscu schematu CT_TcPr —
+                    # PO cnfStyle/tcW/gridSpan/hMerge/vMerge, PRZED shd/tcMar/
+                    # vAlign. Wstawienie na pozycję 0 (przed tcW/gridSpan) sprawia
+                    # że LibreOffice/Word IGNORUJĄ element → krawędź zostaje cienka
+                    # (to był bug: r0 nagłówka SET renderował 2px mimo right=12).
+                    tcBorders = etree.Element(wt('tcBorders'))
+                    PRECEDING = {wt('cnfStyle'), wt('tcW'), wt('gridSpan'),
+                                 wt('hMerge'), wt('vMerge')}
+                    insert_at = 0
+                    for k, child in enumerate(list(tcPr)):
+                        if child.tag in PRECEDING:
+                            insert_at = k + 1
+                        else:
+                            break
+                    tcPr.insert(insert_at, tcBorders)
+                right_el = tcBorders.find(wt('right'))
+                if right_el is None:
+                    right_el = etree.SubElement(tcBorders, wt('right'))
+                right_el.set(f'{{{W}}}val', 'single')
+                right_el.set(f'{{{W}}}sz', '12')
+                right_el.set(f'{{{W}}}space', '0')
+                right_el.set(f'{{{W}}}color', 'auto')
+
         # ── BO5: dodatkowo skalujemy tabele 3 i 4 (strona 3 — extension sheet) ──
         # T3 (header s.3) skalujemy proporcjonalnie do tej samej szerokości co T1.
         # T4 (results s.3 z (SET 4)/(SET 5)) celowo NIE skalujemy do max — niech

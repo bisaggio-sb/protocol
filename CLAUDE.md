@@ -125,7 +125,7 @@ typy są BEZ ikony. 🟡 = budujemy/testujemy. 🔴 = niedostępne (wkrótce).
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
 | Indywidualny | działa | działa (Bo3, Bo5; w tym 1/32 i 1/64) |
-| Drużynowy 2-os. | działa | Bo3 działa; Bo5 🔴 wkrótce |
+| Drużynowy 2-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 3-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 4-os. | działa | działa (Bo3, Bo5) |
 
@@ -173,11 +173,31 @@ w wierszu tabeli (PIL).
 - [x] DWÓJKA Grupa real-data fill (TMP 2026 xlsx) — zatwierdzone
 - [x] Renaming plików docx na konwencję PFM SharePoint z UNDERSCORE
 - [x] DWÓJKA Bo3 — szablon pucharowy, routing, format/fazy odblokowane
-- [ ] DWÓJKA Bo5 — szablon pucharowy (zdjąć guard po dodaniu)
+- [x] DWÓJKA Bo5 — szablon pucharowy, routing, guard zdjęty
 - [ ] IND Bo7 — szablon pucharowy (po Bo5 dwójki)
-- [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
+- [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-15 (fix3) — **DWÓJKA Bo5 dodana + TRÓJKA_Bo5 podmieniona + bug 'SET 4/5'.**
+  (a) Nowy szablon `DWÓJKA_Bo5.docx` od usera (4 tabele jak TROJKA_Bo5:
+  header s.1 + score s.1 + header s.2 + score s.2). Header r0 ma 8 komórek:
+  c0=Tor (label+val 5.27cm), c1=Godz./c2=val, c3-c5/c6=filler, c7=Mecz #.
+  Score 20 cols/22 rows, SET 1/SET 2/(SET 3) + 6 SUMA na OBU stronach
+  (page 2 = duplikat — backup sheet jak user zaprojektował). Dodany
+  `_fill_protocol` branch dla DWOJKA_Bo5 wzorowany na TROJKA_Bo5, plus
+  wypełnia oba nagłówki (T1 i T3). Usunięte guards w app.py (bo_options,
+  warning Bo5, blank-form). Dodany routing template_type='DWOJKA_Bo5'
+  dla `is_dwojka and is_pucharowa and Best of 5`. Dodany do regression
+  TEMPLATES → 12/12 OK.
+  (b) **Bug 'SET 4'/'SET 5' w Aptos**: TROJKA_LABELS (font normalization
+  dla TROJKA/DWOJKA Bo3/Bo5) miało 'SET 1/2/3' ale BRAKOWAŁO 'SET 4'/
+  'SET 5'. Stąd w DWÓJKA_Bo5 Pkt SET 4/5 zostawały w Aptos (serif
+  fallback) zamiast Calibri jak SET 1-3. Dodane do listy. Wcześniej
+  nie wyłapało bo żaden poprzedni szablon nie miał 'SET 4'/'SET 5' jako
+  osobnych run text (TROJKA_Bo5 też ma — czyli mogło być nawet wcześniej
+  złe, ale szablon TROJKA może miał inny split runów).
+  (c) Nowy szablon `TRÓJKA_Bo5.docx` od usera podmieniony bez zmian
+  w kodzie (regresja 11/11 → 12/12 OK).
 - 2026-06-15 (fix2) — **3 uwagi usera po fixach z 06-15: faktycznie nie były naprawione.**
   (A) **IND_Bo3/Bo5 „Wygrane sety" mniejsze niż „Punkty SET N"**: poprzedni
   NUCLEAR 2 hardcodował sz=18 dla Wygr/Podpis, podczas gdy NUCLEAR-SET dla
