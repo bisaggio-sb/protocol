@@ -46,12 +46,13 @@ Legenda: bez ikony = działa · 🟡 w testach · 🔴 niedostępne
 
 | Rodzaj turnieju | Faza grupowa | Faza pucharowa (Bo3 / Bo5) | Szablony docx |
 |---|---|---|---|
-| Indywidualny | działa | działa (Bo3 / Bo5) | `IND_Grupa`, `IND_Bo3`, `IND_Bo5` |
+| Indywidualny | działa | działa (Bo3 / Bo5 / Bo7) | `IND_Grupa`, `IND_Bo3`, `IND_Bo5`, `IND_Bo7` |
 | Drużynowy 2-os. | działa | działa (Bo3 / Bo5) | `DWÓJKA_Grupa`, `DWÓJKA_Bo3`, `DWÓJKA_Bo5` |
 | Drużynowy 3-os. | działa | działa (Bo3 / Bo5) | `TRÓJKA_Grupa`, `TRÓJKA_Bo3`, `TRÓJKA_Bo5` |
 | Drużynowy 4-os. | działa | działa (Bo3 / Bo5) | `CZWÓRKA_Grupa`, `CZWÓRKA_Bo3`, `CZWÓRKA_Bo5` |
 
 - **Wszystkie typy** obsługują fazę grupową i drabinki + pełne Bo3/Bo5.
+  Indywidualny dodatkowo **Best of 7** (finały; szablon `IND_Bo7` — bez „Mecz #").
 - **4-os. grupowa** ma poziomy strip z QR + logami pod tabelą.
 
 ## Uruchomienie lokalne
@@ -65,7 +66,7 @@ streamlit run app.py
 
 Wymagania:
 - Python 3.9+
-- Szablony w katalogu: `IND_Grupa.docx`, `IND_Bo3.docx`, `IND_Bo5.docx`, `DWÓJKA_Grupa.docx`, `DWÓJKA_Bo3.docx`, `DWÓJKA_Bo5.docx`, `TRÓJKA_Grupa.docx`, `TRÓJKA_Bo3.docx`, `TRÓJKA_Bo5.docx`, `CZWÓRKA_Grupa.docx`, `CZWÓRKA_Bo3.docx`, `CZWÓRKA_Bo5.docx`
+- Szablony w katalogu: `IND_Grupa.docx`, `IND_Bo3.docx`, `IND_Bo5.docx`, `IND_Bo7.docx`, `DWÓJKA_Grupa.docx`, `DWÓJKA_Bo3.docx`, `DWÓJKA_Bo5.docx`, `TRÓJKA_Grupa.docx`, `TRÓJKA_Bo3.docx`, `TRÓJKA_Bo5.docx`, `CZWÓRKA_Grupa.docx`, `CZWÓRKA_Bo3.docx`, `CZWÓRKA_Bo5.docx`
 - Logo PFM: `assets_pfm_logo.png`
 
 ## Branche i workflow
@@ -101,6 +102,7 @@ protocol/
 ├── IND_Grupa.docx          # Szablon indywidualny (grupowa)
 ├── IND_Bo3.docx            # Indywidualny pucharowa Best of 3
 ├── IND_Bo5.docx            # Indywidualny pucharowa Best of 5
+├── IND_Bo7.docx            # Indywidualny pucharowa Best of 7 (finały, bez „Mecz #")
 ├── DWÓJKA_Grupa.docx       # Szablon 2-osobowy (grupowa)
 ├── DWÓJKA_Bo3.docx         # 2-os. pucharowa Best of 3
 ├── DWÓJKA_Bo5.docx         # 2-os. pucharowa Best of 5

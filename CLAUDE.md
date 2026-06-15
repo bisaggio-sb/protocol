@@ -124,16 +124,17 @@ typy są BEZ ikony. 🟡 = budujemy/testujemy. 🔴 = niedostępne (wkrótce).
 
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
-| Indywidualny | działa | działa (Bo3, Bo5; w tym 1/32 i 1/64) |
+| Indywidualny | działa | działa (Bo3, Bo5, Bo7; w tym 1/32 i 1/64) |
 | Drużynowy 2-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 3-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 4-os. | działa | działa (Bo3, Bo5) |
 
 **Nazewnictwo plików** (zgodne z PFM SharePoint, UNDERSCORE od 2026-06-01):
 `IND_Grupa.docx`, `IND_Bo3.docx`, `IND_Bo5.docx`, `DWÓJKA_Grupa.docx`,
-`DWÓJKA_Bo3.docx`, `TRÓJKA_Grupa.docx`, `TRÓJKA_Bo3.docx`, `TRÓJKA_Bo5.docx`,
-`CZWÓRKA_Grupa.docx`, `CZWÓRKA_Bo3.docx`, `CZWÓRKA_Bo5.docx`. Kod używa stałych
-`IND` / `IND_Bo3` / `DWOJKA` / `DWOJKA_Bo3` / `TROJKA*` / `CZWORKA*` w
+`IND_Bo7.docx`, `DWÓJKA_Bo3.docx`, `TRÓJKA_Grupa.docx`, `TRÓJKA_Bo3.docx`,
+`TRÓJKA_Bo5.docx`, `CZWÓRKA_Grupa.docx`, `CZWÓRKA_Bo3.docx`, `CZWÓRKA_Bo5.docx`.
+Kod używa stałych
+`IND` / `IND_Bo3` / `IND_Bo7` / `DWOJKA` / `DWOJKA_Bo3` / `TROJKA*` / `CZWORKA*` w
 identyfikatorach Python, ale mapuje je na nazwy plików przez dict `template_files`.
 
 **Rozwiązany problem „linie" (str.2 — wyrównanie tabeli wyników):** tabela `(SET 4)/(SET 5)`
@@ -163,8 +164,13 @@ w wierszu tabeli (PIL).
 - DWÓJKA Bo3 (puchar): DZIAŁA. Szablon `DWÓJKA_Bo3.docx` (SET 1/2/(SET 3),
   6 SUMA). Routing w app.py (puchar + Bo3), format Bo3 odblokowany, fazy
   drabinki bez ikon. Col0 wąska (jak TRÓJKA_Bo3 — puchar bez grafik).
-- DWÓJKA Bo5 (puchar): jeszcze nie — guard w app.py blokuje wybór (st.stop
-  + warning „wkrótce"). Format Bo5 oznaczony 🔴.
+- DWÓJKA Bo5 (puchar): DZIAŁA (patrz log 2026-06-15 fix3).
+- IND Bo7 (puchar/finały): DZIAŁA. Szablon `IND_Bo7.docx` od usera (4 tabele:
+  header s.1 + score SET 1-4 + header s.2 + score (SET 5)(SET 6)(SET 7)).
+  User CELOWO usunął etykietę „Mecz #" (Bo7 grany praktycznie tylko w finale —
+  jeden mecz, numer zbędny). Format „Best of 7" w selectboxie TYLKO dla
+  Indywidualnego. Weryfikacja renderem: obie strony wyrównane (L=0, R≈817px),
+  fonty Calibri spójne, brak Mecz #.
 
 ### Backlog (kolejność = priorytet)
 - [x] IND Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data
@@ -174,10 +180,31 @@ w wierszu tabeli (PIL).
 - [x] Renaming plików docx na konwencję PFM SharePoint z UNDERSCORE
 - [x] DWÓJKA Bo3 — szablon pucharowy, routing, format/fazy odblokowane
 - [x] DWÓJKA Bo5 — szablon pucharowy, routing, guard zdjęty
-- [ ] IND Bo7 — szablon pucharowy (po Bo5 dwójki)
+- [x] IND Bo7 — szablon pucharowy/finały (bez „Mecz #"), routing, wyrównanie str.2
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-15 (fix4) — **IND Bo7 dodany (finały).** Nowy szablon `IND_Bo7.docx`
+  od usera: 4 tabele (header s.1, score SET 1-4, header s.2, score (SET 5/6/7))
+  z twardym page-breakiem w T1→T2. Struktura analogiczna do IND_Bo5, ale user
+  USUNĄŁ etykietę „Mecz #" (Bo7 grany w praktyce tylko w finale — jeden mecz).
+  Zmiany:
+  (a) `generate_docx`: `template_files['IND_Bo7']`; nowy `_fill_protocol` branch
+  IND_Bo7 (godz→tcs[3], imiona→hrows[2/3].tc[0], BEZ Mecz #); IND_Bo7 dopisane
+  do list font-normalizacji (IND_BO_LABELS rozszerzone o PktSET 6/7, SET 6/7,
+  (SET 6)/(SET 7), 'Godz'), `_fix_pkt_set_cells`/`_force_calibri_score_labels`,
+  skip_placeholders, header right-indent, no-graphics left-col, insert nagłówka
+  str.2 (cloned_tbls[2]).
+  (b) **Wyrównanie str.2** (SET 5/6/7): osobny blok `if template_type=='IND_Bo7'`
+  (Bo5 ma swój, inne wymiary). Geometrię str.1 czytamy DYNAMICZNIE z szablonu —
+  tabelę wyników str.1 wykrywamy po 'IMIONA' (NIE po 'SET 1', bo nagłówek ma
+  'PktSET 1' i jest szerszy/inny ind → str.2 wyrównywałaby się do nagłówka,
+  nie do tabeli wyników). Skalujemy gridCol+tcW str.2 do tblW str.1 (10710),
+  jawne jc=left + tblInd = ind str.1 (-725). Po fixie: L=0, R≈817px na obu str.
+  (c) `app.py`: „Best of 7" w `bo_options` TYLKO dla Indywidualnego; routing
+  w obu blokach template_type (grupowy ~1787 i pucharowy ~2040); fmt_suffix
+  '_Bo7'; pusty formularz (osobny selectbox dla IND z Bo7 + mapping + label).
+  (d) Regresja: IND_Bo7 w TEMPLATES + `is_puch` łapie 'Bo7' → 13/13 OK.
 - 2026-06-15 (fix3) — **DWÓJKA Bo5 dodana + TRÓJKA_Bo5 podmieniona + bug 'SET 4/5'.**
   (a) Nowy szablon `DWÓJKA_Bo5.docx` od usera (4 tabele jak TROJKA_Bo5:
   header s.1 + score s.1 + header s.2 + score s.2). Header r0 ma 8 komórek:

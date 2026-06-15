@@ -768,6 +768,9 @@ with col_form:
                 "Best of 3": "Best of 3",
                 "Best of 5": "Best of 5",
             }
+            # Best of 7 — tylko indywidualny (w praktyce wyłącznie finały).
+            if tournament_type == "Indywidualny":
+                bo_options["Best of 7"] = "Best of 7"
             # Default: Bo3 dla 1/8, Bo5 dla 1/4 i wyżej (zgodnie z FAQ)
             default_idx = 0
             if "1/4" in tournament_phase or "1/2" in tournament_phase or \
@@ -777,7 +780,8 @@ with col_form:
                 list(bo_options.keys()),
                 format_func=lambda k: bo_options[k],
                 index=default_idx,
-                help="Faza pucharowa zawsze Best of 3 lub Best of 5."
+                help="Faza pucharowa: Best of 3 lub Best of 5. "
+                     "Best of 7 dostępny dla turnieju indywidualnego (finały)."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -1653,8 +1657,16 @@ with st.expander("➕ Pobierz pusty formularz"):
                 index=0, key="blank_format",
                 help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 / Best of 5."
             )
+        elif blank_type == "Indywidualny":
+            # Indywidualny ma dodatkowo Best of 7 (finały)
+            blank_format = st.selectbox(
+                "Format setów",
+                ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)",
+                 "Best of 7 (puchar)"],
+                index=0, key="blank_format"
+            )
         else:
-            # IND, 3-os, 4-os mają pełen zestaw faz
+            # 3-os, 4-os mają pełen zestaw faz (bez Bo7)
             blank_format = st.selectbox(
                 "Format setów",
                 ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)"],
@@ -1788,6 +1800,8 @@ if gen_clicked:
             template_type = 'IND_Bo3'
         elif is_individual and sets_format == "Best of 5":
             template_type = 'IND_Bo5'
+        elif is_individual and sets_format == "Best of 7":
+            template_type = 'IND_Bo7'
         elif is_trojka and sets_format == "Best of 3":
             template_type = 'TROJKA_Bo3'
         elif is_trojka and sets_format == "Best of 5":
@@ -1838,7 +1852,10 @@ if gen_clicked:
         
         # Nazwa pliku + PDF konwersja
         base_name = re.sub(r'[^\w\s-]', '', tournament_name).strip().replace(' ', '_') or "protokoly"
-        fmt_suffix = '_Bo3' if sets_format == 'Best of 3' else ('_Bo5' if sets_format == 'Best of 5' else '')
+        fmt_suffix = ('_Bo3' if sets_format == 'Best of 3'
+                      else '_Bo5' if sets_format == 'Best of 5'
+                      else '_Bo7' if sets_format == 'Best of 7'
+                      else '')
         safe_name = f"{base_name}_godzina_{time_filter.replace(':', '_')}{fmt_suffix}"
         
         pdf_bytes, pdf_err = (None, None)
@@ -2036,6 +2053,8 @@ if gen_clicked:
                 template_type = 'IND_Bo3'
             elif is_individual and is_pucharowa and sets_format == "Best of 5":
                 template_type = 'IND_Bo5'
+            elif is_individual and is_pucharowa and sets_format == "Best of 7":
+                template_type = 'IND_Bo7'
             elif is_trojka and is_pucharowa and sets_format == "Best of 3":
                 template_type = 'TROJKA_Bo3'
             elif is_trojka and is_pucharowa and sets_format == "Best of 5":
@@ -2082,6 +2101,8 @@ if gen_clicked:
                 format_suffix = '_Bo3'
             elif sets_format == 'Best of 5':
                 format_suffix = '_Bo5'
+            elif sets_format == 'Best of 7':
+                format_suffix = '_Bo7'
             safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
     
         pdf_bytes, pdf_err = (None, None)
@@ -2220,6 +2241,8 @@ if blank_clicked:
                 blank_template = 'IND_Bo3'
             elif "Best of 5" in blank_format:
                 blank_template = 'IND_Bo5'
+            elif "Best of 7" in blank_format:
+                blank_template = 'IND_Bo7'
             else:
                 blank_template = 'IND'
         
@@ -2254,6 +2277,7 @@ if blank_clicked:
         'IND': 'indywidualny_2sety',
         'IND_Bo3': 'indywidualny_Bo3',
         'IND_Bo5': 'indywidualny_Bo5',
+        'IND_Bo7': 'indywidualny_Bo7',
         'DWOJKA': 'dwojka_grupowa',
         'DWOJKA_Bo3': 'dwojka_Bo3',
         'DWOJKA_Bo5': 'dwojka_Bo5',

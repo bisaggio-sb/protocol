@@ -14,14 +14,14 @@ DATA = [("Grupa A", [
     {'tor': '2', 'godz': '09:30', 'mecz': '2', 'grupa': 'A',
      'z1': 'Marek Rogalski', 'z2': 'Konrad Rudnik'},
 ])]
-TEMPLATES = ['IND', 'IND_Bo3', 'IND_Bo5',
+TEMPLATES = ['IND', 'IND_Bo3', 'IND_Bo5', 'IND_Bo7',
              'DWOJKA', 'DWOJKA_Bo3', 'DWOJKA_Bo5',
              'TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5',
              'CZWORKA', 'CZWORKA_Bo3', 'CZWORKA_Bo5']
 
 failures = []
 for t in TEMPLATES:
-    is_puch = ('Bo3' in t or 'Bo5' in t)
+    is_puch = ('Bo3' in t or 'Bo5' in t or 'Bo7' in t)
     try:
         d = g.build_document(
             sheet_id='', sheets_url='https://e.com/s', sheets_data=DATA,
