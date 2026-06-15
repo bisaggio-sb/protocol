@@ -1566,6 +1566,43 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             _fill_bo5_header(all_tbls[2])   # nagłówek str.2
         return  # IND_Bo5 ma własną logikę
 
+    # ── Bo7 IND: pucharowa 1v1, 2 strony (twardy page break w szablonie) ──
+    # Identyczna struktura 4-tabelowa jak Bo5: all_tbls[0]=nagłówek str.1,
+    # [1]=wynik SET 1-4, [2]=nagłówek str.2, [3]=wynik (SET 5)(SET 6)(SET 7).
+    # RÓŻNICA vs Bo5: user USUNĄŁ etykietę „Mecz #" (Bo7 to praktycznie tylko
+    # finał — jeden mecz, numer zbędny). Nagłówek r0 ma 10 komórek:
+    # tcs[0]=Tor(label), tcs[2]=Godz(label), tcs[3]=godz-val, reszta filler.
+    # Imiona w hrows[2]/hrows[3].tc[0] (jak Bo5).
+    if template_type == 'IND_Bo7':
+        tor_val = match.get('tor', '').strip()
+        godz_val = match.get('godz', '').strip()
+        z1 = match.get('z1', '')
+        z2 = match.get('z2', '')
+        all_tbls = [el for el in elements if el.tag == wt('tbl')]
+
+        def _fill_bo7_header(tbl):
+            hrows = tbl.findall(wt('tr'))
+            if not hrows:
+                return
+            tcs = hrows[0].findall(wt('tc'))
+            if len(tcs) > 0 and tor_val:
+                _set_cell_label(tcs[0], f'Tor  {tor_val}')
+            if len(tcs) > 3 and godz_val:
+                _set_cell_value(tcs[3], godz_val, size=24, bold=True, align='left')
+            # Brak komórki „Mecz #" — pomijamy.
+            if len(hrows) > 2:
+                tcs = hrows[2].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
+            if len(hrows) > 3:
+                tcs = hrows[3].findall(wt('tc'))
+                if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
+
+        if len(all_tbls) >= 1:
+            _fill_bo7_header(all_tbls[0])   # nagłówek str.1
+        if len(all_tbls) >= 3:
+            _fill_bo7_header(all_tbls[2])   # nagłówek str.2
+        return  # IND_Bo7 ma własną logikę
+
     # ── Bo3/Bo5 CZWÓRKA: landscape, osobne komórki wartości (tc[1]=tor, tc[3]=godz,
     #    tc[5]=mecz) + nazwy drużyn w r1.tc[1] / r2.tc[1]. Header w T0 (i T2 dla Bo5). ──
     if template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5'):
@@ -2151,7 +2188,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Filtruj placeholderowe mecze („Gracz N" w grupowej, „bye" w drabince) dla
     # IND. Tylko indywidualny — drużynówki nie mają tego problemu (zespół ma
     # zwykle prawdziwą nazwę).
-    if skip_placeholders and template_type in ('IND', 'IND_Bo3', 'IND_Bo5'):
+    if skip_placeholders and template_type in ('IND', 'IND_Bo3', 'IND_Bo5', 'IND_Bo7'):
         filtered = []
         for entry in sheets_data:
             if len(entry) == 3:
@@ -2172,6 +2209,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'IND': 'IND_Grupa.docx',
         'IND_Bo3': 'IND_Bo3.docx',           # pucharowa indywidualna Best of 3
         'IND_Bo5': 'IND_Bo5.docx',           # pucharowa indywidualna Best of 5
+        'IND_Bo7': 'IND_Bo7.docx',           # pucharowa indywidualna Best of 7 (finały)
         'DWOJKA': 'DWÓJKA_Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
         'DWOJKA_Bo3': 'DWÓJKA_Bo3.docx',     # 2-osobowa pucharowa Best of 3
         'DWOJKA_Bo5': 'DWÓJKA_Bo5.docx',     # 2-osobowa pucharowa Best of 5
@@ -2991,7 +3029,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # 1) Pomniejszenie fontów etykiet (24→20)
     # 2) Przesunięcie tabeli 1 w prawo (tblInd=600 dxa)
     # Trójkowy szablon ma inną strukturę i nie wymaga tych poprawek.
-    if template_type in ('IND', 'IND_Bo3', 'IND_Bo5'):
+    if template_type in ('IND', 'IND_Bo3', 'IND_Bo5', 'IND_Bo7'):
         # IND_Bo3: zwęzić Wygrane sety (idx 4: 1275→990 dxa) na rzecz Podpis (idx 5, +285).
         # Tylko Bo3 — bo Bo3 T0 ma 6 kolumn (Tor Godz SET1-3 → idx 4=Wygrane, idx 5=Podpis).
         # Bo5 ma 8 kolumn (SET1-5) gdzie idx 4/5 to Pkt SET 4/5 — NIE ruszamy.
@@ -3020,12 +3058,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # IND_Bo3/Bo5: pomniejszenie WSZYSTKICH runs w row 1 T1 (Punkty/SET labels)
         # — bez sprawdzania text content. Template ma "Punkty" split na "Punkt"+"y"
         # jako osobne runs, więc selective matching nie działa.
-        if template_type in ('IND_Bo3', 'IND_Bo5'):
-            IND_BO_LABELS = {'Tor', 'Godz.', 'Godzina', 'Mecz', 'Mecz #', '#',
+        if template_type in ('IND_Bo3', 'IND_Bo5', 'IND_Bo7'):
+            IND_BO_LABELS = {'Tor', 'Godz.', 'Godz', 'Godzina', 'Mecz', 'Mecz #', '#',
                              'PunktySET 1', 'PunktySET 2', 'PunktySET 3',
-                             'PunktySET 4', 'PunktySET 5',
+                             'PunktySET 4', 'PunktySET 5', 'PunktySET 6', 'PunktySET 7',
                              'Punkty', 'SET 1', 'SET 2', 'SET 3', 'SET 4', 'SET 5',
-                             '(SET 3)', '(SET 4)', '(SET 5)',
+                             'SET 6', 'SET 7',
+                             '(SET 3)', '(SET 4)', '(SET 5)', '(SET 6)', '(SET 7)',
                              'Wygrane sety', 'Wygranesety', 'Wygrane', 'sety',
                              'Podpis', 'Runda', 'I M I O N A', 'S U M A'}
             for r in body.iter(wt('r')):
@@ -3339,7 +3378,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
     # ── Pucharowa (Bo3/Bo5): napraw komórki Pkt SET (3 linie → 2) + Calibri na
     # etykietach tabel wynikowych (IMIONA/SUMA/WYNIK krzywe przez Aptos Narrow).
-    if template_type in ('IND_Bo3', 'IND_Bo5', 'TROJKA_Bo3', 'TROJKA_Bo5',
+    if template_type in ('IND_Bo3', 'IND_Bo5', 'IND_Bo7', 'TROJKA_Bo3', 'TROJKA_Bo5',
                          'CZWORKA_Bo3', 'CZWORKA_Bo5'):
         # CZWORKA_Bo5: pomijamy _fix_pkt_set_cells — komórki Pkt SET są już
         # zbudowane wcześniej w bloku CZWORKA z sz=20 (zgodnie z Wygr/Podpis).
@@ -3402,6 +3441,81 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             _set_pr(_pr, 'jc', {'val': 'left'})
             _set_pr(_pr, 'tblInd', {'w': '715', 'type': 'dxa'})
             _set_pr(_pr, 'tblLayout', {'type': 'fixed'})
+
+    # ── IND_Bo7: wyrównaj tabelę wyników str.2 ((SET 5)/(SET 6)/(SET 7)) do tabeli
+    # str.1 (SET 1-4). W szablonie usera str.2 ma osobne wcięcie (tblInd=355) i jest
+    # naturalnie węższa (3 sety vs 4) → lewa krawędź przesunięta w prawo, prawa za
+    # krótka względem str.1. Analogicznie do IND_Bo5, ale geometrię str.1 czytamy
+    # DYNAMICZNIE z szablonu (Bo7 ma inne wymiary niż Bo5).
+    if template_type == 'IND_Bo7':
+        _TBLPR_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual',
+                        'tblStyleRowBandSize', 'tblStyleColBandSize', 'tblW', 'jc',
+                        'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout',
+                        'tblCellMar', 'tblLook']
+
+        def _set_pr7(pr, tag, attrs):
+            for _o in pr.findall(wt(tag)):
+                pr.remove(_o)
+            _el = etree.Element(wt(tag))
+            for _k, _v in attrs.items():
+                _el.set(f'{{{W}}}{_k}', _v)
+            _rank = _TBLPR_ORDER.index(tag) if tag in _TBLPR_ORDER else 99
+            _idx = len(list(pr))
+            for _i, _ch in enumerate(pr):
+                _ct = _ch.tag.replace(f'{{{W}}}', '')
+                if (_TBLPR_ORDER.index(_ct) if _ct in _TBLPR_ORDER else 99) > _rank:
+                    _idx = _i
+                    break
+            pr.insert(_idx, _el)
+
+        _all_t = body.findall(wt('tbl'))
+        # Tabela WYNIKÓW str.1 = zawiera 'IMIONA' (nagłówek lewej kolumny) i NIE '(SET'
+        # (nawias = str.2). UWAGA: tabele nagłówkowe zawierają 'PktSET 1' (→ podłańcuch
+        # 'SET 1'), więc NIE filtrujemy po 'SET 1' — bralibyśmy nagłówek (szerszy, inny ind).
+        _p1 = None
+        for _t in _all_t:
+            _txt = ''.join(x.text or '' for x in _t.iter(wt('t')))
+            if 'IMIONA' in _txt.replace(' ', '') and '(SET' not in _txt:
+                _p1 = _t
+                break
+        _target_w = 10710   # fallback = znana szerokość str.1 z szablonu
+        _target_ind = '-725'
+        if _p1 is not None:
+            _g1 = _p1.find(wt('tblGrid'))
+            if _g1 is not None:
+                _s1 = sum(int(c.get(f'{{{W}}}w', '0')) for c in _g1.findall(wt('gridCol')))
+                if _s1:
+                    _target_w = _s1
+            _pr1 = _p1.find(wt('tblPr'))
+            _ind1 = _pr1.find(wt('tblInd')) if _pr1 is not None else None
+            if _ind1 is not None and _ind1.get(f'{{{W}}}w'):
+                _target_ind = _ind1.get(f'{{{W}}}w')
+
+        for _t in _all_t:
+            _txt = ''.join(x.text or '' for x in _t.iter(wt('t')))
+            if '(SET 5)' not in _txt and '(SET 6)' not in _txt and '(SET 7)' not in _txt:
+                continue
+            _pr = _t.find(wt('tblPr'))
+            if _pr is None:
+                continue
+            _grid = _t.find(wt('tblGrid'))
+            _cur = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol'))) if _grid is not None else 0
+            if _cur:
+                _f = _target_w / _cur
+                for _c in _grid.findall(wt('gridCol')):
+                    _c.set(f'{{{W}}}w', str(int(int(_c.get(f'{{{W}}}w', '0')) * _f)))
+                for _tr in _t.findall(wt('tr')):
+                    for _tc in _tr.findall(wt('tc')):
+                        _tcpr = _tc.find(wt('tcPr'))
+                        _tcw = _tcpr.find(wt('tcW')) if _tcpr is not None else None
+                        if _tcw is not None and _tcw.get(f'{{{W}}}w'):
+                            _tcw.set(f'{{{W}}}w', str(int(int(_tcw.get(f'{{{W}}}w')) * _f)))
+                _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
+                _set_pr7(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
+            # jawne jc=left + ten sam tblInd co str.1 (inaczej LO centruje / przesuwa)
+            _set_pr7(_pr, 'jc', {'val': 'left'})
+            _set_pr7(_pr, 'tblInd', {'w': _target_ind, 'type': 'dxa'})
+            _set_pr7(_pr, 'tblLayout', {'type': 'fixed'})
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
@@ -3550,7 +3664,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # Czekaj — odwrotnie: tabela kończy na 10800, header na 10466. Header KRÓTSZY niż tabela.
                 # No wait — patrząc na screenshot user, header wystaje na prawo OD tabeli. Coś się nie zgadza
                 # z moimi obliczeniami. Daję ind right=800 dxa (~1.4 cm) jako empiryczny fix.
-                if template_type in ('IND_Bo3', 'IND_Bo5'):
+                if template_type in ('IND_Bo3', 'IND_Bo5', 'IND_Bo7'):
                     hind = etree.SubElement(hpPr, wt('ind'))
                     hind.set(f'{{{W}}}right', '800')
                 hsp = etree.SubElement(hpPr, wt('spacing'))
@@ -3587,7 +3701,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # układ 4-tabelowy (header/score str.1 + header/score str.2),
                 # nagłówek str.2 zadziała automatycznie. Guard `len >= 3` chroni
                 # przed wstawieniem gdy szablon ma inną strukturę.
-                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5', 'DWOJKA_Bo5'):
+                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5', 'IND_Bo7', 'DWOJKA_Bo5'):
                     cloned_tbls = [el for el in cloned if el.tag == wt('tbl')]
                     if len(cloned_tbls) >= 3:
                         t3_in_cloned = cloned_tbls[2]
@@ -3722,7 +3836,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # własny napis "Wyniki turnieju" więc tylko placujemy anchored w R1.tc[0]
             # (kotwica) — pozycje z compute_default_positions dla CZWORKA mają Y~22.5cm
             # co spycha je pod tabelę dzięki layoutInCell=0.
-            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'IND_Bo3', 'IND_Bo5', 'CZWORKA_Bo3', 'CZWORKA_Bo5'):
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'IND_Bo3', 'IND_Bo5', 'IND_Bo7', 'CZWORKA_Bo3', 'CZWORKA_Bo5'):
                 pass  # pucharowa — nie ruszamy lewej kolumny T2 (zostaje IMIONA / oryginalna treść)
             elif template_type == 'CZWORKA':
                 # Strip table: inline images w tabeli na pełną szerokość strony.
