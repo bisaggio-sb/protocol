@@ -2992,6 +2992,46 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                 for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                                     fonts.set(f'{{{W}}}{a}', 'Calibri')
 
+            # NUCLEAR 2: nagłówkowe komórki „Wygrane sety" i „Podpis" — normalizuj
+            # WSZYSTKIE runy w nich do Calibri sz=18. W IND_Bo5 „Wygrane sety" jest
+            # rozbite na runy „Wygr"+„."+„ sety"; selektywne matchowanie po tekście
+            # łapało tylko „sety" (→Calibri sz=18), a „Wygr"+„." zostawały w Aptos
+            # BEZ rozmiaru → dziedziczyły docDefault (~24pt) i serif fallback w LO,
+            # przez co „Wygr." renderowało się wielką, dziwną czcionką. Cell-level
+            # rebuild (jak SET-nuclear wyżej) gwarantuje spójność całej komórki.
+            for tbl in body.findall(wt('tbl')):
+                rows_t = tbl.findall(wt('tr'))
+                # tylko tabele nagłówkowe (mało wierszy) — nie tabele wynikowe
+                if len(rows_t) > 6:
+                    continue
+                for tr in rows_t:
+                    for tc in tr.findall(wt('tc')):
+                        cell_text = ''.join((t.text or '') for t in tc.iter(wt('t')))
+                        cell_strip = cell_text.replace(' ', '')
+                        is_wygr = ('Wygr' in cell_text and 'set' in cell_text.lower())
+                        is_podpis = (cell_strip == 'Podpis')
+                        if not (is_wygr or is_podpis):
+                            continue
+                        for run in tc.iter(wt('r')):
+                            ts = run.findall(wt('t'))
+                            if not ts: continue
+                            if not ''.join((t.text or '') for t in ts).strip():
+                                continue
+                            rPr = run.find(wt('rPr'))
+                            if rPr is None:
+                                rPr = etree.Element(wt('rPr'))
+                                run.insert(0, rPr)
+                            for tag in ('sz', 'szCs'):
+                                el = rPr.find(wt(tag))
+                                if el is None:
+                                    el = etree.SubElement(rPr, wt(tag))
+                                el.set(f'{{{W}}}val', '18')
+                            fonts = rPr.find(wt('rFonts'))
+                            if fonts is None:
+                                fonts = etree.SubElement(rPr, wt('rFonts'))
+                            for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                                fonts.set(f'{{{W}}}{a}', 'Calibri')
+
             # Instrukcje (paragrafy "Sety 1 i 2..." i "Set przegrany..."): wymusz italic + szary
             # + Calibri. Bez tego LibreOffice renderuje czarny non-italic (fallback z Aptos Narrow).
             for p in body.findall(wt('p')):
@@ -3420,7 +3460,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # również — szablon ma 4 tabele (str.1 header, str.1 score,
                 # str.2 header, str.2 score), więc wstawiamy hp_page2 przed
                 # tbls[2] (header str.2) — zgodnie z TROJKA_Bo5 / CZWORKA_Bo5.
-                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5'):
+                # DWOJKA_Bo5 dodane na zapas — gdy szablon powstanie i będzie miał
+                # układ 4-tabelowy (header/score str.1 + header/score str.2),
+                # nagłówek str.2 zadziała automatycznie. Guard `len >= 3` chroni
+                # przed wstawieniem gdy szablon ma inną strukturę.
+                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5', 'DWOJKA_Bo5'):
                     cloned_tbls = [el for el in cloned if el.tag == wt('tbl')]
                     if len(cloned_tbls) >= 3:
                         t3_in_cloned = cloned_tbls[2]
