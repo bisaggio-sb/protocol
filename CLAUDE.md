@@ -178,6 +178,31 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-15 (fix) — **Follow-up po 3 uwagach usera (screeny) do iteracji 06-14:**
+  (A) **IND_Bo5 „Wygr." wielką dziwną czcionką**: komórka „Wygrane sety" w
+  szablonie jest rozbita na runy „Wygr"+„."+„ sety". Selektywne matchowanie
+  fontu/rozmiaru (IND_BO_LABELS, LABELS_HEADER, NUCLEAR-SET) łapało tylko
+  „sety" → Calibri sz=18; „Wygr"+„." zostawały Aptos BEZ sz → dziedziczyły
+  docDefault (~24pt) + serif fallback w LO. FIX: nowy blok „NUCLEAR 2" —
+  cell-level rebuild komórek nagłówka zawierających „Wygr…set" oraz „Podpis"
+  (tabele ≤6 wierszy) na Calibri sz=18 dla WSZYSTKICH runów. Zweryfikowane
+  renderem: „Wygr. sety" = ten sam rozmiar co „Pkt SET N"/„Podpis".
+  (B) **DWÓJKA Grupa/Bo3 prawa krawędź za cienka**: cell tcBorders right=12
+  na ostatniej kolumnie SUMA NIE renderuje się na ZEWNĘTRZNEJ krawędzi tabeli
+  w LibreOffice — LO bierze krawędź zewnętrzną z `tblBorders` (było sz=6).
+  Stąd: gruby separator SUMA (left, sz=12) vs cienka krawędź tabeli (right).
+  FIX: patch binarny `tblBorders right` 6→12 w tabeli wynikowej obu szablonów.
+  Teraz prawa krawędź = gruba, spójna z separatorami SUMA. (Lewa/górna/dolna
+  krawędź zostają sz=6 — zgodnie z designem.)
+  (C) **DWÓJKA Bo3 „Punkty SET 3" wyrównane do GÓRY**: prawdziwa przyczyna
+  (≠ tcMar z 06-14): komórka c3 w r2 NIE miała `<w:vAlign w:val="center"/>`
+  podczas gdy c1/c2/c4/c5 miały → tekst lądował przy górnej krawędzi. To był
+  błąd w szablonie usera. FIX: patch binarny — wstrzyknięty `vAlign=center`
+  do c3 (po tcMar, przed </tcPr>). Zweryfikowane renderem: SET 3 wyśrodkowane
+  pionowo jak reszta. (tcMar z 06-14 zostaje — i tak pasuje do sąsiadów.)
+  (D) **DWÓJKA Bo5 nagłówek str.2 na zapas**: dodane 'DWOJKA_Bo5' do gałęzi
+  insertu hp_page2 — gdy szablon powstanie (4-tabelowy), nagłówek str.2
+  zadziała automatycznie (guard `len(cloned_tbls) >= 3`).
 - 2026-06-14 (fix) — **6 problemów zgłoszonych przez usera w jednej iteracji:**
   (#1) **IND grupowa 240 vs 230 protokołów**: NIE bug — `skip_placeholders=True`
   (default dla IND) filtruje mecze z „Gracz N" po którejkolwiek stronie. 10
