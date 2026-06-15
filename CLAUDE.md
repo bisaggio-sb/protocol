@@ -169,8 +169,9 @@ w wierszu tabeli (PIL).
   header s.1 + score SET 1-4 + header s.2 + score (SET 5)(SET 6)(SET 7)).
   User CELOWO usunął etykietę „Mecz #" (Bo7 grany praktycznie tylko w finale —
   jeden mecz, numer zbędny). Format „Best of 7" w selectboxie TYLKO dla
-  Indywidualnego. Weryfikacja renderem: obie strony wyrównane (L=0, R≈817px),
-  fonty Calibri spójne, brak Mecz #.
+  Indywidualnego. Weryfikacja renderem: obie strony WYŚRODKOWANE z równymi
+  marginesami (L≈45px, R≈863px, gap L/R≈47px), fonty Calibri spójne, etykiety
+  „Pkt." z kropką, brak Mecz #. (Centrowanie + kropki: log 2026-06-15 fix5.)
 
 ### Backlog (kolejność = priorytet)
 - [x] IND Bo5 — szablon, fill, wyrównanie str.2, weryfikacja real-data
@@ -184,6 +185,25 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-15 (fix5) — **IND Bo7: centrowanie tabel w PDF + kropki po „Pkt".**
+  (A) **Bug „strona siada na lewej krawędzi" (PDF).** Szablon używa UJEMNEGO
+  `tblInd` (-720 nagłówki / -725 wyniki) — tabela jest szersza niż obszar tekstu
+  (wyniki 10710 dxa vs usable 9026) i ma wystawać symetrycznie w marginesy.
+  WORD liczy tblInd od marginesu tekstu → renderuje z równymi marginesami (OK,
+  „mój docx"). LIBREOFFICE (silnik docx→pdf) liczy tblInd od krawędzi STRONY
+  i przycina ujemny do 0 → tabela dosuwa się do lewej krawędzi (zmierzone L=0,
+  prawy gap 92px — asymetria). Poprzedni „wyrównanie str.2" kopiował ten ujemny
+  tblInd ze str.1, więc OBIE strony siadały na lewej. FIX: `jc=center` na
+  WSZYSTKICH tabelach Bo7 (nagłówki + wyniki, obie strony) + usunięcie tblInd.
+  Centrowanie jest niezależne od układu odniesienia → identyczne w Word i LO.
+  Skalowanie str.2 (SET 5/6/7) do szer. str.1 (10710) zostaje (KROK 1), więc
+  obie strony równo szerokie i wyrównane. Zmierzone po fixie: L=45/46px,
+  R=863px, gap≈47px na obu str. (B) **Kropka po „Pkt"**: runy nagłówka to
+  split „Pkt"+<br/>+„SET N" (gołe „Pkt", 14×=7/str). Dodany loop zamieniający
+  run o tekście dokładnie „Pkt" → „Pkt." (bottom-left suma „PKT" nietknięta —
+  case-sensitive; font już wymuszony przez NUCLEAR-SET match po podłańcuchu
+  'Pkt' — kropka go nie psuje). Weryfikacja renderem: „Pkt. SET 1..7", layout
+  wyśrodkowany na obu str. Regresja 13/13 OK.
 - 2026-06-15 (fix4) — **IND Bo7 dodany (finały).** Nowy szablon `IND_Bo7.docx`
   od usera: 4 tabele (header s.1, score SET 1-4, header s.2, score (SET 5/6/7))
   z twardym page-breakiem w T1→T2. Struktura analogiczna do IND_Bo5, ale user

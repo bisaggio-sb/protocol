@@ -3520,18 +3520,15 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 _p1 = _t
                 break
         _target_w = 10710   # fallback = znana szerokość str.1 z szablonu
-        _target_ind = '-725'
         if _p1 is not None:
             _g1 = _p1.find(wt('tblGrid'))
             if _g1 is not None:
                 _s1 = sum(int(c.get(f'{{{W}}}w', '0')) for c in _g1.findall(wt('gridCol')))
                 if _s1:
                     _target_w = _s1
-            _pr1 = _p1.find(wt('tblPr'))
-            _ind1 = _pr1.find(wt('tblInd')) if _pr1 is not None else None
-            if _ind1 is not None and _ind1.get(f'{{{W}}}w'):
-                _target_ind = _ind1.get(f'{{{W}}}w')
 
+        # KROK 1: str.2 (SET 5/6/7) jest naturalnie węższa (3 sety vs 4) — skalujemy
+        # jej gridCol+tcW do szerokości str.1, żeby obie tabele były tak samo szerokie.
         for _t in _all_t:
             _txt = ''.join(x.text or '' for x in _t.iter(wt('t')))
             if '(SET 5)' not in _txt and '(SET 6)' not in _txt and '(SET 7)' not in _txt:
@@ -3553,10 +3550,33 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             _tcw.set(f'{{{W}}}w', str(int(int(_tcw.get(f'{{{W}}}w')) * _f)))
                 _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
                 _set_pr7(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
-            # jawne jc=left + ten sam tblInd co str.1 (inaczej LO centruje / przesuwa)
-            _set_pr7(_pr, 'jc', {'val': 'left'})
-            _set_pr7(_pr, 'tblInd', {'w': _target_ind, 'type': 'dxa'})
+
+        # KROK 2: WYŚRODKOWANIE wszystkich tabel (nagłówki + wyniki, obie strony).
+        # Szablon używa UJEMNEGO tblInd (-720/-725) żeby tabela szersza niż obszar
+        # tekstu „wystawała" symetrycznie w marginesy — Word liczy tblInd od marginesu
+        # tekstu i renderuje OK. Ale LibreOffice (silnik docx→pdf) liczy tblInd od
+        # krawędzi STRONY i przycina ujemny do 0 → tabela dosuwa się do lewej krawędzi
+        # (user: „siada na lewej krawędzi"). `jc=center` jest niezależne od układu
+        # odniesienia → centruje tak samo w Word i w LO. Usuwamy tblInd (zostawiony
+        # ujemny i tak by przesuwał). Po fixie: równe marginesy L/R w PDF, obie strony
+        # wyrównane (str.2 wyskalowana w KROKU 1 do szer. str.1).
+        for _t in _all_t:
+            _pr = _t.find(wt('tblPr'))
+            if _pr is None:
+                continue
+            _set_pr7(_pr, 'jc', {'val': 'center'})
+            for _o in _pr.findall(wt('tblInd')):
+                _pr.remove(_o)
             _set_pr7(_pr, 'tblLayout', {'type': 'fixed'})
+
+        # Kropka po „Pkt" w etykietach nagłówka (user: „po Pkt dodaj kropki").
+        # Szablon ma runy split: „Pkt" + <w:br/> + „SET N". Bottom-left „PKT" (suma,
+        # wielkie litery) NIE jest łapane (case-sensitive). Font już wymuszony wyżej
+        # przez NUCLEAR-SET (match po podłańcuchu 'Pkt' — kropka go nie psuje).
+        for _r in body.iter(wt('r')):
+            _ts = _r.findall(wt('t'))
+            if len(_ts) == 1 and (_ts[0].text or '').strip() == 'Pkt':
+                _ts[0].text = (_ts[0].text or '').replace('Pkt', 'Pkt.')
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
