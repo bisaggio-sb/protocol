@@ -764,17 +764,10 @@ with col_form:
                 index=0,
                 help="Faza grupowa zawsze 2 sety")
         else:
-            is_dwojka_now = tournament_type == "Drużynowy 2-os."
-            if is_dwojka_now:
-                bo_options = {
-                    "Best of 3": "Best of 3",
-                    "Best of 5": "🔴 Best of 5 (wkrótce)",
-                }
-            else:
-                bo_options = {
-                    "Best of 3": "Best of 3",
-                    "Best of 5": "Best of 5",
-                }
+            bo_options = {
+                "Best of 3": "Best of 3",
+                "Best of 5": "Best of 5",
+            }
             # Default: Bo3 dla 1/8, Bo5 dla 1/4 i wyżej (zgodnie z FAQ)
             default_idx = 0
             if "1/4" in tournament_phase or "1/2" in tournament_phase or \
@@ -795,8 +788,7 @@ with col_form:
     is_trojka = tournament_type == "Drużynowy 3-os."
     is_czworka = tournament_type == "Drużynowy 4-os."
     is_dwojka = tournament_type == "Drużynowy 2-os."
-    # Wszystkie typy obsługują grupową; puchar: IND/TRÓJKA/CZWÓRKA Bo3+Bo5,
-    # DWÓJKA na razie tylko Bo3 (Bo5 wkrótce — patrz guard niżej).
+    # Wszystkie typy obsługują grupową; puchar Bo3+Bo5 dla wszystkich rodzajów.
     is_supported_type = is_individual or is_trojka or is_czworka or is_dwojka
     is_2_sety = sets_format == "2 sety"
     is_grupowa = tournament_phase == "Grupowa"
@@ -846,12 +838,6 @@ with col_form:
                    "Dostępne: Indywidualny (wszystkie fazy), Drużynowy 3-os. (wszystkie fazy), "
                    "Drużynowy 4-os. (tylko grupowa).")
     
-    # DWÓJKA puchar: na razie tylko Bo3 (szablon DWÓJKA_Bo3.docx). Bo5 wkrótce.
-    if is_dwojka and is_pucharowa and sets_format == "Best of 5":
-        st.warning("⚠️ **DWÓJKA — puchar Best of 5** jest jeszcze w przygotowaniu. "
-                   "Dostępny jest już **Best of 3**. Wybierz Best of 3, aby wygenerować protokół.")
-        st.stop()
-
     if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
     # ─── 4. Domyślne elementy ───────────────────────────────────────────
@@ -1661,12 +1647,11 @@ with st.expander("➕ Pobierz pusty formularz"):
         )
     with cols_blank[1]:
         if blank_type == "Drużynowy 2-os.":
-            # Dwójka — grupowa + Bo3 (puchar). Bo5 wkrótce.
             blank_format = st.selectbox(
                 "Format setów",
-                ["2 sety (grupowa)", "Best of 3 (puchar)"],
+                ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)"],
                 index=0, key="blank_format",
-                help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 (Bo5 wkrótce)."
+                help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 / Best of 5."
             )
         else:
             # IND, 3-os, 4-os mają pełen zestaw faz
@@ -2061,6 +2046,8 @@ if gen_clicked:
                 template_type = 'CZWORKA_Bo5'
             elif is_dwojka and is_pucharowa and sets_format == "Best of 3":
                 template_type = 'DWOJKA_Bo3'
+            elif is_dwojka and is_pucharowa and sets_format == "Best of 5":
+                template_type = 'DWOJKA_Bo5'
             elif is_czworka:
                 template_type = 'CZWORKA'
             elif is_trojka:
@@ -2208,7 +2195,12 @@ if blank_clicked:
     with st.spinner("Generuję pusty formularz..."):
         # Mapowanie blank_type + blank_format → template_type
         if blank_type == "Drużynowy 2-os.":
-            blank_template = 'DWOJKA_Bo3' if "Best of 3" in blank_format else 'DWOJKA'
+            if "Best of 3" in blank_format:
+                blank_template = 'DWOJKA_Bo3'
+            elif "Best of 5" in blank_format:
+                blank_template = 'DWOJKA_Bo5'
+            else:
+                blank_template = 'DWOJKA'
         elif blank_type == "Drużynowy 3-os.":
             if "Best of 3" in blank_format:
                 blank_template = 'TROJKA_Bo3'
@@ -2264,6 +2256,7 @@ if blank_clicked:
         'IND_Bo5': 'indywidualny_Bo5',
         'DWOJKA': 'dwojka_grupowa',
         'DWOJKA_Bo3': 'dwojka_Bo3',
+        'DWOJKA_Bo5': 'dwojka_Bo5',
         'TROJKA': 'trojka_2sety',
         'TROJKA_Bo3': 'trojka_Bo3',
         'TROJKA_Bo5': 'trojka_Bo5',
