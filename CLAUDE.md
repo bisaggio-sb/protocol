@@ -178,6 +178,24 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy (po Bo5 dwójki)
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-15 (fix2) — **3 uwagi usera po fixach z 06-15: faktycznie nie były naprawione.**
+  (A) **IND_Bo3/Bo5 „Wygrane sety" mniejsze niż „Punkty SET N"**: poprzedni
+  NUCLEAR 2 hardcodował sz=18 dla Wygr/Podpis, podczas gdy NUCLEAR-SET dla
+  Pkt-SET komórek używa sz=20 (cw≥800) lub sz=16 (cw<800 w Bo5). Stąd
+  „Punkty SET" sz=20 + „Wygrane sety" sz=18 → wizualna różnica wielkości.
+  FIX: NUCLEAR 2 w każdym wierszu znajduje sąsiednią Pkt-SET komórkę,
+  czyta jej tcW i stosuje TĘ SAMĄ regułę rozmiaru do Wygr/Podpis. Plus
+  wymuszamy `<w:b/>` + `<w:bCs/>` dla pewności (runy „Wygr"+„." w IND_Bo5
+  miały bold w szablonie ale dla spójności forsujemy). Zweryfikowane:
+  IND_Bo3 wszystkie etykiety = sz=20 bold; IND_Bo5 wszystkie = sz=16 bold.
+  (B) **DWÓJKA Grupa/Bo3 prawa krawędź: r1 (pusty wiersz nad SUMA) miał
+  jawne `tcBorders right=6`** które nadpisuje `tblBorders=12` z 06-15.
+  Stąd: r0 + r2..r20 + r21 = grube, ale r1 cienkie — wizualna przerwa.
+  User: „przeciągnąłeś je na dół, a wyżej jest słabo" — dokładnie ten
+  efekt. FIX: patch binarny szablonów DWÓJKA_Grupa.docx + DWÓJKA_Bo3.docx
+  — r1 ostatnia komórka `right sz=6 → sz=12`. Po fixie krawędź jednolita
+  od góry do dołu.
+  (C) **Punkty SET 3 — user potwierdził że ten fix z 06-15 zadziałał.** Bez zmian.
 - 2026-06-15 (fix) — **Follow-up po 3 uwagach usera (screeny) do iteracji 06-14:**
   (A) **IND_Bo5 „Wygr." wielką dziwną czcionką**: komórka „Wygrane sety" w
   szablonie jest rozbita na runy „Wygr"+„."+„ sety". Selektywne matchowanie
