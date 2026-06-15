@@ -2993,18 +2993,35 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                     fonts.set(f'{{{W}}}{a}', 'Calibri')
 
             # NUCLEAR 2: nagłówkowe komórki „Wygrane sety" i „Podpis" — normalizuj
-            # WSZYSTKIE runy w nich do Calibri sz=18. W IND_Bo5 „Wygrane sety" jest
-            # rozbite na runy „Wygr"+„."+„ sety"; selektywne matchowanie po tekście
-            # łapało tylko „sety" (→Calibri sz=18), a „Wygr"+„." zostawały w Aptos
-            # BEZ rozmiaru → dziedziczyły docDefault (~24pt) i serif fallback w LO,
-            # przez co „Wygr." renderowało się wielką, dziwną czcionką. Cell-level
-            # rebuild (jak SET-nuclear wyżej) gwarantuje spójność całej komórki.
+            # WSZYSTKIE runy w nich do Calibri + bold + tym samym rozmiarem co
+            # sąsiednie „Pkt SET N" w tym samym wierszu. W IND_Bo5 „Wygrane sety"
+            # jest rozbite na runy „Wygr"+„."+„ sety"; selektywne matchowanie po
+            # tekście łapało tylko „sety" (→Calibri sz=18), a „Wygr"+„." zostawały
+            # w Aptos BEZ rozmiaru → dziedziczyły docDefault (~24pt) i serif
+            # fallback w LO, przez co „Wygr." renderowało się wielką, dziwną
+            # czcionką. ROZMIAR: dopasowujemy do tego co NUCLEAR-SET (wyżej)
+            # wymusza na komórkach „Pkt SET N" w tym samym wierszu — `cw<800`
+            # (wąskie Bo5) → sz=16, inaczej sz=20. Bez tego dopasowania użytkownik
+            # widział wizualną różnicę: „Punkty SET" sz=20 vs „Wygrane sety" sz=18.
             for tbl in body.findall(wt('tbl')):
                 rows_t = tbl.findall(wt('tr'))
                 # tylko tabele nagłówkowe (mało wierszy) — nie tabele wynikowe
                 if len(rows_t) > 6:
                     continue
                 for tr in rows_t:
+                    # 1) Wyznacz rozmiar wiersza patrząc na pierwszą Pkt-SET komórkę
+                    row_size = None
+                    for tc in tr.findall(wt('tc')):
+                        ctext = ''.join((t.text or '') for t in tc.iter(wt('t')))
+                        if ('Pkt' in ctext or 'Punkt' in ctext) and 'SET' in ctext:
+                            tcPr_sib = tc.find(wt('tcPr'))
+                            tcW_sib = tcPr_sib.find(wt('tcW')) if tcPr_sib is not None else None
+                            cw = int(tcW_sib.get(f'{{{W}}}w', '990')) if tcW_sib is not None else 990
+                            row_size = '16' if cw < 800 else '20'
+                            break
+                    if not row_size:
+                        continue
+                    # 2) Aplikuj do komórek Wygrane sety / Podpis w tym wierszu
                     for tc in tr.findall(wt('tc')):
                         cell_text = ''.join((t.text or '') for t in tc.iter(wt('t')))
                         cell_strip = cell_text.replace(' ', '')
@@ -3025,12 +3042,18 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                                 el = rPr.find(wt(tag))
                                 if el is None:
                                     el = etree.SubElement(rPr, wt(tag))
-                                el.set(f'{{{W}}}val', '18')
+                                el.set(f'{{{W}}}val', row_size)
                             fonts = rPr.find(wt('rFonts'))
                             if fonts is None:
                                 fonts = etree.SubElement(rPr, wt('rFonts'))
                             for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                                 fonts.set(f'{{{W}}}{a}', 'Calibri')
+                            # Wymuś bold + boldCs — w IND_Bo5 runy „Wygr"+„." MAJĄ
+                            # bold w szablonie, ale dla pewności i spójności
+                            # z sąsiednimi etykietami nagłówka (które są bold).
+                            for btag in ('b', 'bCs'):
+                                if rPr.find(wt(btag)) is None:
+                                    etree.SubElement(rPr, wt(btag))
 
             # Instrukcje (paragrafy "Sety 1 i 2..." i "Set przegrany..."): wymusz italic + szary
             # + Calibri. Bez tego LibreOffice renderuje czarny non-italic (fallback z Aptos Narrow).
