@@ -2311,7 +2311,48 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     fonts = etree.SubElement(rPr, wt('rFonts'))
                 for a in ('ascii','hAnsi','eastAsia','cs'):
                     fonts.set(f'{{{W}}}{a}', 'Calibri')
-        
+
+        # ── Bo3/Bo5: rozmiar etykiet nagłówka kolumn (Pkt/Punkty SET, Wygrane sety,
+        # Podpis). TRÓJKA_Bo3 ma te runy BEZ jawnego sz (dziedziczą duży docDefault)
+        # → „Wygrane" (W+g+y szerokie) nie mieści się w wąskiej komórce 1174 dxa
+        # i łamie się brzydko na „Wygran"/„e". TRÓJKA_Bo5 ma już sz=20 (renderuje OK),
+        # więc wymuszenie 20 jest tam idempotentne. Skala 20 = 10pt, mieści „Wygrane"
+        # nawet w 1039 dxa (Bo5). Scope: TYLKO tabele nagłówkowe (≤6 wierszy) — żeby
+        # NIE ruszyć wielkich etykiet „SET 1" (sz=28) w tabeli wynikowej.
+        if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'DWOJKA_Bo3', 'DWOJKA_Bo5'):
+            for tbl in body.findall(wt('tbl')):
+                if len(tbl.findall(wt('tr'))) > 6:
+                    continue
+                for tc in tbl.iter(wt('tc')):
+                    ctext = ''.join((t.text or '') for t in tc.iter(wt('t')))
+                    cstrip = ctext.replace(' ', '')
+                    is_pktset = (('Pkt' in ctext or 'Punkt' in ctext) and 'SET' in ctext)
+                    is_wygr = ('Wygr' in ctext and 'set' in ctext.lower())
+                    is_podpis = (cstrip == 'Podpis')
+                    if not (is_pktset or is_wygr or is_podpis):
+                        continue
+                    for run in tc.iter(wt('r')):
+                        if not run.findall(wt('t')):
+                            continue
+                        if not ''.join((t.text or '') for t in run.findall(wt('t'))).strip():
+                            continue
+                        rPr = run.find(wt('rPr'))
+                        if rPr is None:
+                            rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
+                        fonts = rPr.find(wt('rFonts'))
+                        if fonts is None:
+                            fonts = etree.SubElement(rPr, wt('rFonts'))
+                        for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                            fonts.set(f'{{{W}}}{a}', 'Calibri')
+                        for tag in ('sz', 'szCs'):
+                            el = rPr.find(wt(tag))
+                            if el is None:
+                                el = etree.SubElement(rPr, wt(tag))
+                            el.set(f'{{{W}}}val', '20')
+                        for btag in ('b', 'bCs'):
+                            if rPr.find(wt(btag)) is None:
+                                etree.SubElement(rPr, wt(btag))
+
         # Zmniejszenie odstępów po tabeli wynikowej żeby mieściło się na 1 stronie.
         # Ostatni paragraf przed sectPr ma duży before - usuwamy.
         # POMIJAMY DLA Bo5 — Bo5 jest 2-stronicowe, potrzebuje zachowania
