@@ -3892,7 +3892,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # Dla pojedynczego meczu (Finał, Mecz o 3. miejsce) numer jest zbędny → ukrywamy.
         hide_mecz_num = len(matches) <= 1
         for match in matches:
-            if not first:
+            _is_first_match = first
+            # DWÓJKA Bo7 (landscape, score s.2 wypełnia stronę): standalone
+            # page-break-para tworzy PUSTĄ stronę między meczami (break ląduje na
+            # już-pełnej stronie → przeskok o 2). Zamiast tego damy pageBreakBefore
+            # na akapicie nagłówka meczu (hp) — patrz niżej. Inne typy: bez zmian.
+            if not first and template_type != 'DWOJKA_Bo7':
                 body.append(_make_page_break_para())
             first = False
             if hide_mecz_num and match.get('mecz'):
@@ -3924,6 +3929,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
                 hp = etree.Element(wt('p'))
                 hpPr = etree.SubElement(hp, wt('pPr'))
+                # DWÓJKA Bo7: kolejne mecze startują na nowej stronie przez
+                # pageBreakBefore na nagłówku (zamiast standalone break-para,
+                # który dawał pustą stronę — patrz wyżej).
+                if template_type == 'DWOJKA_Bo7' and not _is_first_match:
+                    etree.SubElement(hpPr, wt('pageBreakBefore'))
                 hjc = etree.SubElement(hpPr, wt('jc'))
                 hjc.set(f'{{{W}}}val', 'right')
                 # IND_Bo3: dodaj right indent (~1.4 cm) by header nie wystawał za prawą krawędź tabeli.
@@ -3983,13 +3993,25 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if hpPr2 is None:
                             hpPr2 = etree.Element(wt('pPr'))
                             hp_page2.insert(0, hpPr2)
-                        # DWÓJKA Bo7: szablon MA już własny jawny page break między
-                        # t1 (score s.1) a t2 (header s.2). Dodanie pageBreakBefore
-                        # do hp_page2 dałoby PODWÓJNY break → pusta strona. Wstawiamy
-                        # header str.2 BEZ pageBreakBefore (trafia za istniejący break,
-                        # na początek str.2). Inne szablony: pageBreakBefore zostaje.
-                        if template_type != 'DWOJKA_Bo7' and hpPr2.find(wt('pageBreakBefore')) is None:
+                        if hpPr2.find(wt('pageBreakBefore')) is None:
                             etree.SubElement(hpPr2, wt('pageBreakBefore'))
+                        # DWÓJKA Bo7: szablon ma między score s.1 (t1) a header s.2
+                        # (t2) DWA puste akapity + osobny akapit z jawnym page-break.
+                        # Score s.1 (22 wiersze landscape) wypełnia stronę 1 prawie
+                        # do końca → te akapity SPADAJĄ na nową stronę PRZED jawnym
+                        # breakiem → pusta strona (1 mecz = 3 strony zamiast 2).
+                        # Fix: usuwamy puste/break-only akapity między t1 a t2 i
+                        # polegamy na pageBreakBefore (powyżej) na hp_page2.
+                        if template_type == 'DWOJKA_Bo7':
+                            _t1c = cloned_tbls[1]
+                            _i1 = list(cloned).index(_t1c)
+                            _i2 = list(cloned).index(t3_in_cloned)
+                            for _el in list(cloned)[_i1 + 1:_i2]:
+                                if _el.tag != wt('p'):
+                                    continue
+                                _has_txt = any((x.text or '').strip() for x in _el.iter(wt('t')))
+                                if not _has_txt:
+                                    cloned.remove(_el)
                         t3_idx = list(cloned).index(t3_in_cloned)
                         cloned.insert(t3_idx, hp_page2)
             _fill_protocol(cloned, match,
@@ -4138,6 +4160,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             else:
                 # Bez QR - tylko obrazy bez napisu
                 _populate_left_area(cloned, anchored, '', 0)
+
+            # DWÓJKA Bo7: usuń KOŃCOWE puste akapity z bloku meczu. Szablon ma po
+            # score s.2 puste akapity, które (gdy score s.2 wypełnia stronę) spadają
+            # na nową stronę i razem z page-breakiem MIĘDZY meczami (_make_page_break_para)
+            # tworzą pustą stronę (2 mecze = 5 stron zamiast 4). Bez nich score s.2
+            # kończy stronę, a break czysto przechodzi do kolejnego meczu.
+            if template_type == 'DWOJKA_Bo7':
+                while cloned and cloned[-1].tag == wt('p') and \
+                        not any((x.text or '').strip() for x in cloned[-1].iter(wt('t'))):
+                    cloned.pop()
 
             for el in cloned:
                 body.append(el)
