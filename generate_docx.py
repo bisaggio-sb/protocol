@@ -1791,18 +1791,21 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
         z1 = match.get('z1', '')
         z2 = match.get('z2', '')
         
-        # ── Strona 1 (Table 1, R1.tc[0..5]) — taka sama logika jak w Bo3 ──
+        # ── Strona 1 (Table 1, R1) — taka sama logika jak w Bo3 ──
         if len(rows) >= 1:
             tcs = rows[0].findall(wt('tc'))
             if len(tcs) > 0 and tor_val:
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             if len(tcs) > 2 and godz_val:
                 _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+            # „Mecz #": szablon TRÓJKA_Bo5 ma etykietę w OSTATNIEJ komórce (c7)
+            # — wcześniej fill pisał do c5 (pustej) i renderowały się DWA „Mecz #".
             if len(tcs) > 5:
+                target = tcs[-1]
                 if mecz_val:
-                    _set_cell_label(tcs[5], f'Mecz #  {mecz_val}')
+                    _set_cell_label(target, f'Mecz #  {mecz_val}')
                 else:
-                    _set_cell_label(tcs[5], '')
+                    _set_cell_label(target, '')
         # Drużyny w T1.R3.tc[0] i T1.R4.tc[0]
         if len(rows) > 2:
             tcs = rows[2].findall(wt('tc'))
@@ -2342,6 +2345,18 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     is_podpis = (cstrip == 'Podpis')
                     if not (is_pktset or is_wygr or is_podpis):
                         continue
+                    # Adaptacyjny rozmiar: „Wygrane" (7 znaków single-word, nie
+                    # wieloliniowe jak „Pkt"+„SET N") w wąskiej komórce zawija na
+                    # 3 linie („Wygra/ne/sety"). W TROJKA_Bo5 redystrybucja 300 dxa
+                    # zostawia Wygr ~850 dxa — za mało dla sz=20. Drop do sz=16
+                    # poniżej 900 dxa (mieści „Wygrane" w jednej linii).
+                    sz_val = '20'
+                    if is_wygr and template_type == 'TROJKA_Bo5':
+                        # TROJKA_Bo5: redystrybucja w T1 zabiera 300 dxa z Wygr
+                        # (linia ~2491) → po skalowaniu Wygr ~850 dxa, „Wygrane"
+                        # przy sz=20 zawija na 3 linie („Wygra/ne/sety"). sz=16
+                        # mieści jednoliniowo. Bo3 ma szerszy szablon — działa OK.
+                        sz_val = '16'
                     for run in tc.iter(wt('r')):
                         if not run.findall(wt('t')):
                             continue
@@ -2359,7 +2374,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             el = rPr.find(wt(tag))
                             if el is None:
                                 el = etree.SubElement(rPr, wt(tag))
-                            el.set(f'{{{W}}}val', '20')
+                            el.set(f'{{{W}}}val', sz_val)
                         for btag in ('b', 'bCs'):
                             if rPr.find(wt(btag)) is None:
                                 etree.SubElement(rPr, wt(btag))
@@ -2693,6 +2708,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     break  # tylko raz
             
             scale_t3 = TARGET_WIDTH / ORIG_T3_TOTAL
+            # tblW musi też dostać TARGET_WIDTH — bez tego LO bierze stare
+            # tblW (9450) jako autorytet i kompresuje gridCol proporcjonalnie
+            # → Wygr cell renderowany jako ~768 dxa, „Wygrane" zawija na 3 linie.
+            tblPr_t3 = t3.find(wt('tblPr'))
+            if tblPr_t3 is not None:
+                tblW3 = tblPr_t3.find(wt('tblW'))
+                if tblW3 is None:
+                    tblW3 = etree.SubElement(tblPr_t3, wt('tblW'))
+                tblW3.set(f'{{{W}}}w', str(TARGET_WIDTH))
+                tblW3.set(f'{{{W}}}type', 'dxa')
             grid3 = t3.find(wt('tblGrid'))
             if grid3 is not None:
                 for col in grid3.findall(wt('gridCol')):
