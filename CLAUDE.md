@@ -125,7 +125,7 @@ typy są BEZ ikony. 🟡 = budujemy/testujemy. 🔴 = niedostępne (wkrótce).
 | Typ | Grupowa | Pucharowa (Bo3/Bo5) |
 |---|---|---|
 | Indywidualny | działa | działa (Bo3, Bo5, Bo7; w tym 1/32 i 1/64) |
-| Drużynowy 2-os. | działa | działa (Bo3, Bo5) |
+| Drużynowy 2-os. | działa | działa (Bo3, Bo5, Bo7) |
 | Drużynowy 3-os. | działa | działa (Bo3, Bo5) |
 | Drużynowy 4-os. | działa | działa (Bo3, Bo5) |
 
@@ -182,9 +182,38 @@ w wierszu tabeli (PIL).
 - [x] DWÓJKA Bo3 — szablon pucharowy, routing, format/fazy odblokowane
 - [x] DWÓJKA Bo5 — szablon pucharowy, routing, guard zdjęty
 - [x] IND Bo7 — szablon pucharowy/finały (bez „Mecz #"), routing, wyrównanie str.2
-- [ ] DWÓJKA Bo7 — szablon pucharowy
+- [x] DWÓJKA Bo7 — szablon pucharowy (landscape, fill+paginacja+routing) DZIAŁA
+- [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
+  (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix5) — **DWÓJKA Bo7 (NOWY TYP) + dokończenie iteracji 5-pkt.**
+  (1) **DWÓJKA Bo7** — landscape jak CZWÓRKA Bo5, 2 drużyny, 7 setów (score
+  s.1=SET 1-4, s.2=SET 5-7). Fill przez gałąź CZWORKA_Bo3/Bo5 (r0[1]=tor,
+  r0[3]=godz, r0[5]=mecz, r1[1]/r2[1]=nazwy drużyn). **Fix paginacji:** puste
+  akapity + standalone page-break w szablonie dawały PUSTE strony (1 mecz=3,
+  2 mecze=5). Fix: pageBreakBefore na hp_page2 + usunięcie pustych akapitów
+  między t1-t2; między meczami pageBreakBefore na nagłówku meczu zamiast
+  standalone break + usuwanie końcowych pustych akapitów. Wynik: 1 mecz=2 str,
+  2 mecze=4 str. **app.py:** „Best of 7" dla 2-os. (bo_options + blank form +
+  oba bloki routingu). Dodane też dwójka Bo3/Bo5 do multi-phase bloku (luka).
+  (2) **DWÓJKA Bo3 + TRÓJKA Bo5: cienka prawa krawędź** — pętla wymuszała
+  `right sz=12` na ostatniej komórce każdego wiersza → pogrubione narożniki.
+  Fix: prawa krawędź zewn. sz=12→6 (jednolita z top/left/bottom) + tblBorders
+  right→6 + ostatnia SUMA right→6. Separatory SUMA (left=12) bez zmian.
+  (3) **DWÓJKA Bo5: „Godz." zawijało + Tor/Mecz nie-bold.** „Godz." = runy
+  „Godz"(sz22)+„."(BEZ sz). Cell-level norm nagłówka (Calibri+sz22 na r0) dla
+  DWOJKA_Bo3/Bo5 + `_bold_cell` na Tor/Mecz.
+  (4) **TRÓJKA Bo5: „Wygr. sety" sz=20.** Nowy szablon + patch t2 „Wygrane"→
+  „Wygr." (spójność str.); redystrybucja 800 dxa cała z Podpis (Wygr ~1150,
+  mieści sz=20). Cofnięty hack sz=16.
+  (5) **CZWÓRKA Bo3/Bo5: podmiana szablonów** (kosmetyka wording, bez kodu).
+  **IND Bo7 header do prawej krawędzi — NIE UDAŁO SIĘ (LO-owe ograniczenie).**
+  r0 ma inny układ kolumn niż r1-r3 na wspólnym gridzie → ostatnia kolumna jest
+  tylko spanowana (nie startuje komórki) → LO ją zwija (header R≈789 vs wyniki
+  863). 5 podejść bez skutku (transfer+zero, gridSpan++, usunięcie gridCol+skrót
+  span, pusta komórka startująca, autofit). WYMAGA EDYCJI SZABLONU (r1-r3 muszą
+  dzielić grid r0). Cofnięte do oryginalnego KROK1b. NIE walczyć kodem.
 - 2026-06-16 (fix4) — **Iteracja 5-punktowa: CZWÓRKA swap, TRÓJKA Bo5 Wygr.+ramki,
   DWÓJKA Bo3 ramki, DWÓJKA Bo5 Godz./bold, IND Bo7 header == wyniki.**
   (1) **DWÓJKA Bo3 + TRÓJKA Bo5: zbędne pogrubienia prawego górnego/dolnego
