@@ -1610,9 +1610,11 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             _fill_bo7_header(all_tbls[2])   # nagłówek str.2
         return  # IND_Bo7 ma własną logikę
 
-    # ── Bo3/Bo5 CZWÓRKA: landscape, osobne komórki wartości (tc[1]=tor, tc[3]=godz,
-    #    tc[5]=mecz) + nazwy drużyn w r1.tc[1] / r2.tc[1]. Header w T0 (i T2 dla Bo5). ──
-    if template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5'):
+    # ── Bo3/Bo5 CZWÓRKA + DWÓJKA Bo7: landscape, osobne komórki wartości
+    #    (tc[1]=tor, tc[3]=godz, tc[5]=mecz) + nazwy drużyn w r1.tc[1] / r2.tc[1].
+    #    Header w T0 (i T2 dla Bo5/Bo7). DWÓJKA Bo7 ma identyczną strukturę co
+    #    CZWÓRKA Bo5 (landscape) — różni się tylko liczbą zawodników (2 vs 4). ──
+    if template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5', 'DWOJKA_Bo7'):
         tor_val = match.get('tor', '').strip()
         godz_val = match.get('godz', '').strip()
         mecz_val = match.get('mecz', '').strip()
@@ -2241,6 +2243,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         'DWOJKA': 'DWÓJKA_Grupa.docx',       # 2-osobowa drużyna grupowa (własny layout: DRUŻYNY pion, 4 SUMA/SET)
         'DWOJKA_Bo3': 'DWÓJKA_Bo3.docx',     # 2-osobowa pucharowa Best of 3
         'DWOJKA_Bo5': 'DWÓJKA_Bo5.docx',     # 2-osobowa pucharowa Best of 5
+        'DWOJKA_Bo7': 'DWÓJKA_Bo7.docx',     # 2-osobowa pucharowa Best of 7 (landscape, jak CZWÓRKA)
         'TROJKA': 'TRÓJKA_Grupa.docx',
         'TROJKA_Bo3': 'TRÓJKA_Bo3.docx',
         'TROJKA_Bo5': 'TRÓJKA_Bo5.docx',
@@ -2278,8 +2281,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 pgMar.set(f'{{{W}}}bottom', '280')
                 pgMar.set(f'{{{W}}}left', '720')
                 pgMar.set(f'{{{W}}}right', '720')
-            elif template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5'):
-                # Pucharowa czwórka — szablony mają własne marginesy (Bo5 landscape!),
+            elif template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5', 'DWOJKA_Bo7'):
+                # Pucharowa czwórka + DWÓJKA Bo7 — szablony landscape z własnymi
+                # marginesami (NIE wymuszamy 720, zepsułoby szerokie tabele 27 cm).
                 # NIE wymuszamy 720 (zepsułoby szerokie tabele 27 cm w landscape).
                 # ALE: bottom margin szablonu jest ~26 dxa (zero), więc dodany przez
                 # build_document paragraf nagłówka turnieju (~280 dxa) pcha ostatnie
@@ -3000,16 +3004,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
     # Templates CZWORKA_Bo3/CZWORKA_Bo5 mieszczą się w 18.46 cm (margines 720), więc
     # nie skalujemy tabel — tylko wymuszamy Calibri na labelach (bez tego Aptos fallback
     # w LibreOffice rozjeżdża etykiety) i pomniejszamy wiersz Pkt/SET do sz=20.
-    if template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5'):
+    if template_type in ('CZWORKA_Bo3', 'CZWORKA_Bo5', 'DWOJKA_Bo7'):
         # Tor/Godzina/Mecz# celowo NIE są w tym secie — template używa Aptos Narrow,
         # co powoduje zawijanie "Tor"→"To/r" w wąskiej kolumnie, dokładnie jak w wzorcu.
         # Konwersja na Calibri uniemożliwiałaby zawijanie i zmieniała wygląd.
+        # (SET 6/7, Pkt SET 6/7, (SET 5-7) dodane dla DWÓJKA Bo7 — 7 setów.)
         CZW_BO_LABELS = {'PunktySET 1', 'PunktySET 2', 'PunktySET 3',
-                         'PunktySET 4', 'PunktySET 5',
+                         'PunktySET 4', 'PunktySET 5', 'PunktySET 6', 'PunktySET 7',
                          'PktSET 1', 'PktSET 2', 'PktSET 3', 'PktSET 4', 'PktSET 5',
-                         'Punkty', 'Pkt', 'Wygrane', 'sety', 'Wygranesety', 'Podpis',
-                         'SET 1', 'SET 2', 'SET 3', 'SET 4', 'SET 5',
-                         '(SET 3)', '(SET 4)', '(SET 5)', 'SUMA', 'S U M A', 'I M I O N A'}
+                         'PktSET 6', 'PktSET 7', 'Pkt.SET 6', 'Pkt.SET 7',
+                         'Punkty', 'Pkt', 'Wygrane', 'sety', 'Wygranesety',
+                         'Wygr.sety', 'Wygr. sety', 'Podpis',
+                         'SET 1', 'SET 2', 'SET 3', 'SET 4', 'SET 5', 'SET 6', 'SET 7',
+                         '(SET 3)', '(SET 4)', '(SET 5)', '(SET 6)', '(SET 7)',
+                         'SUMA', 'S U M A', 'I M I O N A'}
         for r in body.iter(wt('r')):
             ts = r.findall(wt('t'))
             if not ts: continue
@@ -3962,7 +3970,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 # układ 4-tabelowy (header/score str.1 + header/score str.2),
                 # nagłówek str.2 zadziała automatycznie. Guard `len >= 3` chroni
                 # przed wstawieniem gdy szablon ma inną strukturę.
-                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5', 'IND_Bo7', 'DWOJKA_Bo5'):
+                if template_type in ('TROJKA_Bo5', 'CZWORKA_Bo5', 'IND_Bo5', 'IND_Bo7', 'DWOJKA_Bo5', 'DWOJKA_Bo7'):
                     cloned_tbls = [el for el in cloned if el.tag == wt('tbl')]
                     if len(cloned_tbls) >= 3:
                         t3_in_cloned = cloned_tbls[2]
@@ -3975,7 +3983,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if hpPr2 is None:
                             hpPr2 = etree.Element(wt('pPr'))
                             hp_page2.insert(0, hpPr2)
-                        if hpPr2.find(wt('pageBreakBefore')) is None:
+                        # DWÓJKA Bo7: szablon MA już własny jawny page break między
+                        # t1 (score s.1) a t2 (header s.2). Dodanie pageBreakBefore
+                        # do hp_page2 dałoby PODWÓJNY break → pusta strona. Wstawiamy
+                        # header str.2 BEZ pageBreakBefore (trafia za istniejący break,
+                        # na początek str.2). Inne szablony: pageBreakBefore zostaje.
+                        if template_type != 'DWOJKA_Bo7' and hpPr2.find(wt('pageBreakBefore')) is None:
                             etree.SubElement(hpPr2, wt('pageBreakBefore'))
                         t3_idx = list(cloned).index(t3_in_cloned)
                         cloned.insert(t3_idx, hp_page2)
@@ -3986,7 +3999,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
             # Lista elementów do wstawienia w lewym obszarze
             # Bo3/Bo5 nie używają grafik (lewa kolumna jest wąska, ~0.7 cm).
-            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'CZWORKA_Bo3', 'CZWORKA_Bo5'):
+            if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5', 'CZWORKA_Bo3', 'CZWORKA_Bo5', 'DWOJKA_Bo7'):
                 order = []
             else:
                 order = image_order if image_order else (
