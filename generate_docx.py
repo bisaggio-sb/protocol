@@ -1704,16 +1704,32 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
         mecz_val = match.get('mecz', '').strip()
         z1 = match.get('z1', '')
         z2 = match.get('z2', '')
+        # Tor/Mecz # wstawiamy przez _set_cell_label (zachowuje szablonowy font),
+        # ale w innych szablonach (CZWÓRKA/DWÓJKA Bo3) te wartości są POGRUBIONE —
+        # template DWÓJKA Bo5 ma label nie-bold, więc forsujemy bold na całej
+        # komórce (label + wartość), żeby było spójnie. (Godz. value już bold.)
+        def _bold_cell(tc):
+            for run in tc.iter(wt('r')):
+                if not run.findall(wt('t')):
+                    continue
+                rPr = run.find(wt('rPr'))
+                if rPr is None:
+                    rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
+                for btag in ('b', 'bCs'):
+                    if rPr.find(wt(btag)) is None:
+                        etree.SubElement(rPr, wt(btag))
         # Strona 1 (T1)
         if len(rows) >= 1:
             tcs = rows[0].findall(wt('tc'))
             if len(tcs) > 0 and tor_val:
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
+                _bold_cell(tcs[0])
             if len(tcs) > 2 and godz_val:
                 _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
             if len(tcs) >= 8:
                 if mecz_val:
                     _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
+                    _bold_cell(tcs[-1])
                 else:
                     _set_cell_label(tcs[-1], '')
         if len(rows) > 2:
@@ -1731,11 +1747,13 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 tcs = t3_rows[0].findall(wt('tc'))
                 if len(tcs) > 0 and tor_val:
                     _set_cell_label(tcs[0], f'Tor  {tor_val}')
+                    _bold_cell(tcs[0])
                 if len(tcs) > 2 and godz_val:
                     _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
                 if len(tcs) >= 8:
                     if mecz_val:
                         _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
+                        _bold_cell(tcs[-1])
                     else:
                         _set_cell_label(tcs[-1], '')
             if len(t3_rows) > 2:
@@ -2326,6 +2344,40 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 for a in ('ascii','hAnsi','eastAsia','cs'):
                     fonts.set(f'{{{W}}}{a}', 'Calibri')
 
+        # ── DWÓJKA Bo3/Bo5: nagłówek r0 (Tor / Godz. / Mecz #) — wymuś Calibri +
+        # jawny rozmiar na KAŻDYM runie. Powód: „Godz." jest rozbite na 2 runy
+        # „Godz"(sz22) + „."(BEZ sz → dziedziczy duży docDefault ~24pt). Match
+        # per-run w TROJKA_LABELS nie łapie ani „Godz" (nie ma w secie) ani „."
+        # → kropka renderowana ogromna w Aptos, „Godz." zawija na 2 linie
+        # („Godz"/„."), a wartość 13:30 w osobnej komórce ląduje wyżej. Cell-level
+        # force (jak w CZWÓRCE) naprawia rozbite labele niezależnie od podziału runów.
+        if template_type in ('DWOJKA_Bo3', 'DWOJKA_Bo5'):
+            for tbl in body.findall(wt('tbl')):
+                first_row = tbl.find(wt('tr'))
+                if first_row is None:
+                    continue
+                rtxt = ''.join((t.text or '') for t in first_row.iter(wt('t')))
+                if 'Tor' not in rtxt or 'Mecz' not in rtxt:
+                    continue
+                for tc in first_row.findall(wt('tc')):
+                    for run in tc.iter(wt('r')):
+                        if not run.findall(wt('t')):
+                            continue
+                        rPr = run.find(wt('rPr'))
+                        if rPr is None:
+                            rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
+                        fonts = rPr.find(wt('rFonts'))
+                        if fonts is None:
+                            fonts = etree.SubElement(rPr, wt('rFonts'))
+                        for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                            fonts.set(f'{{{W}}}{a}', 'Calibri')
+                        # Jawny rozmiar 22 (11pt) — domyka osierocony run „."
+                        for tag in ('sz', 'szCs'):
+                            el = rPr.find(wt(tag))
+                            if el is None:
+                                el = etree.SubElement(rPr, wt(tag))
+                                el.set(f'{{{W}}}val', '22')
+
         # ── Bo3/Bo5: rozmiar etykiet nagłówka kolumn (Pkt/Punkty SET, Wygrane sety,
         # Podpis). TRÓJKA_Bo3 ma te runy BEZ jawnego sz (dziedziczą duży docDefault)
         # → „Wygrane" (W+g+y szerokie) nie mieści się w wąskiej komórce 1174 dxa
@@ -2350,13 +2402,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                     # 3 linie („Wygra/ne/sety"). W TROJKA_Bo5 redystrybucja 300 dxa
                     # zostawia Wygr ~850 dxa — za mało dla sz=20. Drop do sz=16
                     # poniżej 900 dxa (mieści „Wygrane" w jednej linii).
+                    # „Wygr. sety" (skrócone, z kropką) mieści się przy sz=20
+                    # w wąskiej komórce 850 dxa — tak samo jak kolumny Pkt SET.
+                    # (Poprzednio szablon miał „Wygrane sety" 7-znakowe, wymagało
+                    # sz=16; user zmienił label na „Wygr. sety" na obu stronach.)
                     sz_val = '20'
-                    if is_wygr and template_type == 'TROJKA_Bo5':
-                        # TROJKA_Bo5: redystrybucja w T1 zabiera 300 dxa z Wygr
-                        # (linia ~2491) → po skalowaniu Wygr ~850 dxa, „Wygrane"
-                        # przy sz=20 zawija na 3 linie („Wygra/ne/sety"). sz=16
-                        # mieści jednoliniowo. Bo3 ma szerszy szablon — działa OK.
-                        sz_val = '16'
                     for run in tc.iter(wt('r')):
                         if not run.findall(wt('t')):
                             continue
@@ -2489,8 +2539,17 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # od Wygrane sety (po skalowaniu Wygrane sety ~1.93 cm, Podpis ~3.13 cm
             # → po transferze: Wygrane sety ~1.40 cm, Podpis ~2.25 cm).
             if template_type in ('TROJKA_Bo3', 'TROJKA_Bo5'):
-                TRANSFER_FROM_PODPIS = 500
-                TRANSFER_FROM_WYGRANE = 300
+                # Bo5: NIE kradniemy z Wygr — komórka „Wygr. sety" przy sz=20
+                # potrzebuje pełnej szerokości (~1150 dxa), inaczej zawija na
+                # 3 linie („Wyg/r./sety"). Cały transfer (800) bierzemy z Podpis
+                # (szeroki ~1890 dxa → zostaje ~1090, „Podpis" mieści się).
+                # Bo3: bez zmian (szablon ma inne proporcje, user: działa OK).
+                if template_type == 'TROJKA_Bo5':
+                    TRANSFER_FROM_PODPIS = 800
+                    TRANSFER_FROM_WYGRANE = 0
+                else:
+                    TRANSFER_FROM_PODPIS = 500
+                    TRANSFER_FROM_WYGRANE = 300
                 TOTAL_TRANSFER = TRANSFER_FROM_PODPIS + TRANSFER_FROM_WYGRANE
                 tblGrid_t1 = t1.find(wt('tblGrid'))
                 if tblGrid_t1 is not None:
@@ -2629,13 +2688,15 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if old_b is not None:
                             tgt_tcPr.remove(old_b)
                         new_borders = deepcopy(ref_borders)
-                        # Ostatnia SUMA: grube prawe border (krawędź tabeli)
+                        # Ostatnia SUMA: prawa krawędź = krawędź tabeli, sz=6
+                        # (cienka ramka zewnętrzna — patrz niżej; wcześniej 12
+                        # dawało pogrubiony prawy narożnik).
                         if tgt_idx == last_idx:
                             right_el = new_borders.find(wt('right'))
                             if right_el is None:
                                 right_el = etree.SubElement(new_borders, wt('right'))
                             right_el.set(f'{{{W}}}val', 'single')
-                            right_el.set(f'{{{W}}}sz', '12')
+                            right_el.set(f'{{{W}}}sz', '6')
                             right_el.set(f'{{{W}}}space', '0')
                             right_el.set(f'{{{W}}}color', 'auto')
                         tgt_tcPr.insert(0, new_borders)
@@ -2679,9 +2740,25 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if right_el is None:
                     right_el = etree.SubElement(tcBorders, wt('right'))
                 right_el.set(f'{{{W}}}val', 'single')
-                right_el.set(f'{{{W}}}sz', '12')
+                # Prawa krawędź ZEWNĘTRZNA = sz=6 (jak top/left/bottom ramki) —
+                # wcześniej sz=12 dawało „pogrubione" narożniki (górny i dolny
+                # prawy róg), które user oznaczył jako zbędne. Teraz cała ramka
+                # zewnętrzna jednolicie cienka; grube zostają tylko WEWNĘTRZNE
+                # separatory kolumn SUMA (left=12).
+                right_el.set(f'{{{W}}}sz', '6')
                 right_el.set(f'{{{W}}}space', '0')
                 right_el.set(f'{{{W}}}color', 'auto')
+
+            # tblBorders prawa krawędź też na 6 (była 12 w szablonie) — żeby
+            # komórki bez jawnego tcBorders (np. nagłówek SET gridSpan) też
+            # rysowały cienką krawędź zewnętrzną.
+            tblPr_edge = t2.find(wt('tblPr'))
+            if tblPr_edge is not None:
+                tbB = tblPr_edge.find(wt('tblBorders'))
+                if tbB is not None:
+                    rEl = tbB.find(wt('right'))
+                    if rEl is not None:
+                        rEl.set(f'{{{W}}}sz', '6')
 
         # ── BO5: dodatkowo skalujemy tabele 3 i 4 (strona 3 — extension sheet) ──
         # T3 (header s.3) skalujemy proporcjonalnie do tej samej szerokości co T1.
@@ -2734,10 +2811,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             if w:
                                 tcW.set(f'{{{W}}}w', str(int(int(w) * scale_t3)))
             # Bo5: redystrybucja szerokości w T3 (header s.2) — analogicznie do T1.
-            # Bierzemy 500 z Podpis + 300 z Wygrane sety (kol -1, -2). Suma = 800
-            # idzie do kol Tor (kol 0). Po: Podpis ~2.21 cm > Wygrane sety ~1.36 cm.
-            T3_FROM_PODPIS = 500
-            T3_FROM_WYGRANE = 300
+            # Całe 800 z Podpis (jak T1) — Wygr „Wygr. sety" sz=20 potrzebuje
+            # pełnej szerokości, nie kradniemy z niego (patrz komentarz T1).
+            T3_FROM_PODPIS = 800
+            T3_FROM_WYGRANE = 0
             T3_TOTAL = T3_FROM_PODPIS + T3_FROM_WYGRANE
             grid3 = t3.find(wt('tblGrid'))
             if grid3 is not None:
@@ -3594,6 +3671,57 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             _tcw.set(f'{{{W}}}w', str(int(int(_tcw.get(f'{{{W}}}w')) * _f)))
                 _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
                 _set_pr7(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
+
+        # KROK 1b: rozszerz nagłówek (t0/t2) do PRAWEJ krawędzi wyników.
+        # PROBLEM: w nagłówku wiersz Tor/Godz/Mecz (r0) pokrywa wszystkie 19 kolumn,
+        # ale wiersze Pkt SET / nazwiska (r1-r3) tylko 18 — ostatnia („sieroca")
+        # kolumna ~765 dxa jest pusta. LibreOffice CENTRUJE tabelę po PEŁNEJ
+        # szerokości (z sierocą kolumną), ale RYSUJE wiersze Pkt SET tylko do
+        # pokrytych kolumn → prawa krawędź nagłówka kończy się przed wynikami
+        # (user: „rozszerz górną tabelkę do żółtego prostokąta"). Próby z gridSpan
+        # autofitowały. ROZWIĄZANIE: przenosimy szerokość sierocej kolumny do
+        # POPRZEDNiej (ostatniej pokrywanej przez Pkt SET) i zerujemy sierocą do 1
+        # dxa. Wtedy wiersze Pkt SET renderują pełną szerokość = jak r0 = jak wyniki,
+        # a całkowita szer. tabeli bez zmian (centrowanie nienaruszone). Nazwiska
+        # są w tc[0] (lewa strona) — nietknięte.
+        for _t in _all_t:
+            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
+            if 'Podpis' not in _ttxt:   # tylko tabele nagłówkowe
+                continue
+            _grid = _t.find(wt('tblGrid'))
+            if _grid is None:
+                continue
+            _gcols = _grid.findall(wt('gridCol'))
+            _N = len(_gcols)
+            _min_cov = _N
+            for _tr in _t.findall(wt('tr')):
+                _cov = 0
+                for _tc in _tr.findall(wt('tc')):
+                    _gs = _tc.find(f'{wt("tcPr")}/{wt("gridSpan")}')
+                    _cov += int(_gs.get(f'{{{W}}}val')) if _gs is not None else 1
+                _min_cov = min(_min_cov, _cov)
+            if _min_cov >= _N or _min_cov < 1:
+                continue
+            # Sieroce kolumny = ostatnie (N - min_cov). Ich szer. → kolumna min_cov-1.
+            _orphan_w = sum(int(_gcols[i].get(f'{{{W}}}w', '0')) for i in range(_min_cov, _N))
+            _keep = _gcols[_min_cov - 1]
+            _keep.set(f'{{{W}}}w', str(int(_keep.get(f'{{{W}}}w', '0')) + _orphan_w))
+            for i in range(_min_cov, _N):
+                _gcols[i].set(f'{{{W}}}w', '1')
+            # tcW ostatniej komórki w wierszach o min pokryciu += orphan (żeby tcW
+            # zgadzało się z poszerzoną kolumną — LO/Word czytają tcW per komórka).
+            for _tr in _t.findall(wt('tr')):
+                _cells = _tr.findall(wt('tc'))
+                _cov = 0
+                for _tc in _cells:
+                    _gs = _tc.find(f'{wt("tcPr")}/{wt("gridSpan")}')
+                    _cov += int(_gs.get(f'{{{W}}}val')) if _gs is not None else 1
+                if _cov != _min_cov or not _cells:
+                    continue
+                _ltcpr = _cells[-1].find(wt('tcPr'))
+                _ltcw = _ltcpr.find(wt('tcW')) if _ltcpr is not None else None
+                if _ltcw is not None and _ltcw.get(f'{{{W}}}w'):
+                    _ltcw.set(f'{{{W}}}w', str(int(_ltcw.get(f'{{{W}}}w')) + _orphan_w))
 
         # KROK 2: WYŚRODKOWANIE wszystkich tabel (nagłówki + wyniki, obie strony).
         # Szablon używa UJEMNEGO tblInd (-720/-725) żeby tabela szersza niż obszar
