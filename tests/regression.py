@@ -15,7 +15,7 @@ DATA = [("Grupa A", [
      'z1': 'Marek Rogalski', 'z2': 'Konrad Rudnik'},
 ])]
 TEMPLATES = ['IND', 'IND_Bo3', 'IND_Bo5', 'IND_Bo7',
-             'DWOJKA', 'DWOJKA_Bo3', 'DWOJKA_Bo5',
+             'DWOJKA', 'DWOJKA_Bo3', 'DWOJKA_Bo5', 'DWOJKA_Bo7',
              'TROJKA', 'TROJKA_Bo3', 'TROJKA_Bo5',
              'CZWORKA', 'CZWORKA_Bo3', 'CZWORKA_Bo5']
 
