@@ -185,6 +185,28 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix3) — **DWÓJKA Bo5 str.2 = SET 4-5 + TRÓJKA Bo5 dwa bugi.**
+  (A) **DWÓJKA Bo5: str.2 pokazywała SET 1-3 zamiast SET 4-5.** Stary szablon
+  w repo miał T3 jako duplikat T1 (oba SET 1/2/(SET 3)) — komentarz w logu
+  6-15 fix3 błędnie nazwał to „backup sheet, celowo". User wgrał nowy
+  `DWÓJKA_Bo5.docx` gdzie T3 ma poprawnie SET 4/5/(SET 4)/(SET 5). Podmiana
+  szablonu, fill bez zmian (i tak dotyka tylko nagłówków T0/T2).
+  (B) **TRÓJKA Bo5 #1: zduplikowany „Mecz #" w nagłówku str.1.** Szablon
+  ma etykietę „Mecz #" w `tcs[7]` (ostatnia komórka), ale fill `_fill_protocol`
+  pisał wartość do `tcs[5]` (pustej) → renderowały się DWA „Mecz #": jeden
+  z numerem, drugi pusty. Fix: zmiana target na `tcs[-1]` (jak w str.2, która
+  była OK). Bo3 nieruszany — działa.
+  (C) **TRÓJKA Bo5 #2: „Wygrane sety" zawijało na 3 linie („Wygra/ne/sety").**
+  Dwie złożone przyczyny: (1) blok redystrybucji w T1 (linia ~2491) przesuwa
+  300 dxa z Wygrane do Tor → Wygr cell ~850 dxa po skalowaniu, za mało dla
+  sz=20 single-word „Wygrane" (7 znaków). Fix: w NUCLEAR-2 dla TROJKA_Bo5
+  hard-set sz=16 dla is_wygr (Bo3 zostaje na sz=20 bo szablon ma szerszą Wygr
+  cell, działa). (2) Na str.2 dodatkowo T3 (tbls[2]) miał `tblW=9450`
+  oryginalne ale gridCol już zaktualizowane do 10462 → LO bierze tblW jako
+  autorytet i kompresuje proporcjonalnie 0.903 → faktyczna Wygr renderowana
+  ~768 dxa, „Wygran/e/sety" 3 linie nawet przy sz=16. Fix: dodano set tblW
+  T3 do TARGET_WIDTH (10466) razem ze skalowaniem gridCol. Po obu fixach:
+  Wygr cell na obu str. = 850 dxa rzeczywiste, sz=16, „Wygrane/sety" 2 linie.
 - 2026-06-16 (fix2) — **IND Bo7 Mecz # (nowy szablon usera) + nowy CZWÓRKA_Bo5.**
   (a) User podesłał nowy `IND_Bo7.docx` z dodaną komórką „Mecz #" w nagłówku
   (r0: tcs[4]='Mecz #' s3, tcs[5]=wartość s2). Fill: numer dopisywany do
