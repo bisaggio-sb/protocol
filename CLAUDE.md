@@ -185,6 +185,28 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 — **3 fixy: IND Bo7 nagłówek == wyniki, DWÓJKA Bo3/Bo5 centrowanie,
+  TRÓJKA Bo3 „Mecz #" Calibri.**
+  (A) **IND Bo7 nagłówek wystawał poza wyniki** (po fixie z 06-15 nagłówek
+  11475 dxa vs wyniki 10710 dxa, centrowane osobno → wystawanie symetryczne).
+  Fix: blok KROK 1 skaluje WSZYSTKIE tabele (oprócz `_p1` = źródło prawdy)
+  do `_target_w` = 10710. Wcześniej skalował tylko str.2 (SET 5/6/7). Po fixie
+  nagłówki s.1+s.2 = wyniki = 10710 dxa, wszystko wyrównane.
+  (B) **DWÓJKA Bo3/Bo5: wyniki dosuwały się w prawo w PDF** (ten sam bug Word/LO
+  co IND Bo7: ujemny tblInd -540 nagłówek / -1530 wyniki). Word: tabele
+  wynikowe wystają symetrycznie poza nagłówek (user: „ładnie powyśrodkowywane"
+  w Word view). LO: ujemny tblInd clampowany → wyniki dosuwają się
+  asymetrycznie w prawo. Fix: jc=center + usunięcie tblInd na WSZYSTKICH
+  tabelach (Bo5 = 4 tabele). Po fixie wyniki wystają symetrycznie poza
+  nagłówek na obu stronach — identycznie jak w Word.
+  (C) **TRÓJKA Bo3 „Mecz # 1" w szeryfowej czcionce** (prawy górny róg).
+  Przyczyna: template c5 ma „Mecz #" w Aptos; `_set_cell_label` zmieniał tekst
+  na „Mecz #  1" (TWO spaces) ale zachowywał font (Aptos). Font-normalizacja
+  TROJKA_LABELS matchowała po EXACT string — „Mecz #  1" nie pasowało (set
+  zawiera „Mecz" i „#" osobno, oraz pełne „Mecz #" ale BEZ wartości). Bez
+  matchu Aptos zostawał → LO fallback na szeryf. Fix: dodano prefix match
+  `text_content.startswith('Mecz #')` w pętli normalizacji. Działa też dla
+  TRÓJKA Bo5 / DWÓJKA Bo3 / DWÓJKA Bo5 (wszystkie używają tego samego bloku).
 - 2026-06-15 (fix5) — **IND Bo7: centrowanie tabel w PDF + kropki po „Pkt".**
   (A) **Bug „strona siada na lewej krawędzi" (PDF).** Szablon używa UJEMNEGO
   `tblInd` (-720 nagłówki / -725 wyniki) — tabela jest szersza niż obszar tekstu

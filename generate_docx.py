@@ -2301,7 +2301,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             ts = r.findall(wt('t'))
             if not ts: continue
             text_content = ''.join((t.text or '') for t in ts).strip()
-            if text_content in TROJKA_LABELS:
+            # Match po exact label LUB prefix "Mecz #" (po fill _set_cell_label
+            # zmienia "Runda" → "Mecz #  1" w jednym runie — single-text nie pasuje
+            # do żadnego stringa z TROJKA_LABELS → bez tego LO bierze Aptos Narrow
+            # fallback → szeryf na "Mecz # 1" w prawym górnym).
+            if text_content in TROJKA_LABELS or text_content.startswith('Mecz #'):
                 rPr = r.find(wt('rPr'))
                 if rPr is None:
                     rPr = etree.Element(wt('rPr'))
@@ -3527,11 +3531,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 if _s1:
                     _target_w = _s1
 
-        # KROK 1: str.2 (SET 5/6/7) jest naturalnie węższa (3 sety vs 4) — skalujemy
-        # jej gridCol+tcW do szerokości str.1, żeby obie tabele były tak samo szerokie.
+        # KROK 1: skaluj WSZYSTKIE pozostałe tabele do szerokości tabeli wyników
+        # str.1 (_target_w = 10710):
+        #  • str.2 wyniki (SET 5/6/7) — naturalnie węższa (3 sety vs 4).
+        #  • nagłówki str.1 i str.2 — naturalnie SZERSZE (11475 vs 10710), bo szablon
+        #    ma negatywny tblInd kompensujący różnicę w Wordzie. Po jc=center
+        #    (KROK 2) wystawały symetrycznie poza wyniki na obu stronach — user
+        #    chciał, żeby krawędzie się pokrywały. Po skalowaniu obie strony =
+        #    nagłówek i wyniki tej samej szerokości, wszystko wyrównane.
         for _t in _all_t:
-            _txt = ''.join(x.text or '' for x in _t.iter(wt('t')))
-            if '(SET 5)' not in _txt and '(SET 6)' not in _txt and '(SET 7)' not in _txt:
+            if _t is _p1:   # str.1 wyniki = źródło prawdy, nie ruszamy
                 continue
             _pr = _t.find(wt('tblPr'))
             if _pr is None:
@@ -3577,6 +3586,34 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             _ts = _r.findall(wt('t'))
             if len(_ts) == 1 and (_ts[0].text or '').strip() == 'Pkt':
                 _ts[0].text = (_ts[0].text or '').replace('Pkt', 'Pkt.')
+
+    # ── DWÓJKA Bo3/Bo5: centruj tabele (ten sam bug Word/LO co IND Bo7).
+    # Szablon ma ujemny tblInd (-540 nagłówek, -1530 wyniki) — w Wordzie tabele
+    # wynikowe wystają symetrycznie poza nagłówek (user: „ładnie powyśrodkowywane"),
+    # w LibreOffice (PDF) ujemny tblInd jest clampowany i tabele dosuwają się
+    # asymetrycznie. Fix: jc=center + usunięcie tblInd. Po fixie wyniki (szersze)
+    # wystają symetrycznie poza nagłówek na obu stronach (Bo5 = 4 tabele).
+    if template_type in ('DWOJKA_Bo3', 'DWOJKA_Bo5'):
+        _TBLPR_ORDER_D = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual',
+                          'tblStyleRowBandSize', 'tblStyleColBandSize', 'tblW', 'jc',
+                          'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout',
+                          'tblCellMar', 'tblLook']
+        def _set_pr_d(pr, tag, attrs):
+            for _o in pr.findall(wt(tag)): pr.remove(_o)
+            _el = etree.Element(wt(tag))
+            for _k, _v in attrs.items(): _el.set(f'{{{W}}}{_k}', _v)
+            _rank = _TBLPR_ORDER_D.index(tag) if tag in _TBLPR_ORDER_D else 99
+            _idx = len(list(pr))
+            for _i, _ch in enumerate(pr):
+                _ct = _ch.tag.replace(f'{{{W}}}', '')
+                if (_TBLPR_ORDER_D.index(_ct) if _ct in _TBLPR_ORDER_D else 99) > _rank:
+                    _idx = _i; break
+            pr.insert(_idx, _el)
+        for _t in body.findall(wt('tbl')):
+            _pr = _t.find(wt('tblPr'))
+            if _pr is None: continue
+            _set_pr_d(_pr, 'jc', {'val': 'center'})
+            for _o in _pr.findall(wt('tblInd')): _pr.remove(_o)
 
     # ── Sectpr i template
     sectPr = body.find(wt('sectPr'))
