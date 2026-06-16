@@ -185,6 +185,32 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix4) — **Iteracja 5-punktowa: CZWÓRKA swap, TRÓJKA Bo5 Wygr.+ramki,
+  DWÓJKA Bo3 ramki, DWÓJKA Bo5 Godz./bold, IND Bo7 header == wyniki.**
+  (1) **DWÓJKA Bo3 + TRÓJKA Bo5: zbędne pogrubienia prawego górnego/dolnego
+  narożnika.** Pętla „jednolita prawa krawędź" wymuszała `right sz=12` na
+  ostatniej komórce każdego wiersza tabeli wyników → gruba prawa krawędź
+  (asymetryczna vs cienka top/left/bottom sz=6). Fix: prawa krawędź ZEWNĘTRZNA
+  → sz=6 (jednolita ramka), + tblBorders right 12→6, + ostatnia SUMA right 12→6.
+  Wewnętrzne separatory SUMA (left=12) bez zmian.
+  (2) **DWÓJKA Bo5: „Godz." zawijało + Tor/Mecz nie-bold.** „Godz." rozbite na
+  runy „Godz"(sz22)+„."(BEZ sz → dziedziczy duży docDefault, Aptos) — match
+  per-run w TROJKA_LABELS nie łapał. Dodano cell-level normalizację nagłówka
+  (Calibri + jawny sz=22 na KAŻDYM runie r0) dla DWOJKA_Bo3/Bo5. Tor/Mecz # teraz
+  bold (`_bold_cell` po `_set_cell_label`) — jak w CZWÓRCE/DWÓJCE Bo3.
+  (3) **TRÓJKA Bo5: „Wygrane sety" → „Wygr. sety" + sz=20 (jak inne kolumny).**
+  User wgrał nowy szablon z „Wygr. sety" (t0) — patch binarny też na t2 (str.2
+  miała wciąż „Wygrane"). Redystrybucja kolumn w T1/T3 dla Bo5: całe 800 dxa
+  z Podpis (nie 300 z Wygr) → Wygr zostaje ~1150 dxa, „Wygr. sety" mieści się
+  sz=20 (2 linie). Cofnięty hack sz=16. (Bo3 bez zmian — user: działa.)
+  (4) **CZWÓRKA Bo3/Bo5: podmiana szablonów (kosmetyczny wording usera).** Bez
+  zmian w kodzie. (5) **IND Bo7: nagłówek == wyniki (prawa krawędź).** Szablon
+  ma nagłówki z „sierocą" ostatnią kolumną (r0 pokrywa 19 kol, Pkt SET/nazwiska
+  18) → LO centrował tabelę po pełnej szer. ale rysował Pkt SET krócej (R≈809 vs
+  wyniki 863). Fix (KROK 1b): przeniesienie szer. sierocej kolumny do poprzedniej
+  + zerowanie sierocej do 1 dxa → wiersze Pkt SET renderują pełną szer. = wyniki
+  (R=863, obie strony). Zmierzone: header L=46/R=863 = wyniki. **(DWÓJKA Bo7
+  szablon dodany do repo, wiring w osobnym commicie.)**
 - 2026-06-16 (fix3) — **DWÓJKA Bo5 str.2 = SET 4-5 + TRÓJKA Bo5 dwa bugi.**
   (A) **DWÓJKA Bo5: str.2 pokazywała SET 1-3 zamiast SET 4-5.** Stary szablon
   w repo miał T3 jako duplikat T1 (oba SET 1/2/(SET 3)) — komentarz w logu
