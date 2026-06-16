@@ -768,8 +768,8 @@ with col_form:
                 "Best of 3": "Best of 3",
                 "Best of 5": "Best of 5",
             }
-            # Best of 7 — tylko indywidualny (w praktyce wyłącznie finały).
-            if tournament_type == "Indywidualny":
+            # Best of 7 — indywidualny i drużynowy 2-os. (w praktyce finały).
+            if tournament_type in ("Indywidualny", "Drużynowy 2-os."):
                 bo_options["Best of 7"] = "Best of 7"
             # Default: Bo3 dla 1/8, Bo5 dla 1/4 i wyżej (zgodnie z FAQ)
             default_idx = 0
@@ -781,7 +781,7 @@ with col_form:
                 format_func=lambda k: bo_options[k],
                 index=default_idx,
                 help="Faza pucharowa: Best of 3 lub Best of 5. "
-                     "Best of 7 dostępny dla turnieju indywidualnego (finały)."
+                     "Best of 7 dostępny dla turnieju indywidualnego i 2-os. (finały)."
             )
 
     # Walidacja - obecnie sprawdzone i zweryfikowane:
@@ -1653,9 +1653,10 @@ with st.expander("➕ Pobierz pusty formularz"):
         if blank_type == "Drużynowy 2-os.":
             blank_format = st.selectbox(
                 "Format setów",
-                ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)"],
+                ["2 sety (grupowa)", "Best of 3 (puchar)", "Best of 5 (puchar)",
+                 "Best of 7 (puchar)"],
                 index=0, key="blank_format",
-                help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 / Best of 5."
+                help="Drużynowy 2-os. — faza grupowa lub puchar Best of 3 / 5 / 7 (finały)."
             )
         elif blank_type == "Indywidualny":
             # Indywidualny ma dodatkowo Best of 7 (finały)
@@ -1810,6 +1811,12 @@ if gen_clicked:
             template_type = 'CZWORKA_Bo3'
         elif is_czworka and sets_format == "Best of 5":
             template_type = 'CZWORKA_Bo5'
+        elif is_dwojka and sets_format == "Best of 3":
+            template_type = 'DWOJKA_Bo3'
+        elif is_dwojka and sets_format == "Best of 5":
+            template_type = 'DWOJKA_Bo5'
+        elif is_dwojka and sets_format == "Best of 7":
+            template_type = 'DWOJKA_Bo7'
         elif is_czworka:
             template_type = 'CZWORKA'
         elif is_dwojka:
@@ -2067,6 +2074,8 @@ if gen_clicked:
                 template_type = 'DWOJKA_Bo3'
             elif is_dwojka and is_pucharowa and sets_format == "Best of 5":
                 template_type = 'DWOJKA_Bo5'
+            elif is_dwojka and is_pucharowa and sets_format == "Best of 7":
+                template_type = 'DWOJKA_Bo7'
             elif is_czworka:
                 template_type = 'CZWORKA'
             elif is_trojka:
@@ -2220,6 +2229,8 @@ if blank_clicked:
                 blank_template = 'DWOJKA_Bo3'
             elif "Best of 5" in blank_format:
                 blank_template = 'DWOJKA_Bo5'
+            elif "Best of 7" in blank_format:
+                blank_template = 'DWOJKA_Bo7'
             else:
                 blank_template = 'DWOJKA'
         elif blank_type == "Drużynowy 3-os.":
