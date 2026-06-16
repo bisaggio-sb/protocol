@@ -1576,6 +1576,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
     if template_type == 'IND_Bo7':
         tor_val = match.get('tor', '').strip()
         godz_val = match.get('godz', '').strip()
+        mecz_val = match.get('mecz', '').strip()
         z1 = match.get('z1', '')
         z2 = match.get('z2', '')
         all_tbls = [el for el in elements if el.tag == wt('tbl')]
@@ -1589,7 +1590,13 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             if len(tcs) > 3 and godz_val:
                 _set_cell_value(tcs[3], godz_val, size=24, bold=True, align='left')
-            # Brak komórki „Mecz #" — pomijamy.
+            # „Mecz #": numer dopisany do etykiety w tcs[4] (jak w TRÓJCE/CZWÓRCE) —
+            # komórka jest vAlign=center, więc „Mecz #  1" jest pionowo wyśrodkowane
+            # (oddzielna komórka wartości tcs[5] nie ma vAlign → wartość lądowała u góry).
+            # Dla faz z jednym meczem (Finał, Mecz o N. miejsce) build_document zeruje
+            # match['mecz'] → czyścimy całą etykietę, żeby nie wisiała samotnie.
+            if len(tcs) > 4:
+                _set_cell_label(tcs[4], f'Mecz #  {mecz_val}' if mecz_val else '')
             if len(hrows) > 2:
                 tcs = hrows[2].findall(wt('tc'))
                 if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
@@ -3116,7 +3123,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 ts = r.findall(wt('t'))
                 if not ts: continue
                 text_content = ''.join((t.text or '') for t in ts).strip()
-                if text_content in IND_BO_LABELS:
+                # Exact label LUB prefix „Mecz #" — po fill etykieta to „Mecz #  1"
+                # (IND_Bo7), single-text nie pasuje do żadnego stringa z setu → bez
+                # tego LO bierze Aptos fallback (szeryf na numerze meczu).
+                if text_content in IND_BO_LABELS or text_content.startswith('Mecz #'):
                     rPr = r.find(wt('rPr'))
                     if rPr is None:
                         rPr = etree.Element(wt('rPr'))

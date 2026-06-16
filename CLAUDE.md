@@ -185,6 +185,28 @@ w wierszu tabeli (PIL).
 - [ ] DWÓJKA Bo7 — szablon pucharowy
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix2) — **IND Bo7 Mecz # (nowy szablon usera) + nowy CZWÓRKA_Bo5.**
+  (a) User podesłał nowy `IND_Bo7.docx` z dodaną komórką „Mecz #" w nagłówku
+  (r0: tcs[4]='Mecz #' s3, tcs[5]=wartość s2). Fill: numer dopisywany do
+  ETYKIETY `_set_cell_label(tcs[4], f'Mecz #  {n}')` (jak TRÓJKA/CZWÓRKA) —
+  komórka c4 ma vAlign=center, więc „Mecz #  1" jest pionowo wyśrodkowane;
+  oddzielna komórka wartości c5 NIE ma vAlign → wartość lądowała u góry (źle).
+  Ukrywanie: dla faz z 1 meczem (Finał, „Mecz o N. miejsce") build_document
+  zeruje match['mecz'] (`hide_mecz_num = len(matches)<=1`) → czyścimy całą
+  etykietę `_set_cell_label(tcs[4], '')`. Działa na obu nagłówkach (str.1+str.2).
+  Font: dodany prefix-match `startswith('Mecz #')` w bloku IND_BO_LABELS
+  (etykieta „Mecz #" jest Aptos → bez tego LO serif fallback na numerze).
+  Weryfikacja renderem: 2 mecze → „Mecz #  1"/„Mecz #  2" inline Calibri na obu
+  str.; 1 mecz → brak etykiety. (b) Nowy `CZWÓRKA_Bo5.docx` od usera (fix
+  wcześniejszego błędu) — podmiana bez zmian w kodzie, render OK, regresja 13/13.
+  **UWAGA — wyrównanie nagłówka str.1 w PDF NADAL ~53px krótsze od wyników**
+  (HEADER R≈809 vs BOTTOM R≈863). Nowy szablon NIE naprawił tego: wiersze
+  nazwisk + Pkt SET (r1-r3) wciąż pokrywają 18 z 19 gridCol (Podpis kończy się
+  1 kolumnę przed wierszem Tor/Godz). W Wordzie OK (ujemny tblInd), w LO render
+  krótki. User: „z obecną wersją można żyć". Fix wymaga edycji SZABLONU
+  (rozszerzyć ostatnią komórkę r1-r3 by spinała pełny grid) — moje próby przez
+  kod (gridSpan/tcW/orphan-col) za każdym razem powodowały autofit LO i zwijanie
+  nazwisk na 3 linie. NIE ruszać kodem.
 - 2026-06-16 — **3 fixy: IND Bo7 nagłówek == wyniki, DWÓJKA Bo3/Bo5 centrowanie,
   TRÓJKA Bo3 „Mecz #" Calibri.**
   (A) **IND Bo7 nagłówek wystawał poza wyniki** (po fixie z 06-15 nagłówek
