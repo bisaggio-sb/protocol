@@ -187,6 +187,34 @@ w wierszu tabeli (PIL).
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix6) — **DWÓJKA Bo7 szeryfy/rozmiary + ramki SUMA + jednolity Tor/Godz/Mecz.**
+  (1) **DWÓJKA Bo7 szeryfy** — etykiety SET 1-7/(SET 5-7)/numery wierszy/PKT w
+  TABELI WYNIKÓW (nie header) były rozbite na runy z font=None/Aptos Narrow →
+  LO szeryf. `header_tbls` force łapał tylko nagłówek. Fix: NUKLEARNE Calibri na
+  KAŻDYM runie body DWÓJKA Bo7 POZA szarym nagłówkiem (color=666666). Skan
+  potwierdza: tylko szary nagłówek non-Calibri. (2) **Wygr. sety za duże** —
+  NUCLEAR is_label trzymał template sz=20; dodano width-based size dla is_label
+  w DWÓJKA Bo7 → Wygr (733<800)=16 jak Pkt SET. (3) **Pkt SET 7 centrowanie** —
+  dodano DWÓJKA Bo7 do rebuildu Pkt SET (czyste 2-linie „Pkt."+„SET N", sz=16)
+  → spójne run-splity. (4) **Nowy szablon** (więcej miejsca na nazwę drużyny);
+  auto-shrink w `_set_cell_value` (min 18) obsługuje długie nazwy, bardzo długie
+  zawijają na 2 linie. (5) **DWÓJKA Bo3/Bo5 prawa krawędź** — POPRZEDNIO za
+  bardzo ściennłem (cała na 6). User: krawędź ostatniej SUMA MIAŁA być gruba
+  (jak wewnętrzne SUMA right=12). Fix: wiersze SUMA-body (ostatnia komórka
+  left=12) → right=12; nagłówek SET/sub-header/PKT (narożniki) → right=6.
+  Ostatnia SUMA w normalizacji też 12. (6) **TRÓJKA Bo5 „Mecz #" rozjechane na
+  str.2** — komórka Mecz# str.2 węższa (1093 vs 1314) → „Mecz #  1" przy
+  docDefault ~24 zawijało. Fix: rozszerzono normalizację nagłówka (force Calibri
+  + JEDNOLITY sz=22 na WSZYSTKICH runach r0) na TROJKA_Bo3/Bo5 — mieści się +
+  jednolite. (7) **Jednolity rozmiar Tor/Godz/Mecz** (user: „różne rozmiary,
+  powinno być jednolicie"). Etykiety r0 → sz=22 (force, normalizacja na
+  szablonie). Wartości przez `_set_cell_value` (DWÓJKA Bo3 tor/godz/mecz=28,
+  godz wszędzie=24, IND_Bo3 godz=24) → ujednolicone do sz=22 w fillach. Teraz
+  DWÓJKA/TRÓJKA Bo3/Bo5 mają Tor/Godz/Mecz jednolicie 22 (wartości bold). UWAGA:
+  normalizacja nagłówka działa na SZABLONIE (przed fillem) → wartości
+  `_set_cell_value` trzeba zmieniać W FILLU (nie łapie ich normalizacja);
+  wartości przez `_set_cell_label` dziedziczą rozmiar znormalizowanego runu.
+  Landscape (CZWÓRKA, DWÓJKA Bo7) zostają na sz=20 (własny spójny zestaw).
 - 2026-06-16 (fix5) — **DWÓJKA Bo7 (NOWY TYP) + dokończenie iteracji 5-pkt.**
   (1) **DWÓJKA Bo7** — landscape jak CZWÓRKA Bo5, 2 drużyny, 7 setów (score
   s.1=SET 1-4, s.2=SET 5-7). Fill przez gałąź CZWORKA_Bo3/Bo5 (r0[1]=tor,
