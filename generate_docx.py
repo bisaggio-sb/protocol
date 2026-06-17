@@ -1843,9 +1843,9 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             tcs = rows[3].findall(wt('tc'))
             if tcs: _set_cell_value(tcs[0], z2, size=24, align='right')
         
-        # ── Strona 3 (Table 3) — inna struktura: 7 widocznych kolumn w R1 ──
-        # tc[0]=Tor, tc[1]=empty(wide), tc[2-4]=empty, tc[5]=empty, tc[6]=Runda(last)
-        # Bez "Godz." labela (na drugiej stronie nie ma czasu, jest już na pierwszej)
+        # ── Strona 3 (Table 3) — analogiczna struktura do T1 ──
+        # Aktualny szablon TRÓJKA_Bo5 ma „Godz." też na str.2 (wcześniejsze
+        # wersje nie miały — stąd stary komentarz „NO Godz."). Wypełniamy.
         all_tbls = [el for el in elements if el.tag == wt('tbl')]
         if len(all_tbls) >= 3:
             t3 = all_tbls[2]
@@ -1854,7 +1854,9 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 tcs = t3_rows[0].findall(wt('tc'))
                 if len(tcs) > 0 and tor_val:
                     _set_cell_label(tcs[0], f'Tor  {tor_val}')
-                # "Runda" jest w ostatniej komórce R1 — szukamy ostatniej z 7
+                if len(tcs) > 2 and godz_val:
+                    _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
+                # „Mecz #" w ostatniej komórce r0 (analogicznie do str.1).
                 if len(tcs) >= 7:
                     if mecz_val:
                         _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
