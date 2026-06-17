@@ -1623,6 +1623,19 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             # match['mecz'] → czyścimy całą etykietę, żeby nie wisiała samotnie.
             if len(tcs) > 4:
                 _set_cell_label(tcs[4], f'Mecz #  {mecz_val}' if mecz_val else '')
+                # Wymuś bold na komórce Mecz # — szablon ma str.1 bold, str.2 nie
+                # (user: „Mecz wydaje się niepogrubiony na drugiej stronie").
+                # `_set_cell_label` zachowuje format szablonu, więc forsujemy bold tu.
+                if mecz_val:
+                    for _run in tcs[4].iter(wt('r')):
+                        if not _run.findall(wt('t')):
+                            continue
+                        _rPr = _run.find(wt('rPr'))
+                        if _rPr is None:
+                            _rPr = etree.Element(wt('rPr')); _run.insert(0, _rPr)
+                        for _btag in ('b', 'bCs'):
+                            if _rPr.find(wt(_btag)) is None:
+                                etree.SubElement(_rPr, wt(_btag))
             if len(hrows) > 2:
                 tcs = hrows[2].findall(wt('tc'))
                 if tcs: _set_cell_value(tcs[0], z1, size=24, align='right')
