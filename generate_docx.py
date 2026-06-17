@@ -3371,7 +3371,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         tcW = tcPr.find(wt('tcW'))
                         cw = int(tcW.get(f'{{{W}}}w', '990')) if tcW is not None else 990
                         if template_type == 'IND_Bo7':
-                            cell_sz = '16'
+                            cell_sz = '20'
                         else:
                             cell_sz = '16' if cw < 800 else '20'
                         for p in tc.findall(wt('p')):
@@ -3651,9 +3651,10 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         if template_type == 'IND_Bo7':
             # IND_Bo7 str.1: komórki Pkt SET 744-807 dxa (na granicy progu 800).
             # narrow/wide rozjeżdżały SET 1 (cw=807→20) i resztę (cw=744→16) →
-            # user: „pierwsza strona ma chujowe nagłówki, tylko Pkt SET 5 ok".
-            # Wymuszamy JEDNOLITY sz=16 na całym IND_Bo7 (mieści się wszędzie).
-            _fix_pkt_set_cells(body, narrow='16', wide='16')
+            # user: „pierwsza strona ma chujowe nagłówki". Wymuszamy JEDNOLITY
+            # sz=20 (jak „Wygr. sety" w komórce 836 dxa) — „Pkt."/„SET N" mieści
+            # się 2-liniowo w 744-807 dxa, spójnie z Wygr/Podpis.
+            _fix_pkt_set_cells(body, narrow='20', wide='20')
         elif template_type != 'CZWORKA_Bo5':
             _fix_pkt_set_cells(body)
         _force_calibri_score_labels(body)
