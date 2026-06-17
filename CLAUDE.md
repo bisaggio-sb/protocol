@@ -187,6 +187,18 @@ w wierszu tabeli (PIL).
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-16 (fix7) — **Numery wierszy zawijały pionowo + TRÓJKA Bo5 Godz str.2.**
+  (A) **Numery wierszy (10-18) zawijały pionowo** („1"/„0") w wąskiej kolumnie
+  numerów (TRÓJKA Bo3/Bo5 numcol ~391 dxa). W Wordzie „10" mieści się poziomo,
+  ale LO (Carlito) renderuje szerzej + tcMar 105/105 → zawijanie. Fix uniwersalny:
+  w tabelach wyników (z SUMA) komórki z liczbą 1-18 → tcMar lewo/prawo = 10 dxa.
+  Sprawdzone na wszystkich szablonach (TRÓJKA/DWÓJKA/CZWÓRKA Bo3/Bo5, DWÓJKA Bo7).
+  (B) **TRÓJKA Bo5: brak Godz. na str.2** — fill T3 miał stary komentarz „NO
+  Godz." (poprzednia wersja szablonu bez tej etykiety). Nowy szablon ma „Godz."
+  na obu str. → dodano fill wartości godz do tcs[2] na str.2 (jak str.1).
+  (C) **Auto-shrink `_set_cell_value`** rozszerzony do sz=14 (było min 18) —
+  user: „wolę ciut mniejszą czcionkę niż zawijanie". ≤35 znaków bez zawijania
+  w komórce nazwy drużyny DWÓJKA Bo7 (3009 dxa).
 - 2026-06-16 (fix6) — **DWÓJKA Bo7 szeryfy/rozmiary + ramki SUMA + jednolity Tor/Godz/Mecz.**
   (1) **DWÓJKA Bo7 szeryfy** — etykiety SET 1-7/(SET 5-7)/numery wierszy/PKT w
   TABELI WYNIKÓW (nie header) były rozbite na runy z font=None/Aptos Narrow →

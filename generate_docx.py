@@ -2311,6 +2311,34 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 for side in ('top','bottom','left','right'):
                     pgMar.set(f'{{{W}}}{side}', '720')
 
+    # ── Numery wierszy (1-18) w tabelach wyników: zmniejsz marginesy komórki ──
+    # W niektórych szablonach (np. TRÓJKA_Bo3/Bo5) kolumna numerów jest wąska
+    # (~391 dxa). W Wordzie „10".."18" mieszczą się poziomo, ale LibreOffice
+    # (Carlito) renderuje szerzej + tcMar 105/105 → 2-cyfrowe numery ZAWIJAJĄ
+    # pionowo („1"/„0"). User: „te numery pionowo zamiast poziomo, ja tak nie
+    # robiłem". Fix uniwersalny: w komórkach tabel wyników (z SUMA) zawierających
+    # tylko liczbę 1-18 ścinamy tcMar lewo/prawo do 10 dxa → 2 cyfry mieszczą się
+    # poziomo. Dotyczy wszystkich szablonów (gdyby gdziekolwiek był ten layout).
+    for _tbl in body.findall(wt('tbl')):
+        if 'SUMA' not in ''.join((x.text or '') for x in _tbl.iter(wt('t'))):
+            continue
+        for _tc in _tbl.iter(wt('tc')):
+            _txt = ''.join((x.text or '') for x in _tc.iter(wt('t'))).strip()
+            if not (_txt.isdigit() and 1 <= int(_txt) <= 18):
+                continue
+            _tcpr = _tc.find(wt('tcPr'))
+            if _tcpr is None:
+                continue
+            _m = _tcpr.find(wt('tcMar'))
+            if _m is None:
+                _m = etree.SubElement(_tcpr, wt('tcMar'))
+            for _side in ('left', 'right'):
+                _e = _m.find(wt(_side))
+                if _e is None:
+                    _e = etree.SubElement(_m, wt(_side))
+                    _e.set(f'{{{W}}}type', 'dxa')
+                _e.set(f'{{{W}}}w', '10')
+
     # ── Fonty etykiet: pomniejsz zbyt duże (24→20 dla głównych etykiet,
     # zachowaj 24 dla nagłówków SET 1/SET 2/Wyniki turnieju w tabeli wyników).
     # Tor/Godzina/Grupa/Mecz# (sz=24) → sz=22 (czytelne, mieszczą się w linii)
