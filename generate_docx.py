@@ -1522,8 +1522,10 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             if len(tcs) > 0 and tor_val:
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             godz_val = match.get('godz', '').strip()
+            # sz=24 — wcześniej 22 dla spójności z DWÓJKĄ/TRÓJKĄ Bo3, ale user:
+            # IND_Bo5 ma 24 i wygląda lepiej, ujednolicamy IND Bo3↔Bo5 na 24.
             if len(tcs) > 2 and godz_val:
-                _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
+                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
             mecz_val = match.get('mecz', '').strip()
             if len(tcs) > 5:
                 if mecz_val:
@@ -1560,6 +1562,21 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             if len(tcs) > 3 and godz_val:
                 _set_cell_value(tcs[3], godz_val, size=24, bold=True, align='left')
+                # Etykieta „Godz." (c2) ma tcW=1710 dxa i jest centrowana → wizualnie
+                # tworzy duży odstęp od wartości w c3. Wyrównanie do prawej dosuwa
+                # label do krawędzi przy wartości (user: „idealnie ten większy
+                # rozmiar Bo5 + mniejszy odstęp jak w Bo3").
+                if len(tcs) > 2:
+                    _label_p = tcs[2].find(wt('p'))
+                    if _label_p is not None:
+                        _label_pPr = _label_p.find(wt('pPr'))
+                        if _label_pPr is None:
+                            _label_pPr = etree.Element(wt('pPr'))
+                            _label_p.insert(0, _label_pPr)
+                        _jc = _label_pPr.find(wt('jc'))
+                        if _jc is None:
+                            _jc = etree.SubElement(_label_pPr, wt('jc'))
+                        _jc.set(f'{{{W}}}val', 'right')
             if len(tcs) > 5:
                 _set_cell_label(tcs[5], f'Mecz #  {mecz_val}' if mecz_val else '')
             if len(hrows) > 2:
