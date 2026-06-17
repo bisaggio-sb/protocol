@@ -1514,7 +1514,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             godz_val = match.get('godz', '').strip()
             if len(tcs) > 2 and godz_val:
-                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
             mecz_val = match.get('mecz', '').strip()
             if len(tcs) > 5:
                 if mecz_val:
@@ -1678,11 +1678,11 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             godz_val = match.get('godz', '').strip()
             mecz_val = match.get('mecz', '').strip()
             if len(tcs) > 1 and tor_val:
-                _set_cell_value(tcs[1], tor_val, size=28, bold=True)
+                _set_cell_value(tcs[1], tor_val, size=22, bold=True)
             if len(tcs) > 3 and godz_val:
-                _set_cell_value(tcs[3], godz_val, size=28, bold=True)
+                _set_cell_value(tcs[3], godz_val, size=22, bold=True)
             if len(tcs) > 8 and mecz_val:
-                _set_cell_value(tcs[8], mecz_val, size=28, bold=True)
+                _set_cell_value(tcs[8], mecz_val, size=22, bold=True)
         # Drużyny w r3.c0 i r4.c0
         if len(rows) > 3:
             tcs = rows[3].findall(wt('tc'))
@@ -1727,7 +1727,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
                 _bold_cell(tcs[0])
             if len(tcs) > 2 and godz_val:
-                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
             if len(tcs) >= 8:
                 if mecz_val:
                     _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
@@ -1751,7 +1751,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                     _set_cell_label(tcs[0], f'Tor  {tor_val}')
                     _bold_cell(tcs[0])
                 if len(tcs) > 2 and godz_val:
-                    _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                    _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
                 if len(tcs) >= 8:
                     if mecz_val:
                         _set_cell_label(tcs[-1], f'Mecz #  {mecz_val}')
@@ -1782,7 +1782,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             godz_val = match.get('godz', '').strip()
             if len(tcs) > 2 and godz_val:
-                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
             mecz_val = match.get('mecz', '').strip()
             if len(tcs) > 5:
                 if mecz_val:
@@ -1817,7 +1817,7 @@ def _fill_protocol(elements, match, hide_grupa_mecz=False, phase_label=None,
             if len(tcs) > 0 and tor_val:
                 _set_cell_label(tcs[0], f'Tor  {tor_val}')
             if len(tcs) > 2 and godz_val:
-                _set_cell_value(tcs[2], godz_val, size=24, bold=True, align='left')
+                _set_cell_value(tcs[2], godz_val, size=22, bold=True, align='left')
             # „Mecz #": szablon TRÓJKA_Bo5 ma etykietę w OSTATNIEJ komórce (c7)
             # — wcześniej fill pisał do c5 (pustej) i renderowały się DWA „Mecz #".
             if len(tcs) > 5:
@@ -2355,7 +2355,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # → kropka renderowana ogromna w Aptos, „Godz." zawija na 2 linie
         # („Godz"/„."), a wartość 13:30 w osobnej komórce ląduje wyżej. Cell-level
         # force (jak w CZWÓRCE) naprawia rozbite labele niezależnie od podziału runów.
-        if template_type in ('DWOJKA_Bo3', 'DWOJKA_Bo5'):
+        # Rozszerzone na TRÓJKĘ Bo3/Bo5: nagłówek str.2 ma węższą komórkę „Mecz #"
+        # (1093 vs 1314 na str.1) → „Mecz #  1" przy docDefault ~24 zawijało na 2
+        # linie („Mecz #"/„1" — user: „Mecz # rozjechane"). Wymuszamy JEDNOLITY
+        # sz=22 na WSZYSTKICH runach r0 (Tor/Godz./Mecz# + wartości) — mieści się
+        # na obu stronach i daje spójny rozmiar etykiet (user: „powinno być
+        # jednolicie w każdym wariancie wszędzie").
+        if template_type in ('DWOJKA_Bo3', 'DWOJKA_Bo5', 'TROJKA_Bo3', 'TROJKA_Bo5'):
             for tbl in body.findall(wt('tbl')):
                 first_row = tbl.find(wt('tr'))
                 if first_row is None:
@@ -2375,12 +2381,14 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             fonts = etree.SubElement(rPr, wt('rFonts'))
                         for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
                             fonts.set(f'{{{W}}}{a}', 'Calibri')
-                        # Jawny rozmiar 22 (11pt) — domyka osierocony run „."
+                        # Jednolity sz=22 (11pt) — FORSUJEMY na każdym runie (także
+                        # tych z własnym sz, np. godz=24), żeby Tor/Godz/Mecz miały
+                        # ten sam rozmiar i Mecz# nie zawijał w wąskiej komórce str.2.
                         for tag in ('sz', 'szCs'):
                             el = rPr.find(wt(tag))
                             if el is None:
                                 el = etree.SubElement(rPr, wt(tag))
-                                el.set(f'{{{W}}}val', '22')
+                            el.set(f'{{{W}}}val', '22')
 
         # ── Bo3/Bo5: rozmiar etykiet nagłówka kolumn (Pkt/Punkty SET, Wygrane sety,
         # Podpis). TRÓJKA_Bo3 ma te runy BEZ jawnego sz (dziedziczą duży docDefault)
