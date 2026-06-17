@@ -2692,15 +2692,16 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if old_b is not None:
                             tgt_tcPr.remove(old_b)
                         new_borders = deepcopy(ref_borders)
-                        # Ostatnia SUMA: prawa krawędź = krawędź tabeli, sz=6
-                        # (cienka ramka zewnętrzna — patrz niżej; wcześniej 12
-                        # dawało pogrubiony prawy narożnik).
+                        # Ostatnia SUMA: prawa krawędź = krawędź tabeli, sz=12 —
+                        # MUSI być gruba jak prawa krawędź WEWNĘTRZNYCH kolumn SUMA
+                        # (right=12), inaczej ostatnia kolumna SUMA wygląda inaczej
+                        # niż reszta (user: „ta krawędź miała być pogrubiona").
                         if tgt_idx == last_idx:
                             right_el = new_borders.find(wt('right'))
                             if right_el is None:
                                 right_el = etree.SubElement(new_borders, wt('right'))
                             right_el.set(f'{{{W}}}val', 'single')
-                            right_el.set(f'{{{W}}}sz', '6')
+                            right_el.set(f'{{{W}}}sz', '12')
                             right_el.set(f'{{{W}}}space', '0')
                             right_el.set(f'{{{W}}}color', 'auto')
                         tgt_tcPr.insert(0, new_borders)
@@ -2740,29 +2741,21 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         else:
                             break
                     tcPr.insert(insert_at, tcBorders)
+                # Grubość prawej krawędzi zależna od typu wiersza:
+                # • wiersze SUMA-body (ostatnia komórka = kolumna SUMA, ma left=12)
+                #   → right=12, żeby ostatnia kolumna SUMA miała grubą prawą krawędź
+                #   JAK wewnętrzne kolumny SUMA (user: „ta krawędź miała być pogrubiona").
+                # • nagłówek SET / sub-header / wiersz PKT (narożniki) → right=6,
+                #   bo tam pogrubienie było zbędne (wcześniejsza uwaga usera o rogach).
+                _lastleft = last_tc.find(f'{wt("tcPr")}/{wt("tcBorders")}/{wt("left")}')
+                _is_suma_row = _lastleft is not None and _lastleft.get(f'{{{W}}}sz') == '12'
                 right_el = tcBorders.find(wt('right'))
                 if right_el is None:
                     right_el = etree.SubElement(tcBorders, wt('right'))
                 right_el.set(f'{{{W}}}val', 'single')
-                # Prawa krawędź ZEWNĘTRZNA = sz=6 (jak top/left/bottom ramki) —
-                # wcześniej sz=12 dawało „pogrubione" narożniki (górny i dolny
-                # prawy róg), które user oznaczył jako zbędne. Teraz cała ramka
-                # zewnętrzna jednolicie cienka; grube zostają tylko WEWNĘTRZNE
-                # separatory kolumn SUMA (left=12).
-                right_el.set(f'{{{W}}}sz', '6')
+                right_el.set(f'{{{W}}}sz', '12' if _is_suma_row else '6')
                 right_el.set(f'{{{W}}}space', '0')
                 right_el.set(f'{{{W}}}color', 'auto')
-
-            # tblBorders prawa krawędź też na 6 (była 12 w szablonie) — żeby
-            # komórki bez jawnego tcBorders (np. nagłówek SET gridSpan) też
-            # rysowały cienką krawędź zewnętrzną.
-            tblPr_edge = t2.find(wt('tblPr'))
-            if tblPr_edge is not None:
-                tbB = tblPr_edge.find(wt('tblBorders'))
-                if tbB is not None:
-                    rEl = tbB.find(wt('right'))
-                    if rEl is not None:
-                        rEl.set(f'{{{W}}}sz', '6')
 
         # ── BO5: dodatkowo skalujemy tabele 3 i 4 (strona 3 — extension sheet) ──
         # T3 (header s.3) skalujemy proporcjonalnie do tej samej szerokości co T1.
@@ -3065,8 +3058,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         rPr = run.find(wt('rPr'))
                         if rPr is None:
                             rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
-                        # rozmiar wymuszamy tylko dla Pkt/SET (zachowujemy template'owy sz dla Wygr./Podpis)
-                        if is_pkt_set:
+                        # rozmiar wg szerokości komórki dla Pkt/SET; dla DWÓJKA Bo7
+                        # TAKŻE dla Wygr./Podpis — bez tego „Wygr. sety" zostawała na
+                        # template'owym sz=20 (większa niż Pkt SET sz=16 → user:
+                        # „wygr. sety większa czcionka niepotrzebnie"). Width-based
+                        # daje Wygr (733<800)=16 = jak Pkt SET, Podpis (1165)=20.
+                        if is_pkt_set or (is_label and template_type == 'DWOJKA_Bo7'):
                             for tag in ('sz', 'szCs'):
                                 el = rPr.find(wt(tag))
                                 if el is None:
@@ -3132,9 +3129,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # wymuszał sz=16, a Wygr.sety/Podpis zostawały sz=20 → wizualna niespójność.
         # Fix: rebuild WSZYSTKICH komórek "Pkt SET N" w wąskich (cw<900) do 2 linii
         # "Pkt" + "SET N" przy sz=20 (zgodnie z Wygr/Podpis).
-        if template_type == 'CZWORKA_Bo5':
+        if template_type in ('CZWORKA_Bo5', 'DWOJKA_Bo7'):
             import re as _re
             XMLSPACE = '{http://www.w3.org/XML/1998/namespace}space'
+            # DWÓJKA Bo7: komórki Pkt SET wąskie (720) → sz=16 (jak NUCLEAR);
+            # CZWÓRKA Bo5 → sz=20. Rebuild ujednolica run-splity (c7 miał „SET 1"
+            # jednym runem, c8+ „ SET "+„N") → spójne centrowanie „Pkt SET 7".
+            _rebuild_sz = '16' if template_type == 'DWOJKA_Bo7' else '20'
             for htbl in header_tbls:
                 for tc in htbl.iter(wt('tc')):
                     full = ''.join((t.text or '') for t in tc.iter(wt('t')))
@@ -3171,7 +3172,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         for tag in ('b', 'bCs'):
                             etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '1')
                         for tag in ('sz', 'szCs'):
-                            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', '20')
+                            etree.SubElement(rPr, wt(tag)).set(f'{{{W}}}val', _rebuild_sz)
                         if with_break:
                             etree.SubElement(r, wt('br'))
                         t = etree.SubElement(r, wt('t'))
@@ -3186,6 +3187,31 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         if vA is None:
                             vA = etree.SubElement(tcPr, wt('vAlign'))
                         vA.set(f'{{{W}}}val', 'center')
+
+        # ── DWÓJKA Bo7: NUKLEARNE Calibri na CAŁYM dokumencie ──────────────
+        # User: „szeryfów dużo, trudno utrzymać czcionkę z szablonu?". Etykiety
+        # SET 1-7 / (SET 5-7) / numery wierszy 1-18 / PKT w TABELI WYNIKÓW (nie
+        # header) były rozbite na runy „SET"+„ 1" itd. z font=None/Aptos Narrow →
+        # LO bierze szeryfowy fallback. header_tbls force łapie tylko nagłówek.
+        # Tu wymuszamy Calibri na KAŻDYM runie w body — POZA szarym nagłówkiem
+        # turnieju (color=666666, Aptos italic, user: „w prawym górnym może zostać").
+        # Rozmiarów NIE ruszamy (zostają z szablonu / wcześniejszych bloków).
+        if template_type == 'DWOJKA_Bo7':
+            for run in body.iter(wt('r')):
+                if not run.findall(wt('t')):
+                    continue
+                rPr = run.find(wt('rPr'))
+                if rPr is not None:
+                    clr = rPr.find(wt('color'))
+                    if clr is not None and (clr.get(f'{{{W}}}val') or '').lower() == '666666':
+                        continue  # szary nagłówek turnieju — zostaw Aptos
+                else:
+                    rPr = etree.Element(wt('rPr')); run.insert(0, rPr)
+                fonts = rPr.find(wt('rFonts'))
+                if fonts is None:
+                    fonts = etree.SubElement(rPr, wt('rFonts'))
+                for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+                    fonts.set(f'{{{W}}}{a}', 'Calibri')
 
     # ── Operacje SPECYFICZNE DLA INDYWIDUALNEGO szablonu:
     # 1) Pomniejszenie fontów etykiet (24→20)
