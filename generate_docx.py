@@ -3362,9 +3362,18 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             vAlign = etree.SubElement(tcPr, wt('vAlign'))
                         vAlign.set(f'{{{W}}}val', 'center')
                         # Font zależny od szerokości: wąskie (<800 dxa, 5 setów Bo5) → 16, reszta 20.
+                        # IND_Bo7: WSZYSTKIE Pkt SET 1-7 na str.1 ścisnięte (744-807 dxa),
+                        # próg 800 trafiał niespójnie (SET 1=807→20, SET 2-4/6-7=744→16,
+                        # SET 5=749→16 ale „_fix_pkt_set_cells" potem podbijał do 20…).
+                        # Ujednolicam: cały IND_Bo7 nagłówek str.1+str.2 → sz=16 (mieści
+                        # się wszędzie, spójnie). Inne szablony zostają z dotychczasową
+                        # logiką szerokości.
                         tcW = tcPr.find(wt('tcW'))
                         cw = int(tcW.get(f'{{{W}}}w', '990')) if tcW is not None else 990
-                        cell_sz = '16' if cw < 800 else '20'
+                        if template_type == 'IND_Bo7':
+                            cell_sz = '16'
+                        else:
+                            cell_sz = '16' if cw < 800 else '20'
                         for p in tc.findall(wt('p')):
                             for run in p.findall(wt('r')):
                                 ts = run.findall(wt('t'))
@@ -3639,7 +3648,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # zbudowane wcześniej w bloku CZWORKA z sz=20 (zgodnie z Wygr/Podpis).
         # Inaczej fix_pkt_set_cells zobaczyłby <w:br/> i przebudował ponownie
         # z narrow='16' (cw<800), przez co Pkt SET znów byłyby mniejsze.
-        if template_type != 'CZWORKA_Bo5':
+        if template_type == 'IND_Bo7':
+            # IND_Bo7 str.1: komórki Pkt SET 744-807 dxa (na granicy progu 800).
+            # narrow/wide rozjeżdżały SET 1 (cw=807→20) i resztę (cw=744→16) →
+            # user: „pierwsza strona ma chujowe nagłówki, tylko Pkt SET 5 ok".
+            # Wymuszamy JEDNOLITY sz=16 na całym IND_Bo7 (mieści się wszędzie).
+            _fix_pkt_set_cells(body, narrow='16', wide='16')
+        elif template_type != 'CZWORKA_Bo5':
             _fix_pkt_set_cells(body)
         _force_calibri_score_labels(body)
 
