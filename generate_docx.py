@@ -1299,16 +1299,25 @@ def _set_cell_value(tc, text, *, bold=True, size=28, align='center'):
             # zmierzone na „Stowarzyszenie Aktywny Orlik I" w komórce 3060 dxa — przy 4.2
             # sz=20 jeszcze zawijał ostatni znak). Margines komórki + rezerwa ~200 dxa.
             usable = cell_w - 200
+            # Pełen zakres: 28→14. Min 14 (7pt) jest jeszcze komfortowo czytelne,
+            # mieści ~35 znaków w komórce 2800 dxa (DWÓJKA Bo7 nazwa drużyny: 3009
+            # dxa). User: „wolałbym ciut zmniejszoną czcionkę niż kolejną linię
+            # i rozjechanie w tabelce". Bardzo długie (>40 znaków) wciąż zawiną,
+            # ale poniżej 14pt tekst robi się nieczytelny — granica praktyczna.
             chosen = None
-            for try_sz in (28, 26, 24, 22, 20, 18):
+            for try_sz in (28, 26, 24, 22, 20, 18, 16, 14):
                 if try_sz > size:
                     continue
                 if n * try_sz * 5.0 <= usable:
                     chosen = try_sz
                     break
-            size = chosen if chosen is not None else 18
+            size = chosen if chosen is not None else 14
         else:
-            if n > 28:
+            if n > 34:
+                size = 14
+            elif n > 30:
+                size = 16
+            elif n > 28:
                 size = 18
             elif n > 24:
                 size = 20
