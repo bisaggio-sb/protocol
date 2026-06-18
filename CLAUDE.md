@@ -187,6 +187,21 @@ w wierszu tabeli (PIL).
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-17 — **Selektywny wydruk protokołów (multiselect grupa/zawodnik) +
+  nowy IND_Grupa.docx z numerami kolejek rzutowych.** (A) **Multiselect:**
+  expander „🎯 Wybierz konkretne protokoły do wydruku (opcjonalnie)" pod sekcją
+  sortowania (TYLKO faza grupowa, puchar generuje pojedynczą fazę). Wewnątrz
+  przycisk „📋 Wczytaj listę" → `fetch_all_group_sheets` → cache w
+  `session_state['sel_cache_<sid>']` (per arkusz). Po wczytaniu 2 multiselecty:
+  grupy (literki A-Z) + zawodnicy (z meczów, posortowani alfabetycznie). Filtr
+  AND: grupy zawężają zbiór protokołów, zawodnicy filtrują mecze (zostają te
+  z udziałem któregokolwiek wybranego po z1/z2). Puste = bez filtra (default,
+  nie rzuca się w oczy). Sentinele „bye"/„X" pomijane na liście zawodników,
+  „Gracz N" zostaje (spójnie z rozpiskami). Aplikacja filtra w `gen_clicked`
+  po `fetch_all_group_sheets`, przed sortowaniem. (B) **IND_Grupa nowy szablon:**
+  user dodał kolumnę numerów kolejek rzutowych (1-18 + PKT) — render działa
+  bez zmian w kodzie (TROJKA branch obsługuje skalowanie po istniejących
+  gridCol/tcW), regresja 14/14 OK.
 - 2026-06-17 — **Rozpiski meczowe: „Gracz N" dostaje rozpiskę.** Poprzednio
   `matches_to_player_schedules` filtrowało wszystkie placeholdery przez
   `_is_placeholder_name` (sentinele + „Gracz N"). User: „rozpiski też dla

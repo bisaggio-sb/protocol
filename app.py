@@ -1632,6 +1632,82 @@ if tournament_phase == "Grupowa":
                   "(stara logika).")
         )
 
+# ── Selektywny wydruk: filtr per grupa/zawodnik (opcjonalny) ────────────
+# Use case: pomyłka / przesunięcie zawodników między grupami → przedrukować
+# tylko wybrane protokoły zamiast całego pliku. Default = puste filtry = wszystko.
+# Tylko dla fazy grupowej (puchar generuje pojedynczą fazę, nie ma sensu filtrować).
+sel_groups = []
+sel_players = []
+if tournament_phase == "Grupowa":
+    with st.expander("🎯 Wybierz konkretne protokoły do wydruku (opcjonalnie)"):
+        st.caption("Przydatne gdy chcesz przedrukować pojedyncze protokoły "
+                   "(np. po przesunięciu zawodnika między grupami). "
+                   "Puste pola = bez filtra (wszystkie protokoły).")
+        _sel_sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+        # Cache w session_state: klucz=sid (gdy zmieni się arkusz, cache się unieważnia)
+        _cache_key = f'sel_cache_{_sel_sid}' if _sel_sid else None
+        _cache = st.session_state.get(_cache_key) if _cache_key else None
+
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            _load_btn = st.button("📋 Wczytaj listę",
+                                  disabled=not _sel_sid,
+                                  help="Pobiera grupy i zawodników z arkusza, "
+                                       "żeby pokazać je niżej w listach wyboru.",
+                                  use_container_width=True)
+        with c2:
+            if _cache:
+                st.caption(f"✓ Wczytano {len(_cache['groups'])} grup, "
+                           f"{len(_cache['players'])} zawodników.")
+            elif _sel_sid:
+                st.caption("Kliknij **Wczytaj listę** żeby zobaczyć grupy i nazwiska z arkusza.")
+            else:
+                st.caption("Najpierw wklej URL arkusza w sekcji 2.")
+
+        if _load_btn and _sel_sid:
+            with st.spinner("Pobieram grupy i zawodników…"):
+                try:
+                    _sd = generate_docx.fetch_all_group_sheets(_sel_sid)
+                    _groups = []
+                    _players_set = set()
+                    for gname, gmatches in _sd:
+                        _letter = gname.replace('Gr.', '').replace('Grupa', '').strip()
+                        _groups.append(_letter)
+                        for m in gmatches:
+                            for w in (m.get('z1', ''), m.get('z2', '')):
+                                w = (w or '').strip()
+                                # Sentinele pomijamy; „Gracz N" zostaje (user może chcieć go wybrać).
+                                if w and w.lower() != 'bye' and w.upper() != 'X':
+                                    _players_set.add(w)
+                    _cache = {'groups': _groups,
+                              'players': sorted(_players_set, key=lambda s: s.lower())}
+                    st.session_state[_cache_key] = _cache
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się pobrać arkusza: {e}")
+
+        if _cache:
+            sel_groups = st.multiselect(
+                "Grupy do wydruku",
+                _cache['groups'],
+                default=[],
+                key=f'sel_groups_{_sel_sid}',
+                help="Puste = wszystkie grupy. Wybierz konkretne litery aby przedrukować tylko ich protokoły.",
+            )
+            sel_players = st.multiselect(
+                "Zawodnicy (filtruj mecze z udziałem wybranych)",
+                _cache['players'],
+                default=[],
+                key=f'sel_players_{_sel_sid}',
+                help="Puste = wszyscy. Wybór = tylko mecze, w których uczestniczy któryś z zaznaczonych "
+                     "(po którejkolwiek stronie). Działa razem z filtrem grup (AND).",
+            )
+            if sel_groups or sel_players:
+                _parts = []
+                if sel_groups: _parts.append(f"{len(sel_groups)} {generate_docx.pluralize(len(sel_groups), 'grupa','grupy','grup')}")
+                if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), 'zawodnik','zawodników','zawodników')}")
+                st.info(f"🎯 Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
+
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
     gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
@@ -1986,7 +2062,36 @@ if gen_clicked:
             finally:
                 try: _fetch_pb.empty()
                 except Exception: pass
-            
+
+            # ── Selektywny wydruk (filtr per grupa/zawodnik z expandera 5b) ──
+            # Filtry działają AND: zaznaczenie grup ZAWĘŻA do nich, dodatkowo
+            # zaznaczenie zawodników filtruje mecze (zostają tylko te z udziałem
+            # któregokolwiek z wybranych po dowolnej stronie z1/z2).
+            if sel_groups or sel_players:
+                _filtered = []
+                _sel_groups_norm = {g.strip().upper() for g in sel_groups}
+                _sel_players_set = set(sel_players)
+                _matched = 0
+                for gname, gmatches in sheets_data:
+                    _letter = gname.replace('Gr.', '').replace('Grupa', '').strip().upper()
+                    if _sel_groups_norm and _letter not in _sel_groups_norm:
+                        continue
+                    if _sel_players_set:
+                        _kept = [m for m in gmatches
+                                 if (m.get('z1','') in _sel_players_set
+                                     or m.get('z2','') in _sel_players_set)]
+                    else:
+                        _kept = list(gmatches)
+                    if _kept:
+                        _filtered.append((gname, _kept))
+                        _matched += len(_kept)
+                sheets_data = _filtered
+                if not sheets_data:
+                    st.error("Wybrane filtry nie dopasowały żadnego meczu. Zmień wybór lub wyczyść filtry.")
+                    st.stop()
+                st.info(f"🎯 Filtr aktywny: {_matched} {generate_docx.pluralize(_matched,'mecz','mecze','meczów')} "
+                        f"z {len(sheets_data)} {generate_docx.pluralize(len(sheets_data),'grupy','grup','grup')}.")
+
             # ── Sortowanie protokołów (sort_mode z sekcji 5) ──
             # "grupa" (default historyczny) — zostaw jak jest: każda grupa to osobny block
             # "tor"   — flatten + sort po torze, potem po godzinie (drugorzędne)
