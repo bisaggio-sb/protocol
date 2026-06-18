@@ -187,6 +187,15 @@ w wierszu tabeli (PIL).
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-17 — **Rozpiski meczowe: „Gracz N" dostaje rozpiskę.** Poprzednio
+  `matches_to_player_schedules` filtrowało wszystkie placeholdery przez
+  `_is_placeholder_name` (sentinele + „Gracz N"). User: „rozpiski też dla
+  Gracz XX, de facto może przyjść w ostatniej chwili". Fix: filtr lokalny —
+  pomijamy tylko `'X'` i `'bye'` (sentinele nieużywanych slotów); „Gracz N"
+  zostaje i dostaje własną kartę rozpiski. **Zachowanie protokołów BEZ ZMIAN:**
+  `skip_placeholders` w `build_document` (IND grupowa) nadal filtruje mecze
+  z „Gracz N" po dowolnej stronie — to inna ścieżka i inny use case (nie chcemy
+  zużywać kartki na protokół meczu który prawdopodobnie się nie odbędzie).
 - 2026-06-16 (fix7) — **Numery wierszy zawijały pionowo + TRÓJKA Bo5 Godz str.2.**
   (A) **Numery wierszy (10-18) zawijały pionowo** („1"/„0") w wąskiej kolumnie
   numerów (TRÓJKA Bo3/Bo5 numcol ~391 dxa). W Wordzie „10" mieści się poziomo,

@@ -256,7 +256,11 @@ def matches_to_player_schedules(matches, group_letter):
         for who in (m.get('z1', ''), m.get('z2', '')):
             who = (who or '').strip()
             if not who: continue
-            if _is_placeholder_name(who): continue  # nie rób rozpiski dla 'X'/'bye'/'Gracz N'
+            # Pomijamy tylko sentinele NIEUŻYWANYCH slotów ('X', 'bye') — „Gracz N"
+            # zostaje, bo to placeholder na zawodnika który może dojść w ostatniej
+            # chwili (user: „rozpiski też dla Gracz XX, de facto może przyjść").
+            if who.lower() == 'bye' or who.upper() == 'X':
+                continue
             by_player.setdefault(who, []).append(m)
     out = []
     for name in sorted(by_player.keys(), key=lambda s: s.lower()):
