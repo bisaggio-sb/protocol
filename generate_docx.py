@@ -3676,10 +3676,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             _fix_pkt_set_cells(body)
         _force_calibri_score_labels(body)
 
-    # ── IND_Bo5: wyrównaj tabelę wyników str.2 ((SET 4)/(SET 5)) do lewej, do tego
-    # samego wcięcia (715 dxa) co tabela str.1. Szablon ma ją wyśrodkowaną (jc=center,
-    # tblW=auto). KLUCZ: trzeba ustawić JAWNE jc=left — samo usunięcie jc nie wystarcza,
-    # bo LibreOffice wtedy i tak centruje tabelę, ignorując tblInd.
+    # ── IND_Bo5: wyrównaj tabelę wyników str.2 ((SET 4)/(SET 5)) do lewej (do tego
+    # samego wcięcia 715 dxa co str.1). Szablon ma ją wyśrodkowaną (jc=center) →
+    # bez fixa LO ją centruje na środku strony zamiast wyrównać do lewej krawędzi
+    # tabeli str.1. NIE skalujemy szerokości — user celowo robi str.2 węższą
+    # (mniej setów = węższa tabela, zgodnie z jego edycją szablonu).
     if template_type == 'IND_Bo5':
         _TBLPR_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual',
                         'tblStyleRowBandSize', 'tblStyleColBandSize', 'tblW', 'jc',
@@ -3708,24 +3709,8 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             _pr = _t.find(wt('tblPr'))
             if _pr is None:
                 continue
-            # Skaluj kolumny do szerokości tabeli wyników str.1 (8550 dxa), żeby PRAWA
-            # krawędź str.2 pokrywała się ze str.1 (str.2 ma mniej setów = naturalnie węższa).
-            _SCORE_W = 8550
-            _grid = _t.find(wt('tblGrid'))
-            _cur = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol'))) if _grid is not None else 0
-            if _cur:
-                _f = _SCORE_W / _cur
-                for _c in _grid.findall(wt('gridCol')):
-                    _c.set(f'{{{W}}}w', str(int(int(_c.get(f'{{{W}}}w', '0')) * _f)))
-                for _tr in _t.findall(wt('tr')):
-                    for _tc in _tr.findall(wt('tc')):
-                        _tcpr = _tc.find(wt('tcPr'))
-                        _tcw = _tcpr.find(wt('tcW')) if _tcpr is not None else None
-                        if _tcw is not None and _tcw.get(f'{{{W}}}w'):
-                            _tcw.set(f'{{{W}}}w', str(int(int(_tcw.get(f'{{{W}}}w')) * _f)))
-                _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
-                _set_pr(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
-            # KLUCZ: jawne jc=left — bez tego LibreOffice centruje tabelę ignorując tblInd.
+            # KLUCZ: jawne jc=left + tblInd — bez tego LO centruje tabelę. Szerokość
+            # bez zmian (zachowujemy intencję szablonu — str.2 jest węższa).
             _set_pr(_pr, 'jc', {'val': 'left'})
             _set_pr(_pr, 'tblInd', {'w': '715', 'type': 'dxa'})
             _set_pr(_pr, 'tblLayout', {'type': 'fixed'})
@@ -3785,6 +3770,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         for _t in _all_t:
             if _t is _p1:   # str.1 wyniki = źródło prawdy, nie ruszamy
                 continue
+            # SKIP score str.2 = tabela z '(SET' (np. (SET 5)/(SET 6)/(SET 7)) — user
+            # celowo zwęża ją w szablonie (mniej setów), nie naciągamy do _target_w.
+            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
+            if '(SET' in _ttxt:
+                continue
             _pr = _t.find(wt('tblPr'))
             if _pr is None:
                 continue
@@ -3802,6 +3792,21 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                             _tcw.set(f'{{{W}}}w', str(int(int(_tcw.get(f'{{{W}}}w')) * _f)))
                 _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
                 _set_pr7(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
+
+        # Po pominięciu score str.2 ze skalowania, musi dostać własne wyrównanie do
+        # lewej (do tej samej krawędzi co str.1) — analogicznie do IND_Bo5. Bez tego
+        # KROK 2 (jc=center poniżej) wycentruje ją na środku strony i nie będzie się
+        # pokrywać lewą krawędzią ze str.1.
+        for _t in _all_t:
+            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
+            if '(SET' not in _ttxt:
+                continue
+            _pr = _t.find(wt('tblPr'))
+            if _pr is None:
+                continue
+            _set_pr7(_pr, 'jc', {'val': 'left'})
+            _set_pr7(_pr, 'tblInd', {'w': '0', 'type': 'dxa'})
+            _set_pr7(_pr, 'tblLayout', {'type': 'fixed'})
 
         # KROK 1b: rozszerz nagłówek (t0/t2) do PRAWEJ krawędzi wyników.
         # PROBLEM: w nagłówku wiersz Tor/Godz/Mecz (r0) pokrywa wszystkie 19 kolumn,
@@ -3866,6 +3871,11 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         for _t in _all_t:
             _pr = _t.find(wt('tblPr'))
             if _pr is None:
+                continue
+            # SKIP score str.2 — została wyrównana do lewej osobnym blokiem wyżej
+            # (user celowo zwęża ją w szablonie, nie centrujemy).
+            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
+            if '(SET' in _ttxt:
                 continue
             _set_pr7(_pr, 'jc', {'val': 'center'})
             for _o in _pr.findall(wt('tblInd')):
