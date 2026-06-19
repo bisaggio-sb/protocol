@@ -3676,44 +3676,13 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             _fix_pkt_set_cells(body)
         _force_calibri_score_labels(body)
 
-    # ── IND_Bo5: wyrównaj tabelę wyników str.2 ((SET 4)/(SET 5)) do lewej (do tego
-    # samego wcięcia 715 dxa co str.1). Szablon ma ją wyśrodkowaną (jc=center) →
-    # bez fixa LO ją centruje na środku strony zamiast wyrównać do lewej krawędzi
-    # tabeli str.1. NIE skalujemy szerokości — user celowo robi str.2 węższą
-    # (mniej setów = węższa tabela, zgodnie z jego edycją szablonu).
+    # ── IND_Bo5: tabela wyników str.2 ((SET 4)/(SET 5)) — szablon ma jc=center
+    # (wyśrodkowana pod str.1, węższa bo mniej setów). NIE RUSZAMY: żadnego
+    # skalowania ani wymuszania jc. Wcześniej forsowałem jc=left+tblInd i dosuwałem
+    # ją do lewej → łamało wygląd szablonu. jc=center renderuje się poprawnie też
+    # w LibreOffice (to tylko UJEMNY tblInd LO clampuje — tu go nie ma).
     if template_type == 'IND_Bo5':
-        _TBLPR_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual',
-                        'tblStyleRowBandSize', 'tblStyleColBandSize', 'tblW', 'jc',
-                        'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout',
-                        'tblCellMar', 'tblLook']
-
-        def _set_pr(pr, tag, attrs):
-            for _o in pr.findall(wt(tag)):
-                pr.remove(_o)
-            _el = etree.Element(wt(tag))
-            for _k, _v in attrs.items():
-                _el.set(f'{{{W}}}{_k}', _v)
-            _rank = _TBLPR_ORDER.index(tag) if tag in _TBLPR_ORDER else 99
-            _idx = len(list(pr))
-            for _i, _ch in enumerate(pr):
-                _ct = _ch.tag.replace(f'{{{W}}}', '')
-                if (_TBLPR_ORDER.index(_ct) if _ct in _TBLPR_ORDER else 99) > _rank:
-                    _idx = _i
-                    break
-            pr.insert(_idx, _el)
-
-        for _t in body.findall(wt('tbl')):
-            _txt = ''.join(x.text or '' for x in _t.iter(wt('t')))
-            if '(SET 4)' not in _txt and '(SET 5)' not in _txt:
-                continue
-            _pr = _t.find(wt('tblPr'))
-            if _pr is None:
-                continue
-            # KLUCZ: jawne jc=left + tblInd — bez tego LO centruje tabelę. Szerokość
-            # bez zmian (zachowujemy intencję szablonu — str.2 jest węższa).
-            _set_pr(_pr, 'jc', {'val': 'left'})
-            _set_pr(_pr, 'tblInd', {'w': '715', 'type': 'dxa'})
-            _set_pr(_pr, 'tblLayout', {'type': 'fixed'})
+        pass
 
     # ── IND_Bo7: wyrównaj tabelę wyników str.2 ((SET 5)/(SET 6)/(SET 7)) do tabeli
     # str.1 (SET 1-4). W szablonie usera str.2 ma osobne wcięcie (tblInd=355) i jest
@@ -3793,20 +3762,9 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                 _newsum = sum(int(c.get(f'{{{W}}}w', '0')) for c in _grid.findall(wt('gridCol')))
                 _set_pr7(_pr, 'tblW', {'w': str(_newsum), 'type': 'dxa'})
 
-        # Po pominięciu score str.2 ze skalowania, musi dostać własne wyrównanie do
-        # lewej (do tej samej krawędzi co str.1) — analogicznie do IND_Bo5. Bez tego
-        # KROK 2 (jc=center poniżej) wycentruje ją na środku strony i nie będzie się
-        # pokrywać lewą krawędzią ze str.1.
-        for _t in _all_t:
-            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
-            if '(SET' not in _ttxt:
-                continue
-            _pr = _t.find(wt('tblPr'))
-            if _pr is None:
-                continue
-            _set_pr7(_pr, 'jc', {'val': 'left'})
-            _set_pr7(_pr, 'tblInd', {'w': '0', 'type': 'dxa'})
-            _set_pr7(_pr, 'tblLayout', {'type': 'fixed'})
+        # Score str.2 NIE skalujemy (user celowo zwęża) — dostanie jc=center w
+        # KROK 2 razem ze str.1, więc obie wyśrodkowane na tej samej osi → str.2
+        # (węższa) ląduje wyśrodkowana POD str.1, dokładnie jak w szablonie.
 
         # KROK 1b: rozszerz nagłówek (t0/t2) do PRAWEJ krawędzi wyników.
         # PROBLEM: w nagłówku wiersz Tor/Godz/Mecz (r0) pokrywa wszystkie 19 kolumn,
@@ -3868,14 +3826,12 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
         # odniesienia → centruje tak samo w Word i w LO. Usuwamy tblInd (zostawiony
         # ujemny i tak by przesuwał). Po fixie: równe marginesy L/R w PDF, obie strony
         # wyrównane (str.2 wyskalowana w KROKU 1 do szer. str.1).
+        # Centrujemy WSZYSTKIE tabele (nagłówki + str.1 + str.2). str.2 (węższa,
+        # niewyskalowana) wyśrodkowana na tej samej osi co str.1 → ląduje pod nią
+        # symetrycznie, jak w szablonie. Pierwsze strony bez zmian (jak dotychczas).
         for _t in _all_t:
             _pr = _t.find(wt('tblPr'))
             if _pr is None:
-                continue
-            # SKIP score str.2 — została wyrównana do lewej osobnym blokiem wyżej
-            # (user celowo zwęża ją w szablonie, nie centrujemy).
-            _ttxt = ''.join((x.text or '') for x in _t.iter(wt('t')))
-            if '(SET' in _ttxt:
                 continue
             _set_pr7(_pr, 'jc', {'val': 'center'})
             for _o in _pr.findall(wt('tblInd')):
