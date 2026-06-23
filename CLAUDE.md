@@ -187,6 +187,22 @@ w wierszu tabeli (PIL).
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-19 — **Format per drabinka w trybie multi-phase (drukuj godzinę).**
+  Use case: o danej godzinie grają obie drabinki naraz; drabinka przegranych
+  (Miejsca X-Y) ma niższą stawkę → Best of 3, gdy główna leci Bo5/Bo7. Decyzja
+  usera: (a) osobne pliki per format (nie scalamy — 1 docx = 1 szablon = 1
+  format, sklejanie kruche), (b) drabinka B domyślnie Bo3 + checkbox.
+  **Implementacja (app.py, tylko tryb multi-phase):** helper `_is_b_phase` —
+  'b' dla „Miejsca X-Y" i „Mecz o N miejsce" gdy N>3; 'main' dla 1/N, Finał
+  ORAZ „Mecz o 1/2/3 miejsce" (podium → format jak finał, NIE skracamy).
+  Checkbox „Drabinka B w Best of 3" (default ON; pokazywany tylko gdy w
+  zaznaczeniu jest faza B i główny format ≠ Bo3). `_tt_for(fmt)` mapuje format
+  → template_type wg typu turnieju. Fazy grupowane po template_type (main_tt vs
+  b_tt), build OSOBNY dokument per grupa (`build_document` per template), output
+  = lista plików w `last_gen['files']` (każdy z własnym docx/pdf + opisem
+  drabinki). Download UI renderuje sekcję per plik (1 plik gdy jednolity format,
+  2 gdy główna Bo5 + B Bo3). Nazwy: `..._godzina_HH_MM_BoN[_drabinkaB].docx`.
+  Single-phase flow BEZ ZMIAN (jeden format = jeden plik, jak było).
 - 2026-06-17 — **Selektywny wydruk protokołów (multiselect grupa/zawodnik) +
   nowy IND_Grupa.docx z numerami kolejek rzutowych.** (A) **Multiselect:**
   expander „🎯 Wybierz konkretne protokoły do wydruku (opcjonalnie)" pod sekcją
