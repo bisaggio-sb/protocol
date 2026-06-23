@@ -527,6 +527,19 @@ with col_form:
     # zaznaczyć które wygenerować. Default = wszystkie zaznaczone.
     # Generuj robi ZIP z osobnymi protokołami dla każdej fazy.
     selected_phase_keys_multi = None
+    drabinka_b_bo3 = True  # default; checkbox poniżej (tylko gdy w zaznaczeniu jest faza B)
+
+    # Klasyfikacja fazy multi-phase: 'b' = drabinka przegranych (Miejsca X-Y lub
+    # Mecz o N miejsce dla N>3); 'main' = drabinka główna (1/N, Finał) ORAZ
+    # Mecz o 1/2/3 miejsce (mecze podium → format jak finał, NIE skracamy).
+    def _is_b_phase(ui_key):
+        if ui_key.startswith("Miejsca"):
+            return True
+        mm = re.match(r'Mecz o (\d+)', ui_key)
+        if mm:
+            return int(mm.group(1)) > 3
+        return False
+
     if time_filter and (filtered_glowna or filtered_b):
         all_phases_at_time = filtered_glowna + filtered_b
         multi_opts = {}
@@ -571,11 +584,24 @@ with col_form:
                 format_func=lambda k: multi_opts[k],
                 label_visibility="collapsed",
                 help=(f"Wszystkie fazy z godziny {time_filter} są domyślnie zaznaczone. "
-                      "Odznacz te, których nie chcesz generować. "
-                      "Wynik: ZIP z osobnym protokołem na każdą zaznaczoną fazę.")
+                      "Odznacz te, których nie chcesz generować. Fazy o tym samym "
+                      "formacie trafiają do jednego dokumentu; jeśli drabinka B ma "
+                      "inny format (Bo3) niż główna — powstaną osobne pliki.")
             )
             if not selected_phase_keys_multi:
                 st.warning("⚠️ Odznaczyłeś wszystkie fazy — nic do wygenerowania.")
+            # Checkbox: drabinka B w skróconym Best of 3. Pokazujemy tylko gdy
+            # w zaznaczeniu jest faza B i główny format ≠ Bo3 (inaczej bez sensu).
+            _has_b = any(_is_b_phase(k) for k in (selected_phase_keys_multi or []))
+            if _has_b:
+                drabinka_b_bo3 = st.checkbox(
+                    "Drabinka B (mecze o miejsca) w skróconym formacie Best of 3",
+                    value=True,
+                    help="Mecze o miejsca (Miejsca X-Y) drukujemy w Best of 3 nawet gdy "
+                         "główny format to Bo5/Bo7 — mniejsza stawka, oszczędność czasu. "
+                         "Odznacz, by drabinka B miała ten sam format co główna. "
+                         "Mecz o 1/2/3. miejsce ZAWSZE jak finał (format główny). "
+                         "Fazy o różnych formatach trafiają do OSOBNYCH plików.")
     
     cols_t2 = st.columns([3, 4, 3])
     with cols_t2[0]:
@@ -1827,12 +1853,33 @@ if gen_clicked:
             if pk == "Finał": return "Finał"
             return pk
         
-        # Zbieramy dane wszystkich faz: list of (phase_name, matches, phase_label_text)
-        all_sheets_data = []
+        # ── Format per faza (per-bracket) ──────────────────────────────────
+        # Drabinka B (Miejsca X-Y, Mecz o N>3) → Best of 3 (jeśli checkbox ON);
+        # drabinka główna (1/N, Finał) + mecze podium (Mecz o 1/2/3) → format główny.
+        # Fazy o różnych formatach trafiają do OSOBNYCH dokumentów (1 docx = 1 szablon).
+        def _tt_for(fmt):
+            if is_individual:
+                return {'Best of 3': 'IND_Bo3', 'Best of 5': 'IND_Bo5',
+                        'Best of 7': 'IND_Bo7'}.get(fmt, 'IND')
+            if is_trojka:
+                return {'Best of 3': 'TROJKA_Bo3', 'Best of 5': 'TROJKA_Bo5'}.get(fmt, 'TROJKA')
+            if is_czworka:
+                return {'Best of 3': 'CZWORKA_Bo3', 'Best of 5': 'CZWORKA_Bo5'}.get(fmt, 'CZWORKA')
+            if is_dwojka:
+                return {'Best of 3': 'DWOJKA_Bo3', 'Best of 5': 'DWOJKA_Bo5',
+                        'Best of 7': 'DWOJKA_Bo7'}.get(fmt, 'DWOJKA')
+            return 'IND'
+        _main_tt = _tt_for(sets_format)
+        _b_tt = _tt_for('Best of 3') if (drabinka_b_bo3 and sets_format != 'Best of 3') else _main_tt
+
+        # Zbieramy dane pogrupowane po template_type:
+        #   groups[tt] = {'data': [(phase_name, matches, label)], 'fmt': 'Best of N',
+        #                 'bracket': 'b'/'main', 'count': int}
+        groups = {}
         skipped = []
         progress_msg = st.empty()
         total_matches = 0
-        
+
         for idx, phase_key in enumerate(selected_phase_keys_multi, 1):
             progress_msg.info(f"⚙️ Wczytuję {idx}/{len(selected_phase_keys_multi)}: **{phase_key}**...")
             try:
@@ -1861,120 +1908,116 @@ if gen_clicked:
                 skipped.append((phase_key, "wszystkie pary niekompletne"))
                 continue
             p_label = _phase_label_for(phase_key)
+            _is_b = _is_b_phase(phase_key)
+            _tt = _b_tt if _is_b else _main_tt
+            _g = groups.setdefault(_tt, {'data': [], 'fmt': None, 'bracket': set()})
             # 3-tuple: phase_name, matches, phase_text_override
-            all_sheets_data.append((phase_name or phase_key, complete, p_label))
+            _g['data'].append((phase_name or phase_key, complete, p_label))
+            _g['bracket'].add('b' if _is_b else 'main')
             total_matches += len(complete)
-        
+
         progress_msg.empty()
-        
-        if not all_sheets_data:
+
+        if not groups:
             st.error("Nie udało się zebrać meczów dla żadnej fazy."); st.stop()
-        
-        # Build SINGLE document zawierający wszystkie fazy (każdy protokół z własnym nagłówkiem)
+
         logos_bytes, image_order, img_pos = build_image_args()
-        
-        if is_individual and sets_format == "Best of 3":
-            template_type = 'IND_Bo3'
-        elif is_individual and sets_format == "Best of 5":
-            template_type = 'IND_Bo5'
-        elif is_individual and sets_format == "Best of 7":
-            template_type = 'IND_Bo7'
-        elif is_trojka and sets_format == "Best of 3":
-            template_type = 'TROJKA_Bo3'
-        elif is_trojka and sets_format == "Best of 5":
-            template_type = 'TROJKA_Bo5'
-        elif is_czworka and sets_format == "Best of 3":
-            template_type = 'CZWORKA_Bo3'
-        elif is_czworka and sets_format == "Best of 5":
-            template_type = 'CZWORKA_Bo5'
-        elif is_dwojka and sets_format == "Best of 3":
-            template_type = 'DWOJKA_Bo3'
-        elif is_dwojka and sets_format == "Best of 5":
-            template_type = 'DWOJKA_Bo5'
-        elif is_dwojka and sets_format == "Best of 7":
-            template_type = 'DWOJKA_Bo7'
-        elif is_czworka:
-            template_type = 'CZWORKA'
-        elif is_dwojka:
-            template_type = 'DWOJKA'
-        else:
-            template_type = 'TROJKA' if is_trojka else 'IND'
-        
         # Nagłówek bazowy bez fazy — phase per protokół via 3-tuple override.
-        # show_phase_global zostaje pusty, by każdy protokół brał własny label.
         show_name_g = tournament_name.strip() if show_header_on_protocol else ""
         show_date_g = tournament_date if show_header_on_protocol else ""
-        
-        _pw = generate_docx.pluralize(total_matches, 'protokół', 'protokoły', 'protokołów')
-        _multi_pb = st.progress(0.0, text=f"Buduję dokument ({total_matches} {_pw})…")
-        def _on_multi_progress(done, tot, label):
-            try:
-                _multi_pb.progress(min(1.0, done / max(1, tot)),
-                    text=f"Buduję {done}/{tot} — {label}")
-            except Exception:
-                pass
-        try:
-            try:
-                docx_bytes = generate_docx.build_document(
-                    sid, sheets_url.strip(), all_sheets_data,
-                    logos=logos_bytes or None,
-                    tournament_name=show_name_g, tournament_date=show_date_g,
-                    tournament_phase_text="",  # globalny pusty — każdy protokół ma own override
-                    include_qr=include_qr, include_pfm_logo=include_pfm_logo,
-                    image_order=image_order or None, image_positions=img_pos or None,
-                    hide_grupa_mecz=True,
-                    phase_label="",
-                    template_type=template_type,
-                    progress_cb=_on_multi_progress,
-                    skip_placeholders=skip_placeholders)
-            except Exception as e:
-                st.error(f"Błąd budowy dokumentu: {e}"); st.stop()
-        finally:
-            try: _multi_pb.empty()
-            except Exception: pass
-        
-        # Nazwa pliku + PDF konwersja
         base_name = re.sub(r'[^\w\s-]', '', tournament_name).strip().replace(' ', '_') or "protokoly"
-        fmt_suffix = ('_Bo3' if sets_format == 'Best of 3'
-                      else '_Bo5' if sets_format == 'Best of 5'
-                      else '_Bo7' if sets_format == 'Best of 7'
-                      else '')
-        safe_name = f"{base_name}_godzina_{time_filter.replace(':', '_')}{fmt_suffix}"
-        
-        pdf_bytes, pdf_err = (None, None)
-        if fmt_pdf:
-            _stron = generate_docx.pluralize(total_matches, 'stronę', 'strony', 'stron')
-            _pdf_pb = st.progress(0.0, text=f"Konwertuję {total_matches} {_stron} do PDF…")
-            def _on_pdf(elapsed, est):
+
+        def _suffix_for(tt):
+            if tt.endswith('_Bo3'): return '_Bo3'
+            if tt.endswith('_Bo5'): return '_Bo5'
+            if tt.endswith('_Bo7'): return '_Bo7'
+            return ''
+
+        # Budujemy OSOBNY dokument per format (template_type). Zwykle 1 grupa
+        # (cała godzina jednym formatem) lub 2 (główna Bo5 + drabinka B Bo3).
+        # Kolejność: najpierw główna (main) potem B — czytelniej w liście pobierania.
+        _ordered_tts = sorted(groups.keys(),
+                              key=lambda tt: (0 if 'main' in groups[tt]['bracket'] else 1, tt))
+        files = []
+        for _tt in _ordered_tts:
+            _g = groups[_tt]
+            _g_data = _g['data']
+            _g_count = sum(len(d[1]) for d in _g_data)
+            _g_suffix = _suffix_for(_tt)
+            # Etykieta drabinki dla nazwy pliku / opisu (gdy >1 grupa, rozróżniamy)
+            _only_b = _g['bracket'] == {'b'}
+            _bracket_tag = '_drabinkaB' if (_only_b and len(_ordered_tts) > 1) else ''
+            _safe = f"{base_name}_godzina_{time_filter.replace(':', '_')}{_g_suffix}{_bracket_tag}"
+
+            _pw = generate_docx.pluralize(_g_count, 'protokół', 'protokoły', 'protokołów')
+            _multi_pb = st.progress(0.0, text=f"Buduję {_g_suffix.strip('_') or 'dokument'} ({_g_count} {_pw})…")
+            def _on_multi_progress(done, tot, label, _pb=_multi_pb, _sfx=_g_suffix):
                 try:
-                    _pdf_pb.progress(min(0.97, elapsed / max(1, est)),
-                        text=f"Konwertuję {total_matches} {_stron} do PDF… {int(elapsed)}s")
-                except Exception: pass
+                    _pb.progress(min(1.0, done / max(1, tot)),
+                        text=f"Buduję {_sfx.strip('_')} {done}/{tot} — {label}")
+                except Exception:
+                    pass
             try:
-                pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name,
-                                                  progress_cb=_on_pdf, est_pages=total_matches)
+                try:
+                    _docx = generate_docx.build_document(
+                        sid, sheets_url.strip(), _g_data,
+                        logos=logos_bytes or None,
+                        tournament_name=show_name_g, tournament_date=show_date_g,
+                        tournament_phase_text="",
+                        include_qr=include_qr, include_pfm_logo=include_pfm_logo,
+                        image_order=image_order or None, image_positions=img_pos or None,
+                        hide_grupa_mecz=True,
+                        phase_label="",
+                        template_type=_tt,
+                        progress_cb=_on_multi_progress,
+                        skip_placeholders=skip_placeholders)
+                except Exception as e:
+                    st.error(f"Błąd budowy dokumentu ({_g_suffix}): {e}"); st.stop()
             finally:
-                try: _pdf_pb.empty()
+                try: _multi_pb.empty()
                 except Exception: pass
+
+            _pdf, _pdf_err = (None, None)
+            if fmt_pdf:
+                _stron = generate_docx.pluralize(_g_count, 'stronę', 'strony', 'stron')
+                _pdf_pb = st.progress(0.0, text=f"Konwertuję {_g_count} {_stron} do PDF…")
+                def _on_pdf(elapsed, est, _pb=_pdf_pb, _n=_g_count, _s=_stron):
+                    try:
+                        _pb.progress(min(0.97, elapsed / max(1, est)),
+                            text=f"Konwertuję {_n} {_s} do PDF… {int(elapsed)}s")
+                    except Exception: pass
+                try:
+                    _pdf, _pdf_err = docx_to_pdf(_docx, _safe,
+                                                 progress_cb=_on_pdf, est_pages=_g_count)
+                finally:
+                    try: _pdf_pb.empty()
+                    except Exception: pass
+
+            # Opis grupy: format + (gdy >1 grupa) drabinka
+            _desc = (_g_suffix.strip('_') or 'protokoły')
+            if len(_ordered_tts) > 1:
+                _desc += ' · drabinka B' if _only_b else ' · drabinka główna'
+            files.append({
+                'name': _safe,
+                'docx': _docx if fmt_docx else None,
+                'pdf': _pdf if fmt_pdf else None,
+                'pdf_err': _pdf_err,
+                'count': _g_count,
+                'desc': _desc,
+            })
 
         if skipped:
             with st.expander(f"⚠️ Pominięto {len(skipped)} {generate_docx.pluralize(len(skipped),'fazę','fazy','faz')}"):
                 for pk, reason in skipped:
                     st.markdown(f"- **{pk}**: {reason}")
-        
+
         st.session_state['last_gen'] = {
-            'docx': docx_bytes if fmt_docx else None,
-            'pdf': pdf_bytes if fmt_pdf else None,
-            'pdf_err': pdf_err,
-            'name': safe_name,
+            'kind': 'multi_phase_doc',
+            'files': files,
             'total': total_matches,
-            'groups': len(all_sheets_data),
-            'kind': 'multi_phase_doc',  # single doc, not ZIP
-            'phase_count': len(all_sheets_data),
+            'phase_count': sum(len(g['data']) for g in groups.values()),
             'time_filter': time_filter,
         }
-        # Wiadomość success pokazuje się w UI download poniżej (persistent przez reruns),
-        # więc nie dublujemy jej tutaj.
         _multi_phase_done = True
     else:
         _multi_phase_done = False
@@ -2425,10 +2468,44 @@ if 'last_gen' in st.session_state:
     if gen['kind'] == 'multi_phase_doc':
         n_p = gen['total']
         n_f = gen['phase_count']
+        _files = gen.get('files', [])
         p_word = generate_docx.pluralize(n_p, 'protokół', 'protokoły', 'protokołów')
         f_word = generate_docx.pluralize(n_f, 'fazy', 'faz', 'faz')
-        st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
-                   f"(godzina **{gen['time_filter']}**).")
+        if len(_files) > 1:
+            st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
+                       f"(godzina **{gen['time_filter']}**) — **{len(_files)} pliki** "
+                       f"(różne formaty drabinek).")
+        else:
+            st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
+                       f"(godzina **{gen['time_filter']}**).")
+        # Download per plik (1 plik = jeden format; 2 = główna + drabinka B Bo3).
+        for _fi, _f in enumerate(_files):
+            if len(_files) > 1:
+                st.markdown(f"**{_f['desc']}** — {_f['count']} "
+                            f"{generate_docx.pluralize(_f['count'],'protokół','protokoły','protokołów')}")
+            _hd = bool(_f.get('docx')); _hp = bool(_f.get('pdf'))
+            if _hd and _hp:
+                _c = st.columns(2)
+                with _c[0]:
+                    st.download_button(f"⬇️ {_f['name']}.docx", data=_f['docx'],
+                        file_name=f"{_f['name']}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True, key=f"dl_mp_docx_{_fi}_{_f['name']}")
+                with _c[1]:
+                    st.download_button(f"⬇️ {_f['name']}.pdf", data=_f['pdf'],
+                        file_name=f"{_f['name']}.pdf", mime="application/pdf",
+                        use_container_width=True, key=f"dl_mp_pdf_{_fi}_{_f['name']}")
+            elif _hd:
+                st.download_button(f"⬇️ {_f['name']}.docx", data=_f['docx'],
+                    file_name=f"{_f['name']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True, key=f"dl_mp_docx_{_fi}_{_f['name']}")
+            elif _hp:
+                st.download_button(f"⬇️ {_f['name']}.pdf", data=_f['pdf'],
+                    file_name=f"{_f['name']}.pdf", mime="application/pdf",
+                    use_container_width=True, key=f"dl_mp_pdf_{_fi}_{_f['name']}")
+            elif _f.get('pdf_err'):
+                st.error(f"Konwersja PDF nie powiodła się: {_f['pdf_err']}")
     elif gen['kind'] == 'full':
         # Polski plural dla "protokół": 1 protokół, 2-4 protokoły, 5+ protokołów
         n_p = gen['total']
@@ -2456,8 +2533,8 @@ if 'last_gen' in st.session_state:
     else:
         st.success("✅ Pusty formularz gotowy!")
 
-    # multi_phase_doc używa standardowego UI docx/pdf (jak full)
-    if gen['kind'] == 'multi_phase_old_zip':  # nie używane
+    # multi_phase_doc ma własne renderowanie pobierania (lista plików) powyżej.
+    if gen['kind'] == 'multi_phase_doc':
         pass
     else:
         # Jeśli oba formaty - 2 kolumny side by side. Jeśli tylko jeden - wycentrowany.
