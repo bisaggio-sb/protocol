@@ -11,7 +11,7 @@ wykrywa fazy grupowe i drabinkę pucharową, składa dokument z szablonów `.doc
 i opcjonalnie konwertuje do PDF.
 
 Produkcja: https://protocol.streamlit.app/ (deploy z `main` przez Streamlit Cloud).
-Staging:   https://protocol-staging.streamlit.app/ (deploy z `staging` — do
+Development: https://protocol-dev.streamlit.app/ (deploy z `development` — do
 eksperymentów / redesignu UI; **nie tknięty** przez ścieżkę produkcyjną).
 
 ## Środowiska
@@ -19,9 +19,9 @@ eksperymentów / redesignu UI; **nie tknięty** przez ścieżkę produkcyjną).
 | Środowisko | URL | Branch | Cel |
 |---|---|---|---|
 | **Produkcja** | protocol.streamlit.app | `main` | Realne turnieje. Każdy push → live ~1-2 min. |
-| **Staging** | protocol-staging.streamlit.app | `staging` | Redesign UI, eksperymenty, ryzykowne zmiany. Bez SLA — może spać. |
+| **Development** | protocol-dev.streamlit.app | `development` | Redesign UI, eksperymenty, ryzykowne zmiany. Bez SLA — może spać. |
 
-**Workflow zmian na stagingu:** `git checkout staging` → praca → `git push` → auto-deploy. Gdy gotowe i przetestowane: `git checkout main && git merge staging && git push` → produkcja. Branch `staging` pozostaje przy życiu (nie usuwać po merge'u).
+**Workflow zmian na dev:** `git checkout development` → praca → `git push` → auto-deploy. Gdy gotowe i przetestowane: `git checkout main && git merge development && git push` → produkcja. Branch `development` pozostaje przy życiu (nie usuwać po merge'u).
 
 ## Workflow gita (WAŻNE)
 
