@@ -71,26 +71,31 @@ Wymagania:
 
 ## Branche i workflow
 
-- `main` — produkcja (deployowane na `protocol.streamlit.app`)
-- `develop` — integracja, tu lądują nowe zmiany do testów
-- `claude/*` — efemeryczne branche z sesji Claude Code (po review mergowane do `develop`)
+- `main` — produkcja (deployowane na [protocol.streamlit.app](https://protocol.streamlit.app/))
+- `staging` — środowisko testowe (deployowane na [protocol-staging.streamlit.app](https://protocol-staging.streamlit.app/)), do eksperymentów i redesignu UI bez ryzyka dla produkcji
+- `claude/*` — efemeryczne branche z sesji Claude Code
 
-**Przepływ zmiany dev → prod:**
+**Przepływ zmiany staging → prod:**
 
 ```bash
+# Praca na stagingu
+git checkout staging
+# ... commity, push → auto-deploy na protocol-staging.streamlit.app
+git push origin staging
+
+# Po weryfikacji: promocja na produkcję
 git checkout main
-git pull origin main
-git merge develop
+git merge staging
 git push origin main
 ```
 
-Lub przez PR na GitHubie: `develop → main`, review, merge. Po pushu na `main`: Streamlit Cloud sam odświeży aplikację (zwykle 1-2 min). W razie potrzeby: **Manage app → Reboot app**.
+Po pushu na `main`: Streamlit Cloud sam odświeży aplikację (zwykle 1-2 min). W razie potrzeby: **Manage app → Reboot app**.
 
 ## Deploy na Streamlit Cloud
 
 1. Połącz repozytorium z [share.streamlit.io](https://share.streamlit.io)
 2. Wskaż `app.py` jako entry point
-3. Branch: `main` (produkcja) lub `develop` (preview)
+3. Branch: `main` (produkcja) lub `staging` (testowe)
 4. **Deploy**
 
 ## Struktura projektu
