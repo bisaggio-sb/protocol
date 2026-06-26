@@ -197,6 +197,28 @@ w wierszu tabeli (PIL).
 - [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
+### Redesign UI (branch `development`, w toku — 2026-06-26)
+> Cel usera: mniej „AI-feel", nowocześnie/schludnie, branding PFM. Praca TYLKO
+> na `development` (deploy: protocol-dev.streamlit.app). NIE mergować na `main`
+> dopóki user nie zobaczy i nie zaakceptuje wizualnie.
+- **Faza A (zrobione):** theme PFM red `#D81F26` (wyciągnięty z logo), favicon =
+  logo PFM zamiast 🎯, font systemowy (CSS), wycięte 43 ozdobne emoji z
+  buttonów/nagłówków/komunikatów (semantyczne 🟢🔵🟣 legendy drabinek + 🟡🔴
+  statusy + ⬇ download ZOSTAJĄ). Helper: globalny `<style>` na górze app.py.
+- **Faza B (zrobione):** helper `_section(num, title, subtitle)` — designerski
+  nagłówek z czerwonym numerkiem PFM zamiast `st.header("1. Turniej")` (styl
+  Worda). 6 sekcji podmienione (UWAGA: sekcja 4 ma 2 gałęzie puchar/grupa —
+  obie podmienione). Sekcja 4 przemianowana „Domyślne elementy"→„Wygląd protokołu".
+- **Faza C/D (NIEzrobione, czekają na wzrok usera):** C = przeniesienie configu
+  (logo/QR/pozycje) do sidebar + czysty main flow; D = tabs/stepper/mobile. To
+  zmiany STRUKTURALNE (ryzyko regresji, gust) — świadomie wstrzymane do momentu
+  gdy user zobaczy A+B na dev. NIE robić blind.
+- **Znany follow-up:** `st.components.v1.html` (preview, linia ~1491) jest
+  deprecated (warning, działa). Podmiana wymaga ostrożności — iframe izoluje CSS
+  podglądu; `st.html` by go rozlał na apkę. Osobne zadanie, nie ruszać przy redesignie.
+- **Weryfikacja:** `python3 -c "from streamlit.testing.v1 import AppTest; \
+  at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
+
 ### Log zmian (najnowsze u góry)
 - 2026-06-19 — **Format per drabinka w trybie multi-phase (drukuj godzinę).**
   Use case: o danej godzinie grają obie drabinki naraz; drabinka przegranych
