@@ -40,6 +40,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def _section(num, title, subtitle=None):
+    """Czysty nagłówek sekcji: czerwony numerek PFM + tytuł (zamiast „1. Tytuł"
+    w stylu nagłówka Worda). Spójny, designerski, mniej „AI/dokument"."""
+    sub = (f'<div style="color:#6b7280; font-size:0.85rem; margin-top:2px;">{subtitle}</div>'
+           if subtitle else '')
+    st.markdown(f"""
+<div style="display:flex; align-items:center; gap:12px; margin:0.2rem 0 0.9rem 0;">
+  <div style="flex-shrink:0; width:30px; height:30px; border-radius:8px;
+              background:#D81F26; color:#fff; font-weight:700; font-size:0.95rem;
+              display:flex; align-items:center; justify-content:center;">{num}</div>
+  <div>
+    <div style="font-size:1.25rem; font-weight:650; line-height:1.15;
+                letter-spacing:-0.01em; color:#16181D;">{title}</div>
+    {sub}
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
 
 @st.cache_data(show_spinner=False)
 def _bytes_to_data_url(img_bytes: bytes) -> str:
@@ -341,7 +359,7 @@ col_form, col_preview = st.columns([3, 2])
 with col_form:
 
     # ─── 1. Turniej ──────────────────────────────────────────────────────
-    st.header("1. Turniej")
+    _section(1, "Turniej", "Nazwa, data i rodzaj rozgrywek")
     
     # ─── Wiersz 1: Nazwa | Data | Rodzaj ──────────────────────────────
     cols_t1 = st.columns([5, 3, 4])
@@ -373,7 +391,7 @@ with col_form:
     is_ok_pre = is_trojka_pre or is_individual_pre or is_czworka_pre   # zweryfikowane typy
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
-    st.header("2. Link do arkusza Google Sheets")
+    _section(2, "Arkusz Google Sheets", "Wklej publiczny link do arkusza z wynikami")
     cols_link = st.columns([4, 1])
     with cols_link[0]:
         sheets_url = st.text_input("URL arkusza",
@@ -501,7 +519,7 @@ with col_form:
     # SHEET-DRIVEN: po wczytaniu arkusza (sekcja 2) dropdowny pokazują tylko
     # fazy obecne w arkuszu. Godzina (góra) jest GŁÓWNYM filtrem — wybór
     # godziny zawęża Drabinkę i Fazę do tych granych o tej porze.
-    st.header("3. Wybór fazy")
+    _section(3, "Wybór fazy", "Drabinka, faza i format setów")
     
     # Cache (filled by Wczytaj button w sekcji 2)
     detected = None
@@ -902,7 +920,7 @@ with col_form:
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
     is_no_graphics = is_pucharowa
     if is_no_graphics:
-        st.header("4. Domyślne elementy")
+        _section(4, "Wygląd protokołu", "Logo, kod QR i pozycje grafik")
         st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
                 "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
@@ -921,7 +939,7 @@ with col_form:
         else:
             skip_placeholders = False
     else:
-        st.header("4. Domyślne elementy")
+        _section(4, "Wygląd protokołu", "Logo, kod QR i pozycje grafik")
         cols_dom = st.columns(2)
         with cols_dom[0]:
             include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
@@ -1653,7 +1671,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("5. Generuj")
+_section(5, "Generuj protokoły")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
