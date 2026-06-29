@@ -34,8 +34,21 @@ st.markdown("""
   }
   /* Divider lżejszy */
   hr { margin: 1.1rem 0; opacity: 0.5; }
-  /* Mniej pustego marginesu u góry strony */
+  /* Górny margines — czyści górny toolbar Streamlit (mniej niż domyślne, ale bez ucinania) */
   .block-container { padding-top: 4rem; }
+  /* Expandery jako subtelne karty (zamiast gołej linii) */
+  [data-testid="stExpander"] {
+    border: 1px solid #e6e8eb; border-radius: 10px; overflow: hidden;
+  }
+  [data-testid="stExpander"] summary { font-weight: 600; }
+  /* Responsywność: na wąskich ekranach (telefon/tablet) zmniejsz brandbar i marginesy */
+  @media (max-width: 640px) {
+    .block-container { padding-top: 3rem; padding-left: 0.8rem; padding-right: 0.8rem; }
+    .pfm-brandbar { gap: 12px !important; }
+    .pfm-brandbar-logo { height: 40px !important; }
+    .pfm-brandbar-title { font-size: 1.2rem !important; }
+    .pfm-brandbar-sub { font-size: 0.78rem !important; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,15 +147,15 @@ def _load_pfm_assets():
 pfm_data_url, pfm_aspect = _load_pfm_assets()
 
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:18px; padding-bottom:14px;
+<div class="pfm-brandbar" style="display:flex; align-items:center; gap:18px; padding-bottom:14px;
             border-bottom:2px solid #D81F26; margin-bottom:18px;">
-  <img src="{pfm_data_url}" style="height:58px; width:auto; flex-shrink:0;"/>
+  <img class="pfm-brandbar-logo" src="{pfm_data_url}" style="height:58px; width:auto; flex-shrink:0;"/>
   <div>
-    <div style="font-size:1.7rem; font-weight:700; line-height:1.15;
+    <div class="pfm-brandbar-title" style="font-size:1.7rem; font-weight:700; line-height:1.15;
                 letter-spacing:-0.02em; color:#16181D;">
       Generator protokołów meczowych Mölkky
     </div>
-    <div style="margin-top:3px; color:#6b7280; font-size:0.92rem;">
+    <div class="pfm-brandbar-sub" style="margin-top:3px; color:#6b7280; font-size:0.92rem;">
       Protokoły meczowe z arkusza Google Sheets · Polska Federacja Mölkky
     </div>
   </div>
@@ -387,7 +400,8 @@ with col_form:
             list(rodzaj_options.keys()),
             format_func=lambda k: rodzaj_options[k],
             index=0,
-            help="bez ikony = w pełni działa, 🟡 = w testach, 🔴 = niedostępne"
+            help="Typ turnieju — wybiera szablon protokołu: indywidualny lub "
+                 "drużynowy (2, 3 lub 4-osobowy). Wszystkie typy są dostępne."
         )
     
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
