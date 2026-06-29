@@ -1533,7 +1533,11 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
                 display:flex; justify-content:center;">
       {html}
     </div>"""
-    st.components.v1.html(_preview_wrapped, height=PAGE_H_PX + 70, scrolling=False)
+    # `st.html` (nie deprecated) zamiast `st.components.v1.html` (po dacie usunięcia
+    # 2026-06-01, warning co render). Bezpieczne TU: podgląd to czyste inline-style'e
+    # (zero `<style>`/klas → brak wycieku CSS), a `position:absolute` jest zamknięte
+    # w `position:relative` karcie. st.html renderuje inline (bez iframe) i auto-sizuje.
+    st.html(_preview_wrapped)
     st.caption("Schemat — dokładny wygląd w pobranym pliku.")
     
     # ─── Pozycje grafik ──────────────────────────────────────────────────
