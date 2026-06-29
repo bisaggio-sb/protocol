@@ -1,0 +1,36 @@
+name: keep-alive
+
+# Budzi/utrzymuje prod (protocol.streamlit.app) co 30 min, żeby uniknąć ~3-min
+# cold bootu przy wejściu. Repo publiczne → minuty Actions darmowe.
+#
+# UWAGA: zdarzenie `schedule` odpala się TYLKO z domyślnego brancha (main).
+# Ten plik musi być na `main`, inaczej cron nie wystartuje.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # co 30 minut (UTC)
+  workflow_dispatch:           # ręczne odpalenie z zakładki Actions
+
+permissions:
+  contents: read
+
+# Nie kolejkuj nakładających się przebiegów.
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Ping / wake prod
+        run: python scripts/keepalive.py
