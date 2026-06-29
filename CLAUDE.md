@@ -247,11 +247,22 @@ w wierszu tabeli (PIL).
   (były luźno doczepione). Regresja 14/14 + AppTest 0.
 - **Tabs/stepper/mobile (Faza „E", NIEzrobione):** po single-column linowym flow
   prawdopodobnie zbędne. Tylko jeśli user wprost poprosi.
-- **Pilny follow-up:** `st.components.v1.html` (preview) jest PO dacie usunięcia
-  (2026-06-01), warning co render. Gdy Streamlit Cloud podbije wersję — preview
-  PADNIE. Migracja: iframe-izolacja jest konieczna (CSS podglądu nie może wyciec),
-  więc `st.html` NIE nadaje się. Opcja: `from streamlit.components.v1 import html`
-  (sama funkcja, nie atrybut `st.components.v1`) — sprawdzić czy to zdejmuje warning.
+- **Faza G (zrobione — „dajesz z wszystkim"):** (1) **PREVIEW ZMIGROWANY**
+  `st.components.v1.html`→`st.html`. Ustalono empirycznie (Streamlit 1.58): warning
+  jest w SAMEJ funkcji (nie w dostępie przez atrybut), `st.iframe` przyjmuje tylko
+  URL (nie HTML). `st.html` (inline, nie deprecated) BEZPIECZNY bo podgląd to czyste
+  inline-style'e (grep: 0× `<style>`/`class=`), `position:absolute` zamknięte w
+  `relative` karcie, globalna reguła font-family NIE matchuje divów podglądu (brak
+  klasy „css"). Warning zniknął. Weryfikacja wizualna headless NIE wyszła (sandbox
+  ubija serwer streamlit, exit 144) → user weryfikuje na dev. (2) **Mobile:** media
+  query `<=640px` zmniejsza brandbar (klasy `pfm-brandbar*`) + marginesy. (3)
+  **Expandery** jako subtelne karty (border+radius, `[data-testid="stExpander"]`).
+  (4) **Help „Rodzaj"** zaktualizowany (mówił o nieistniejących ikonach 🟡🔴).
+  Regresja 14/14 + AppTest 0. **NIE robiłem tabs** — zburzyłyby czysty single-column.
+- **Lekcja sandbox:** wizualna weryfikacja przez żywy serwer streamlit + Playwright
+  NIE działa (proces ubijany, exit 144). Playwright pip-upgrade rozjeżdża wersję
+  z preinstalowaną przeglądarką → `executable_path=/opt/pw-browsers/chromium-1194/
+  chrome-linux/chrome`. Weryfikacja wizualna = na dev przez usera.
 - **Keep-alive prod (zrobione):** `.github/workflows/keepalive.yml` (cron */30) +
   `scripts/keepalive.py` (Playwright wake-up). MUSI być na `main` (schedule odpala
   się tylko z domyślnego brancha) — wrzucone bezpośrednio na main (tylko te 2 pliki).
