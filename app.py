@@ -916,12 +916,20 @@ with col_form:
     
     if is_pucharowa and is_supported_type:
         st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
+
+# ─── Wygląd protokołu (panel boczny) ────────────────────────────────────
+# Config grafik wyniesiony z głównego flow do sidebara, żeby kroki 1→4 były
+# czyste i krótkie. Body sekcji bez zmian logicznych — wykonuje się PRZED
+# blokiem `col_preview`, więc zmienne (image_positions, elements_active,
+# logos_aspect…) są dostępne dla podglądu i generowania jak dotąd.
+with st.sidebar:
+    st.markdown("#### Wygląd protokołu")
+    st.caption("Logo, kod QR i rozmieszczenie grafik na protokole.")
     # ─── 4. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
     is_no_graphics = is_pucharowa
     if is_no_graphics:
-        _section(4, "Wygląd protokołu", "Logo, kod QR i pozycje grafik")
         st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
                 "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
@@ -940,24 +948,20 @@ with col_form:
         else:
             skip_placeholders = False
     else:
-        _section(4, "Wygląd protokołu", "Logo, kod QR i pozycje grafik")
-        cols_dom = st.columns(2)
-        with cols_dom[0]:
-            include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
-            show_header_on_protocol = st.checkbox(
-                "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
-        with cols_dom[1]:
-            include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
-            if is_individual:
-                skip_placeholders = st.checkbox(
-                    "Ignoruj protokoły dla placeholderów (Gracz ##) w grupie "
-                    "oraz wolnych losów (bye) w drabince",
-                    value=True,
-                    help=("Pomija mecze, w których po dowolnej stronie jest 'Gracz N' "
-                          "(np. 'Gracz 44') lub 'bye' — tylko dla turnieju indywidualnego.")
-                )
-            else:
-                skip_placeholders = False
+        include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
+        show_header_on_protocol = st.checkbox(
+            "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
+        include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
+        if is_individual:
+            skip_placeholders = st.checkbox(
+                "Ignoruj protokoły dla placeholderów (Gracz ##) w grupie "
+                "oraz wolnych losów (bye) w drabince",
+                value=True,
+                help=("Pomija mecze, w których po dowolnej stronie jest 'Gracz N' "
+                      "(np. 'Gracz 44') lub 'bye' — tylko dla turnieju indywidualnego.")
+            )
+        else:
+            skip_placeholders = False
 
     # ─── Grafiki (expander wewnątrz "4. Domyślne elementy") ─────────────
     NUM_LOGOS = 4
@@ -988,29 +992,28 @@ with col_form:
         
         with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
             st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
-            cols_log = st.columns(2)
             # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
-            # Korzystamy z prostego wrappera _CachedUpload.
+            # Korzystamy z prostego wrappera _CachedUpload. W sidebarze układamy
+            # uploadery w jednej kolumnie (wąsko — 2 kolumny by się ścisnęły).
             for i in range(NUM_LOGOS):
-                with cols_log[i % 2]:
-                    # Nonce per grafika — inkrementowany przy "Usuń" by zresetować file_uploader.
-                    _ln = st.session_state.get(f'logo_nonce_{i}', 0)
-                    f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
-                                         key=f"logo_{i}_{_ln}", label_visibility="visible")
-                    if f is not None:
-                        # Świeży upload — cache bajtów do session_state
-                        f.seek(0)
-                        raw_bytes = f.read()
-                        f.seek(0)
-                        st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
-                        logo_files.append(_CachedUpload(f.name, raw_bytes))
-                    else:
-                        # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
-                        # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
-                        # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
-                        # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
-                        st.session_state.pop(f'logo_bytes_{i}', None)
-                        logo_files.append(None)
+                # Nonce per grafika — inkrementowany przy "Usuń" by zresetować file_uploader.
+                _ln = st.session_state.get(f'logo_nonce_{i}', 0)
+                f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
+                                     key=f"logo_{i}_{_ln}", label_visibility="visible")
+                if f is not None:
+                    # Świeży upload — cache bajtów do session_state
+                    f.seek(0)
+                    raw_bytes = f.read()
+                    f.seek(0)
+                    st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                    logo_files.append(_CachedUpload(f.name, raw_bytes))
+                else:
+                    # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
+                    # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
+                    # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
+                    # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
+                    st.session_state.pop(f'logo_bytes_{i}', None)
+                    logo_files.append(None)
             
             # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
             logos_aspect = {}
@@ -1672,7 +1675,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-_section(5, "Generuj protokoły")
+_section(4, "Generuj protokoły")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
