@@ -134,20 +134,21 @@ def _load_pfm_assets():
 pfm_data_url, pfm_aspect = _load_pfm_assets()
 
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
-  <img src="{pfm_data_url}" style="height:64px; width:auto; flex-shrink:0;"/>
+<div style="display:flex; align-items:center; gap:18px; padding-bottom:14px;
+            border-bottom:2px solid #D81F26; margin-bottom:18px;">
+  <img src="{pfm_data_url}" style="height:58px; width:auto; flex-shrink:0;"/>
   <div>
-    <h1 style="margin:0; padding:0; font-size:2.0rem; line-height:1.2;">
+    <div style="font-size:1.7rem; font-weight:700; line-height:1.15;
+                letter-spacing:-0.02em; color:#16181D;">
       Generator protokołów meczowych Mölkky
-    </h1>
-    <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
-      Wygeneruj protokoły meczowe z arkusza Google Sheets.
-    </p>
+    </div>
+    <div style="margin-top:3px; color:#6b7280; font-size:0.92rem;">
+      Protokoły meczowe z arkusza Google Sheets · Polska Federacja Mölkky
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-st.divider()
 
 
 def extract_id(url):
