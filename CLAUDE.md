@@ -235,8 +235,23 @@ w wierszu tabeli (PIL).
   **Trik bez re-indentu:** zmiana TYLKO wrappera (`st.columns`→`st.container`,
   `st.sidebar`→`st.container`, `col_preview`→inline `st.expander`); body z 4-spacjowym
   wcięciem działa identycznie pod każdym z nich.
+- **Faza F (5 fixów po feedbacku usera ze screenów dev — zrobione):** (1) ucinanie
+  górnych napisów: `padding-top` 2.2rem→4rem (2.2 wchodziło pod górny toolbar
+  Streamlit). (2) Mecze wypisane 2×: surowy `st.code` dump z `get_sheet_names_debug`
+  (po „Wczytaj zakładki") duplikował expander „Lista wszystkich faz" → zastąpiony
+  zwięzłym `st.success` (szczegóły w expanderze). (3) Podgląd ładniejszy: miększy
+  cień + border-radius karty (oba warianty html IND/TROJKA), neutralna podkładka
+  `#eceef1` pod kartką. (4) Selektywny wydruk: labele drużyny/zawodnicy dynamiczne
+  (`_sel_is_team = not is_individual`) — „Drużyny" + odmiana dla 2/3/4-os. (5) Sekcja
+  rozpisek/pustego formularza: nagłówek grupujący „Dodatkowe wydruki" nad expanderami
+  (były luźno doczepione). Regresja 14/14 + AppTest 0.
 - **Tabs/stepper/mobile (Faza „E", NIEzrobione):** po single-column linowym flow
   prawdopodobnie zbędne. Tylko jeśli user wprost poprosi.
+- **Pilny follow-up:** `st.components.v1.html` (preview) jest PO dacie usunięcia
+  (2026-06-01), warning co render. Gdy Streamlit Cloud podbije wersję — preview
+  PADNIE. Migracja: iframe-izolacja jest konieczna (CSS podglądu nie może wyciec),
+  więc `st.html` NIE nadaje się. Opcja: `from streamlit.components.v1 import html`
+  (sama funkcja, nie atrybut `st.components.v1`) — sprawdzić czy to zdejmuje warning.
 - **Keep-alive prod (zrobione):** `.github/workflows/keepalive.yml` (cron */30) +
   `scripts/keepalive.py` (Playwright wake-up). MUSI być na `main` (schedule odpala
   się tylko z domyślnego brancha) — wrzucone bezpośrednio na main (tylko te 2 pliki).
