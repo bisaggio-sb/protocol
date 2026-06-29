@@ -915,7 +915,7 @@ with col_form:
                    "Drużynowy 4-os. (tylko grupowa).")
     
     if is_pucharowa and is_supported_type:
-        st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
+        st.info(f"Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
 
 # ─── Wygląd protokołu (panel boczny) ────────────────────────────────────
 # Config grafik wyniesiony z głównego flow do sidebara, żeby kroki 1→4 były
@@ -930,7 +930,7 @@ with st.sidebar:
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
     is_no_graphics = is_pucharowa
     if is_no_graphics:
-        st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
+        st.info("**Faza pucharowa nie używa grafik** — "
                 "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
         # Wyłącz wszystko poza nagłówkiem (ten i tak chcemy w prawym górnym rogu)
