@@ -35,7 +35,7 @@ st.markdown("""
   /* Divider lżejszy */
   hr { margin: 1.1rem 0; opacity: 0.5; }
   /* Mniej pustego marginesu u góry strony */
-  .block-container { padding-top: 2.2rem; }
+  .block-container { padding-top: 4rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -433,7 +433,17 @@ with col_form:
                 info = [f"Błąd: {e}"]
             finally:
                 progress_bar.empty()
-            st.code("\n".join(info))
+            # Zwięzłe potwierdzenie zamiast surowego dumpu (`st.code`) — pełne
+            # zestawienie faz jest w expanderze „Lista wszystkich faz" poniżej
+            # (user: te same mecze były wypisane 2 razy).
+            _d = st.session_state.get('detected')
+            if _d:
+                _ng = _d.get('group_count', 0)
+                _nf = len(_d.get('glowna', [])) + len(_d.get('b', []))
+                st.success(
+                    f"Wczytano: {_ng} {generate_docx.pluralize(_ng,'grupa','grupy','grup')} "
+                    f"fazy grupowej · {_nf} {generate_docx.pluralize(_nf,'faza','fazy','faz')} "
+                    "drabinki. Szczegóły w sekcji „Lista wszystkich faz” poniżej.")
     
     # Pokaż info o aktywnym cache (jeśli URL match)
     if 'detected' in st.session_state and sheets_url.strip():
@@ -1720,6 +1730,12 @@ if tournament_phase == "Grupowa":
 sel_groups = []
 sel_players = []
 if tournament_phase == "Grupowa":
+    # Etykiety zależne od typu turnieju: drużynowy (2/3/4-os.) operuje DRUŻYNAMI,
+    # indywidualny ZAWODNIKAMI (user: w turniejach drużynowych ma być „drużyny").
+    _sel_is_team = not is_individual
+    _sel_ent_label = "Drużyny" if _sel_is_team else "Zawodnicy"
+    _sel_ent_gen = ("drużyna", "drużyny", "drużyn") if _sel_is_team else ("zawodnik", "zawodników", "zawodników")
+    _sel_ent_word = "drużyn" if _sel_is_team else "zawodników"
     with st.expander("Wybierz konkretne protokoły do wydruku (opcjonalnie)"):
         st.caption("Przydatne gdy chcesz przedrukować pojedyncze protokoły "
                    "(np. po przesunięciu zawodnika między grupami). "
@@ -1739,14 +1755,14 @@ if tournament_phase == "Grupowa":
         with c2:
             if _cache:
                 st.caption(f"✓ Wczytano {len(_cache['groups'])} grup, "
-                           f"{len(_cache['players'])} zawodników.")
+                           f"{len(_cache['players'])} {_sel_ent_word}.")
             elif _sel_sid:
                 st.caption("Kliknij **Wczytaj listę** żeby zobaczyć grupy i nazwiska z arkusza.")
             else:
                 st.caption("Najpierw wklej URL arkusza w sekcji 2.")
 
         if _load_btn and _sel_sid:
-            with st.spinner("Pobieram grupy i zawodników…"):
+            with st.spinner(f"Pobieram grupy i {_sel_ent_word}…"):
                 try:
                     _sd = generate_docx.fetch_all_group_sheets(_sel_sid)
                     _groups = []
@@ -1776,7 +1792,7 @@ if tournament_phase == "Grupowa":
                 help="Puste = wszystkie grupy. Wybierz konkretne litery aby przedrukować tylko ich protokoły.",
             )
             sel_players = st.multiselect(
-                "Zawodnicy (filtruj mecze z udziałem wybranych)",
+                f"{_sel_ent_label} (filtruj mecze z udziałem wybranych)",
                 _cache['players'],
                 default=[],
                 key=f'sel_players_{_sel_sid}',
@@ -1786,13 +1802,21 @@ if tournament_phase == "Grupowa":
             if sel_groups or sel_players:
                 _parts = []
                 if sel_groups: _parts.append(f"{len(sel_groups)} {generate_docx.pluralize(len(sel_groups), 'grupa','grupy','grup')}")
-                if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), 'zawodnik','zawodników','zawodników')}")
+                if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), *_sel_ent_gen)}")
                 st.info(f"Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
 
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
     gen_clicked = st.button("Generuj protokoły z arkusza",
                             type="primary", use_container_width=True)
+
+# ─── Dodatkowe wydruki (opcjonalne) ──────────────────────────────────────
+# Drugorzędne akcje pod głównym CTA, zgrupowane pod wspólnym nagłówkiem żeby
+# nie wyglądały jak luźno doczepione expandery (feedback usera o umiejscowieniu).
+st.markdown("")
+st.markdown("###### Dodatkowe wydruki")
+st.caption("Opcjonalne — pusty formularz do ręcznego wypełnienia oraz rozpiski "
+           "meczowe do wycięcia i rozdania przed turniejem.")
 
 with st.expander("Pobierz pusty formularz"):
     st.caption("Pusty formularz przyda się gdy chcesz wydrukować protokół do ręcznego wypełnienia "
