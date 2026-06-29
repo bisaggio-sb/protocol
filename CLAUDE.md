@@ -218,8 +218,25 @@ w wierszu tabeli (PIL).
   IDENTYCZNE). 2-kol layouty (checkboxy/uploadery) spłaszczone do 1 kol. pod wąski
   sidebar. OBIE gałęzie puchar/grupa zachowane. (3) `ℹ️` wycięte z `st.info`.
   Weryfikacja: regresja 14/14 + AppTest 0 wyjątków.
-- **Faza D (NIEzrobiona, czeka na decyzję usera):** tabs/stepper/mobile —
-  strukturalna + mocno zależna od gustu. NIE robić blind; najpierw user ocenia A-C.
+- **Faza D (zrobione — restrukturyzacja po feedbacku usera na dev):** trzy uwagi
+  usera, jedna przyczyna (layout 2-kolumnowy z podglądem). (1) **WIELKA PRZERWA:**
+  `st.columns([3,2])` — lewa kolumna (formularz) krótsza niż prawy podgląd →
+  następna sekcja czekała na wyższą kolumnę → pustka. Fix: `col_form=st.container()`
+  (pełna szerokość, single-column). (2) **Podgląd kradł miejsce** (większość userów
+  wrzuca grafiki i generuje, nie dostraja pozycji) → podgląd+suwaki w **zwijanym
+  expanderze** (collapsed default). WAŻNE: expander tworzony INLINE przy użyciu
+  (`with st.expander(...)` w miejscu dawnego `with col_preview:`), NIE na górze —
+  inaczej slot rezerwuje się za wcześnie i podgląd renderuje się przed sekcją 4.
+  (3) **Sidebar COFNIĘTY** (dylemat usera: otwarty zawala ekran / zamknięty
+  niewidoczny; a upload to częsta ścieżka): config wrócił z `st.sidebar` do
+  głównego flow jako sekcja 4 (`st.container()` zamiast `st.sidebar`, znów bez
+  re-indentu). Flow liniowy single-column: 1 Turniej → 2 Arkusz → 3 Faza →
+  4 Wygląd → 5 Generuj, podgląd opcjonalny między 4 a 5. Regresja 14/14 + AppTest 0.
+  **Trik bez re-indentu:** zmiana TYLKO wrappera (`st.columns`→`st.container`,
+  `st.sidebar`→`st.container`, `col_preview`→inline `st.expander`); body z 4-spacjowym
+  wcięciem działa identycznie pod każdym z nich.
+- **Tabs/stepper/mobile (Faza „E", NIEzrobione):** po single-column linowym flow
+  prawdopodobnie zbędne. Tylko jeśli user wprost poprosi.
 - **Keep-alive prod (zrobione):** `.github/workflows/keepalive.yml` (cron */30) +
   `scripts/keepalive.py` (Playwright wake-up). MUSI być na `main` (schedule odpala
   się tylko z domyślnego brancha) — wrzucone bezpośrednio na main (tylko te 2 pliki).
