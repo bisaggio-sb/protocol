@@ -354,7 +354,11 @@ def compute_default_positions(active_keys, logos_aspect=None,
 
 
 # ════════════════════════════════════════════════════════════════════════
-col_form, col_preview = st.columns([3, 2])
+# Layout jednokolumnowy. Wcześniej 2 kolumny [3,2] robiły WIELKĄ pustą przerwę:
+# lewa (formularz) bywa krótsza niż prawy podgląd → następna sekcja czekała na
+# wyższą kolumnę. Teraz pełna szerokość, a podgląd → opcjonalny expander niżej
+# (większość userów wrzuca grafiki i generuje, nie dostraja pozycji ręcznie).
+col_form = st.container()
 # ════════════════════════════════════════════════════════════════════════
 
 with col_form:
@@ -917,14 +921,14 @@ with col_form:
     if is_pucharowa and is_supported_type:
         st.info(f"Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
 
-# ─── Wygląd protokołu (panel boczny) ────────────────────────────────────
-# Config grafik wyniesiony z głównego flow do sidebara, żeby kroki 1→4 były
-# czyste i krótkie. Body sekcji bez zmian logicznych — wykonuje się PRZED
-# blokiem `col_preview`, więc zmienne (image_positions, elements_active,
-# logos_aspect…) są dostępne dla podglądu i generowania jak dotąd.
-with st.sidebar:
-    st.markdown("#### Wygląd protokołu")
-    st.caption("Logo, kod QR i rozmieszczenie grafik na protokole.")
+# ─── Wygląd protokołu (sekcja w głównym flow) ───────────────────────────
+# Config grafik w głównym, jednokolumnowym flow. Po feedbacku usera: sidebar
+# miał dylemat „otwarty zawala ekran / zamknięty niewidoczny", a upload grafik
+# to częsta ścieżka → ma być widoczny w liniowym flow. `st.container()` zamiast
+# `st.sidebar` → body BEZ re-indentu, pełna szerokość. Wykonuje się PRZED
+# expanderem podglądu, więc zmienne (image_positions, elements_active…) gotowe.
+with st.container():
+    _section(4, "Wygląd protokołu", "Logo, kod QR i grafiki na protokole")
     # ─── 4. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
@@ -1099,10 +1103,12 @@ with st.sidebar:
                     pass
 
 
-# ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
-with col_preview:
-    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
-    st.markdown("##### Podgląd")
+# ─── PODGLĄD HTML/CSS (opcjonalny expander) ──────────────────────────────
+# Expander tworzony TU (nie na górze), żeby renderował się PO sekcji „Wygląd
+# protokołu" w jednokolumnowym flow — inaczej slot zarezerwowałby się za wcześnie.
+with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=False):
+    st.caption("Schematyczny podgląd. Pozycje grafik dostroisz suwakami poniżej "
+               "— dokładny wygląd zobaczysz w pobranym pliku.")
 
     SCALE = 16   # Większy podgląd dla lepszej czytelności (kolumna prawa 2/5 szerokości)
     PAGE_W_CM = 18.46
@@ -1675,7 +1681,7 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-_section(4, "Generuj protokoły")
+_section(5, "Generuj protokoły")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
