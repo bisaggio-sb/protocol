@@ -1249,7 +1249,7 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
         <div style="background:white; border:1px solid #ccc;
                     width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                     position:relative; font-family:Arial, sans-serif;
-                    box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+                    box-shadow:0 6px 24px rgba(0,0,0,0.14); border-radius:6px; margin:0 auto;">
           
           <div style="position:absolute; right:8px; top:6px;
                       font-size:9px; color:#666; font-style:italic;">
@@ -1408,7 +1408,7 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
     <div style="background:white; border:1px solid #ccc; 
                 width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                 position:relative; font-family:Arial, sans-serif;
-                box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+                box-shadow:0 6px 24px rgba(0,0,0,0.14); border-radius:6px; margin:0 auto;">
       
       <div style="position:absolute; right:8px; top:6px; 
                   font-size:9px; color:#666; font-style:italic;">
@@ -1526,8 +1526,15 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
       </div>
     </div>
     """
-    st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=False)
-    st.caption("Schemat. Dokładny wygląd w pobranym pliku.")
+    # Podkładka: biała „kartka" leży na neutralnym tle (lepiej widać krawędzie
+    # i cień → schludniej niż goła kartka na tle apki).
+    _preview_wrapped = f"""
+    <div style="background:#eceef1; padding:20px 12px; border-radius:10px;
+                display:flex; justify-content:center;">
+      {html}
+    </div>"""
+    st.components.v1.html(_preview_wrapped, height=PAGE_H_PX + 70, scrolling=False)
+    st.caption("Schemat — dokładny wygląd w pobranym pliku.")
     
     # ─── Pozycje grafik ──────────────────────────────────────────────────
     # Sekcja edycji pozycji obrazów - bezpośrednio pod podglądem żeby
