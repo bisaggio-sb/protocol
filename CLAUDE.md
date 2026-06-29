@@ -209,10 +209,24 @@ w wierszu tabeli (PIL).
   nagłówek z czerwonym numerkiem PFM zamiast `st.header("1. Turniej")` (styl
   Worda). 6 sekcji podmienione (UWAGA: sekcja 4 ma 2 gałęzie puchar/grupa —
   obie podmienione). Sekcja 4 przemianowana „Domyślne elementy"→„Wygląd protokołu".
-- **Faza C/D (NIEzrobione, czekają na wzrok usera):** C = przeniesienie configu
-  (logo/QR/pozycje) do sidebar + czysty main flow; D = tabs/stepper/mobile. To
-  zmiany STRUKTURALNE (ryzyko regresji, gust) — świadomie wstrzymane do momentu
-  gdy user zobaczy A+B na dev. NIE robić blind.
+- **Faza C (zrobione):** (1) brandowy header u góry — czerwona linia akcentu PFM
+  + atrybucja federacji zamiast szarego dividera. (2) Config „Wygląd protokołu"
+  (sekcja 4: logo/QR/grafiki) PRZENIESIONY do `st.sidebar` — główny flow czysty:
+  1 Turniej → 2 Arkusz → 3 Faza → 4 Generuj (było 5). Sekcja 4 to rewrap
+  `col_form`→`st.sidebar` (body bez zmian logicznych; `with` nie tworzy scope'u
+  w Pythonie → fallbacki `dir()` i dostępność zmiennych dla `col_preview`/generacji
+  IDENTYCZNE). 2-kol layouty (checkboxy/uploadery) spłaszczone do 1 kol. pod wąski
+  sidebar. OBIE gałęzie puchar/grupa zachowane. (3) `ℹ️` wycięte z `st.info`.
+  Weryfikacja: regresja 14/14 + AppTest 0 wyjątków.
+- **Faza D (NIEzrobiona, czeka na decyzję usera):** tabs/stepper/mobile —
+  strukturalna + mocno zależna od gustu. NIE robić blind; najpierw user ocenia A-C.
+- **Keep-alive prod (zrobione):** `.github/workflows/keepalive.yml` (cron */30) +
+  `scripts/keepalive.py` (Playwright wake-up). MUSI być na `main` (schedule odpala
+  się tylko z domyślnego brancha) — wrzucone bezpośrednio na main (tylko te 2 pliki).
+  Repo PUBLICZNE → Actions darmowe. Cold boot prod ~3 min (libreoffice) → sensowny.
+- **LEKCJA:** kontener efemeryczny po restarcie wskakuje na branch
+  `claude/sleepy-fermi-s1fUI` (harness), NIE na `development`. Praca przeżywa TYLKO
+  przez push. Po restarcie: `git checkout development && git pull`. Pushować KAŻDĄ fazę.
 - **Znany follow-up:** `st.components.v1.html` (preview, linia ~1491) jest
   deprecated (warning, działa). Podmiana wymaga ostrożności — iframe izoluje CSS
   podglądu; `st.html` by go rozlał na apkę. Osobne zadanie, nie ruszać przy redesignie.
