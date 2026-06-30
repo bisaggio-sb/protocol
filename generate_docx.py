@@ -1089,6 +1089,7 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
     EMPTY_STOP = 3
     empty_streak = 0
     group_debug = []  # diagnostyka: co się stało z każdą próbą
+    group_sample = []  # surowe wiersze pierwszej zakładki która coś zwróciła
     for li, (letter, tab_name) in enumerate(candidate_tabs):
         if is_fallback_scan:
             _p(10 + int(35 * (li + 1) / total),
@@ -1101,6 +1102,11 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
             if rows:
                 matches = parse_group_rows(rows)
                 group_debug.append(f"{tab_name}: {len(rows)} wierszy → {len(matches)} meczów")
+                # Próbka surowych wierszy pierwszej niepustej zakładki — by zobaczyć
+                # JAK live gviz zwraca strukturę (różną od xlsx) gdy parse daje 0.
+                if not group_sample:
+                    for _ri, _row in enumerate(rows[:6]):
+                        group_sample.append(f"R{_ri}: " + " | ".join(str(c)[:18] for c in _row[:11]))
                 if matches:
                     group_count += 1
                     group_matches_total += len(matches)
@@ -1122,6 +1128,7 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
         result['group_total_matches'] = group_matches_total
     # Diagnostyka (widoczna w UI gdy 0 grup) — by zdiagnozować bez dostępu do live.
     result['_group_debug'] = group_debug
+    result['_group_sample'] = group_sample
     result['_gid_map_tabs'] = sorted(gid_map.keys()) if gid_map else []
 
     _p(48, "🏆 Wczytuję zakładkę Drabinka…")

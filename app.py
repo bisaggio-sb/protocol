@@ -468,6 +468,10 @@ with col_form:
                         st.caption("Próby wczytania grup (Gr. A…):")
                         _gd = _d.get('_group_debug', [])
                         st.code("\n".join(_gd) if _gd else "(brak prób — candidate_tabs puste)")
+                        _gs = _d.get('_group_sample', [])
+                        if _gs:
+                            st.caption("Surowe wiersze pierwszej wczytanej zakładki grupy (live):")
+                            st.code("\n".join(_gs))
     
     # Pokaż info o aktywnym cache (jeśli URL match)
     if 'detected' in st.session_state and sheets_url.strip():
