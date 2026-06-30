@@ -458,6 +458,16 @@ with col_form:
                     f"Wczytano: {_ng} {generate_docx.pluralize(_ng,'grupa','grupy','grup')} "
                     f"fazy grupowej · {_nf} {generate_docx.pluralize(_nf,'faza','fazy','faz')} "
                     "drabinki. Szczegóły w sekcji „Lista wszystkich faz” poniżej.")
+                # Diagnostyka gdy 0 grup mimo że arkusz ma zakładki Gr. * — pomaga
+                # ustalić przyczynę bez dostępu do live (gid_map vs fetch vs parse).
+                if _ng == 0:
+                    with st.expander("Diagnostyka — czemu 0 grup? (rozwiń jeśli powinny być)"):
+                        _tabs = _d.get('_gid_map_tabs', [])
+                        st.caption(f"Zakładki wykryte w arkuszu (gid_map: {len(_tabs)}):")
+                        st.code(", ".join(_tabs) if _tabs else "(gid_map puste — skan po nazwie)")
+                        st.caption("Próby wczytania grup (Gr. A…):")
+                        _gd = _d.get('_group_debug', [])
+                        st.code("\n".join(_gd) if _gd else "(brak prób — candidate_tabs puste)")
     
     # Pokaż info o aktywnym cache (jeśli URL match)
     if 'detected' in st.session_state and sheets_url.strip():
