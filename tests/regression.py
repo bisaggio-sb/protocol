@@ -208,11 +208,36 @@ except Exception as e:
     failures.append(f'rozpiski: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# Test: parse_group_rows odporne na gviz-drop nagłówka 'Tor' (bug IMP 2026 →
+# „0 grup"). Layout grup PFM: '#' | Godzina | Tor | dup | Grupa X | set | set | z2…
+# Po zgubieniu nagłówka 'Tor' przez gviz parser MUSI dalej znajdować mecze
+# (przedtem 'tor' in norm było jedynym wyzwalaczem detekcji nagłówka → 0).
+try:
+    _grp_rows = [
+        ['#', 'Godzina', 'Tor', '', 'Grupa A', '1. set', '2. set', '', '1.set', '2. set'],
+        ['1', '09:00:00', '5',  'Krzysztof D', 'Krzysztof D', '39', '50', 'Małgorzata H', '50', '43'],
+        ['2', '09:00:00', '6',  'Wojciech K',  'Wojciech K',  '50', '50', 'Przemysław L', '48', '11'],
+        ['3', '09:30:00', '7',  'Bartosz K',   'Bartosz K',   '32', '50', 'Leszek Ś',     '50', '27'],
+    ]
+    _gm_norm = g.parse_group_rows(_grp_rows)
+    if len(_gm_norm) != 3:
+        failures.append(f'parse_group_rows (z header Tor): {len(_gm_norm)} meczów, oczek. 3')
+    _gm_drop = g.parse_group_rows(_simulate_gviz_drop_tor_header(_grp_rows))
+    if len(_gm_drop) != 3:
+        failures.append(f'parse_group_rows (gviz drop Tor): {len(_gm_drop)} meczów, oczek. 3 '
+                         '(regresja bugu IMP 2026 „0 grup")')
+    # Tor musi być poprawny (numer), nie pusty/nazwisko
+    if _gm_drop and _gm_drop[0].get('tor') != '5':
+        failures.append(f"parse_group_rows (gviz drop Tor): Tor={_gm_drop[0].get('tor')}, oczek. '5'")
+except Exception as e:
+    failures.append(f'parse_group_rows gviz-drop: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
 if failures:
     print('REGRESJA FAIL:', file=sys.stderr)
     for f in failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + split-phase + rozpiski')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski')
 sys.exit(0)
