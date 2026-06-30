@@ -151,6 +151,61 @@ def _is_valid_match_row(tor, godz, z1, z2):
     return True
 
 def parse_group_rows(rows):
+    """Parsuje zakładkę grupy. Najpierw po nagłówku (well-formed arkusze, TMP);
+    gdy to da 0 (gviz zepsuł nagłówek — np. IMP 2026 gdzie z całego nagłówka
+    został tylko „Grupa A") → fallback pozycyjny po układzie PFM."""
+    if not rows: return []
+    m = _parse_group_rows_header(rows)
+    if m:
+        return m
+    return _parse_group_rows_positional(rows)
+
+
+def _parse_group_rows_positional(rows):
+    """Fallback gdy gviz skasował nagłówek grupy (zostaje np. tylko 'Grupa X',
+    znikają '#'/'Godzina'/'Tor'/etykiety setów). NIE ufa nagłówkowi: wykrywa
+    kolumnę Godziny (HH:MM) w danych i wyprowadza resztę z układu PFM —
+    Tor=+1, z1=+3, z2=+6, #=−1 względem Godziny (potwierdzone na live IMP 2026)."""
+    if not rows: return []
+    grupa = ''
+    for row in rows:
+        for cell in row:
+            gm = re.match(r'^\s*gr(?:upa)?\.?\s*([A-P])\b', str(cell).strip(), re.IGNORECASE)
+            if gm:
+                grupa = gm.group(1).upper(); break
+        if grupa: break
+    # Kolumna godziny = najczęstsza kolumna z wartościami HH:MM(:SS) w danych.
+    time_votes = {}
+    for row in rows:
+        for ci_, cell in enumerate(row):
+            if re.match(r'^\d{1,2}:\d{2}(:\d{2})?$', str(cell).strip()):
+                time_votes[ci_] = time_votes.get(ci_, 0) + 1
+    if not time_votes:
+        return []
+    col_godz = max(time_votes, key=time_votes.get)
+    col_tor, col_z1, col_z2 = col_godz + 1, col_godz + 3, col_godz + 6
+    col_mecz = col_godz - 1 if col_godz >= 1 else None
+    matches = []
+    for row in rows:
+        def g(c):
+            return row[c].strip() if (c is not None and 0 <= c < len(row)) else ''
+        tor = g(col_tor); godz = g(col_godz); z1 = g(col_z1); z2 = g(col_z2)
+        if re.match(r'^\d+\.0+$', tor):
+            tor = tor.split('.')[0]
+        _gm = re.match(r'^(\d{1,2}:\d{2})(?::\d{2})?$', godz)
+        if _gm:
+            godz = _gm.group(1)
+        if not _is_valid_match_row(tor, godz, z1, z2):
+            continue
+        mecz = g(col_mecz)
+        if re.match(r'^\d+\.0+$', mecz):
+            mecz = mecz.split('.')[0]
+        matches.append({'tor': tor, 'godz': godz, 'grupa': grupa,
+                        'mecz': mecz, 'z1': z1, 'z2': z2})
+    return matches
+
+
+def _parse_group_rows_header(rows):
     if not rows: return []
     header_idx, header = None, []
     for i, row in enumerate(rows):
@@ -254,9 +309,10 @@ def fetch_all_group_sheets(sheet_id, progress_cb=None):
         except Exception:
             empty_streak += 1
             continue
-        # Early stop w fallback: 3 puste z rzędu gdy już coś mamy (koniec grup)
-        # albo pierwsze 3 puste (arkusz bez grup) — by nie robić 26 wolnych HTTP.
-        if is_fallback and empty_streak >= 3 and (results or i + 1 >= 3):
+        # Early stop w fallback: 3 puste z rzędu gdy już coś mamy (koniec grup),
+        # albo po 5 próbach bez żadnego wyniku (arkusz bez grup) — by nie robić
+        # 26 wolnych HTTP, ale nie poddać się przy chwilowym błędzie pierwszej.
+        if is_fallback and ((results and empty_streak >= 3) or (not results and i + 1 >= 5)):
             break
     return results
 
@@ -1117,10 +1173,12 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
         except Exception as e:
             group_debug.append(f"{tab_name}: błąd {type(e).__name__}")
         empty_streak += 1
-        # Early-stop w trybie fallback: po EMPTY_STOP pustych z rzędu — gdy już
-        # coś znaleziono (koniec grup) LUB gdy pierwsze EMPTY_STOP są puste
-        # (arkusz bez grup, np. czysta drabinka) — by nie robić 26 wolnych HTTP.
-        if is_fallback_scan and empty_streak >= EMPTY_STOP and (group_count > 0 or li + 1 >= EMPTY_STOP):
+        # Early-stop w trybie fallback: po znalezieniu grup — EMPTY_STOP pustych
+        # z rzędu (koniec grup); bez żadnej grupy — dopiero po 5 próbach (arkusz
+        # bez grup / czysta drabinka), by nie robić 26 wolnych HTTP, ale i nie
+        # poddać się przy chwilowym błędzie pierwszej zakładki.
+        if is_fallback_scan and ((group_count > 0 and empty_streak >= EMPTY_STOP)
+                                 or (group_count == 0 and li + 1 >= 5)):
             break
     if group_count > 0:
         result['has_grupowa'] = True
