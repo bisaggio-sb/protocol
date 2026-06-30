@@ -1826,6 +1826,69 @@ if tournament_phase == "Grupowa":
                 if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), *_sel_ent_gen)}")
                 st.info(f"Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
 
+# ── Selektywny wydruk meczów drabinki (puchar, pojedyncza faza) ─────────
+# Use case: część par już gotowa (np. wcześniej rozegrana 1/8 utworzyła parę
+# 1/4) — wydrukuj tylko wybrane mecze, bez czekania na resztę i bez dublowania
+# przy kolejnym wydruku. Prosta wersja: ręczny wybór, BEZ pamiętania co już
+# wydrukowane (user sam decyduje za każdym razem). Tylko single-phase (multi-
+# phase po godzinie generuje wiele faz naraz — inny przepływ).
+_INCOMPLETE_MARKERS = {'#n/a', 'n/a', 'tbd', '?', 'bye', '-', '—', 'wolny',
+                       'puste', 'tba', 'nieznany'}
+def _match_is_ready(m):
+    z1 = (m.get('z1') or '').strip(); z2 = (m.get('z2') or '').strip()
+    return (z1 and z2 and len(z1) >= 3 and len(z2) >= 3 and
+            z1.lower() not in _INCOMPLETE_MARKERS and z2.lower() not in _INCOMPLETE_MARKERS)
+
+sel_drabinka_matches = None  # None = brak filtra (wszystkie gotowe mecze)
+if is_pucharowa and selected_phase_keys_multi is None:
+    with st.expander("Wybierz konkretne mecze do wydruku (opcjonalnie)"):
+        st.caption("Przydatne gdy część par już gotowa (np. wcześniej rozegrana "
+                   "1/8 utworzyła parę 1/4) — wydrukuj tylko wybrane mecze, bez "
+                   "czekania na resztę fazy. Puste = wszystkie gotowe mecze.")
+        _pm_sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+        _pm_key = f'pm_cache_{_pm_sid}_{tournament_phase}' if _pm_sid else None
+        _pm_cache = st.session_state.get(_pm_key) if _pm_key else None
+
+        _pc1, _pc2 = st.columns([1, 3])
+        with _pc1:
+            _pm_load = st.button("Wczytaj mecze", disabled=not _pm_sid,
+                                 use_container_width=True, key='pm_load_btn',
+                                 help="Pobiera gotowe pary tej fazy z zakładki Drabinka.")
+        with _pc2:
+            if _pm_cache is not None:
+                st.caption(f"✓ Wczytano {len(_pm_cache)} gotowych meczów fazy.")
+            elif _pm_sid:
+                st.caption("Kliknij **Wczytaj mecze** żeby zobaczyć gotowe pary fazy.")
+            else:
+                st.caption("Najpierw wklej URL arkusza w sekcji 2.")
+
+        if _pm_load and _pm_sid:
+            with st.spinner("Pobieram mecze fazy z zakładki Drabinka…"):
+                try:
+                    _pn, _ms = generate_docx.fetch_drabinka_phase(_pm_sid, tournament_phase)
+                    st.session_state[_pm_key] = [m for m in (_ms or []) if _match_is_ready(m)]
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się pobrać meczów: {e}")
+
+        if _pm_cache:
+            _pm_labels = [
+                f"{i+1}. Tor {m.get('tor','?')} · {m.get('godz','—')} · "
+                f"{m.get('z1','?')} — {m.get('z2','?')}"
+                for i, m in enumerate(_pm_cache)
+            ]
+            _pm_picked = st.multiselect(
+                "Mecze do wydruku", _pm_labels, default=[],
+                key=f'pm_sel_{_pm_sid}_{tournament_phase}',
+                help="Puste = wszystkie gotowe mecze. Wybór = drukujemy tylko zaznaczone.")
+            if _pm_picked:
+                _pm_idx = sorted({int(l.split('.', 1)[0]) - 1 for l in _pm_picked})
+                sel_drabinka_matches = [_pm_cache[i] for i in _pm_idx]
+                st.info(f"Filtr aktywny: {len(sel_drabinka_matches)} z {len(_pm_cache)} "
+                        f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}. Generuj poniżej.")
+        elif _pm_cache is not None:
+            st.caption("Brak gotowych (kompletnych) par w tej fazie — wszystkie czekają na zawodników.")
+
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
     gen_clicked = st.button("Generuj protokoły z arkusza",
@@ -2182,7 +2245,21 @@ if gen_clicked:
             if not matches:
                 st.error("Wszystkie mecze są niekompletne — nic do wygenerowania.")
                 st.stop()
-        
+
+            # Filtr per-mecz z sekcji „Wybierz konkretne mecze do wydruku".
+            # sel_drabinka_matches=None → bez filtra (wszystkie). Identyfikacja
+            # meczu po (tor, godz, z1, z2) — pochodzą z tego samego fetcha.
+            if sel_drabinka_matches is not None:
+                _sel_keys = {(m.get('tor'), m.get('godz'), m.get('z1'), m.get('z2'))
+                             for m in sel_drabinka_matches}
+                matches = [m for m in matches
+                           if (m.get('tor'), m.get('godz'), m.get('z1'), m.get('z2')) in _sel_keys]
+                if not matches:
+                    st.error("Wybrane mecze nie pasują do aktualnych danych fazy "
+                             "(arkusz mógł się zmienić) — odśwież listę przyciskiem „Wczytaj mecze”.")
+                    st.stop()
+                st.info(f"Wybrano ręcznie {len(matches)} {generate_docx.pluralize(len(matches),'mecz','mecze','meczów')} do wydruku.")
+
             sheets_data = [(phase_name or tournament_phase, matches)]
         else:
             _fetch_pb = st.progress(0.0, text="Pobieram dane z grup…")
