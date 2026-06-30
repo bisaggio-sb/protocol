@@ -1540,18 +1540,14 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
       </div>
     </div>
     """
-    # Podkładka: biała „kartka" leży na neutralnym tle (lepiej widać krawędzie
-    # i cień → schludniej niż goła kartka na tle apki).
-    _preview_wrapped = f"""
-    <div style="background:#eceef1; padding:20px 12px; border-radius:10px;
-                display:flex; justify-content:center;">
-      {html}
-    </div>"""
-    # `st.html` (nie deprecated) zamiast `st.components.v1.html` (po dacie usunięcia
-    # 2026-06-01, warning co render). Bezpieczne TU: podgląd to czyste inline-style'e
-    # (zero `<style>`/klas → brak wycieku CSS), a `position:absolute` jest zamknięte
-    # w `position:relative` karcie. st.html renderuje inline (bez iframe) i auto-sizuje.
-    st.html(_preview_wrapped)
+    # Render w iframe (`st.components.v1.html`) — KONIECZNY: podgląd ma
+    # `position:absolute` w skalowanej karcie i `st.html` (inline) rozjeżdżał
+    # layout (karta uciekała w prawo i wystawała). Iframe izoluje i daje stałą
+    # ramkę. Karta sama się centruje (`margin:0 auto`); bez szarej podkładki —
+    # czysta wyśrodkowana kartka z cieniem wygląda schludniej niż pusty box.
+    # (Warning o deprecacji `st.components.v1.html` zaakceptowany — działa do
+    # 1.58; realna migracja wymaga przerobienia podglądu, osobne zadanie.)
+    st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=False)
     st.caption("Schemat — dokładny wygląd w pobranym pliku.")
     
     # ─── Pozycje grafik ──────────────────────────────────────────────────
