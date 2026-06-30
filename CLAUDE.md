@@ -277,6 +277,21 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-06-30 — **Ręczny wybór meczów drabinki do wydruku (puchar single-phase).**
+  Use case usera: część par już gotowa (np. wcześniej rozegrana 1/8 utworzyła parę
+  1/4) → wydrukuj tylko wybrane mecze bez czekania na resztę i bez dublowania przy
+  kolejnym wydruku. **Prosta wersja BEZ pamiętania** (user wybiera za każdym razem —
+  świadoma decyzja usera, tracking session_state odrzucony). Implementacja (app.py):
+  expander „Wybierz konkretne mecze do wydruku" (analog do grupowej selektywnej),
+  przycisk „Wczytaj mecze" → `fetch_drabinka_phase` → cache gotowych par w
+  `session_state['pm_cache_<sid>_<phase>']`, multiselect „Tor X · HH:MM · Z1 — Z2"
+  (puste = wszystkie, zero zmiany default). Filtr przy generowaniu po krotce
+  `(tor,godz,z1,z2)` przed `sheets_data`, TYLKO single-phase (`selected_phase_keys_multi
+  is None`; multi-phase po godzinie nietknięty). Helper `_match_is_ready` +
+  module-level `_INCOMPLETE_MARKERS` (spójnie z filtrem kompletności w generacji).
+  `sel_drabinka_matches=None` zdefiniowane bezwarunkowo (brak NameError na innych
+  ścieżkach). Część „wydrukuj wcześniejszą parę" działała już przez skip_placeholders;
+  nowość = ręczny wybór konkretnych meczów.
 - 2026-06-19 — **Format per drabinka w trybie multi-phase (drukuj godzinę).**
   Use case: o danej godzinie grają obie drabinki naraz; drabinka przegranych
   (Miejsca X-Y) ma niższą stawkę → Best of 3, gdy główna leci Bo5/Bo7. Decyzja
