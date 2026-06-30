@@ -116,6 +116,15 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
   `parse_drabinka_rows` przechodzi też przez ten symulator** — odpalana
   automatycznie w regresji, ale nie ignoruj jeśli przy testach realnych danych
   xlsx wynik jest „za dobry" w porównaniu do skarg usera.
+  **REGUŁA (po wpadce IMP 2026): bug live którego NIE odtwarzasz z xlsx →
+  INSTRUMENTUJ, nie zgaduj.** Sandbox nie dosięga docs.google.com, więc jedyny
+  sposób zobaczyć prawdziwą strukturę gviz to diagnostyka w UI wyciągająca surowe
+  dane przez usera (`detect_drabinka_phases` zwraca `_group_debug`/`_group_sample`/
+  `_gid_map_tabs`, app.py pokazuje je w expanderze „Diagnostyka" gdy 0 grup).
+  Dodaj taki probe OD RAZU przy pierwszym zgłoszeniu, zamiast strzelać z xlsx —
+  zgadywanie z xlsx kosztowało 2 nietrafione iteracje (drop-Tor, gid_map) zanim
+  diagnostyka pokazała prawdziwą przyczynę: gviz KASUJE cały nagłówek grupy poza
+  „Grupa X" (parser ma fallback pozycyjny `_parse_group_rows_positional`).
 - **Czcionka:** docelowo Calibri → renderowane przez Carlito; bez `fonts-crosextra-carlito`
   szeryfy/metryki się psują. Nazwiska celowo bywają serif — sprawdzaj świadomie.
 - **Paginacja Bo5/IND** bywała problematyczna (treść str.2 wchodziła na str.1) —
