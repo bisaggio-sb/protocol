@@ -247,14 +247,14 @@ w wierszu tabeli (PIL).
   (były luźno doczepione). Regresja 14/14 + AppTest 0.
 - **Tabs/stepper/mobile (Faza „E", NIEzrobione):** po single-column linowym flow
   prawdopodobnie zbędne. Tylko jeśli user wprost poprosi.
-- **Faza G (zrobione — „dajesz z wszystkim"):** (1) **PREVIEW ZMIGROWANY**
-  `st.components.v1.html`→`st.html`. Ustalono empirycznie (Streamlit 1.58): warning
-  jest w SAMEJ funkcji (nie w dostępie przez atrybut), `st.iframe` przyjmuje tylko
-  URL (nie HTML). `st.html` (inline, nie deprecated) BEZPIECZNY bo podgląd to czyste
-  inline-style'e (grep: 0× `<style>`/`class=`), `position:absolute` zamknięte w
-  `relative` karcie, globalna reguła font-family NIE matchuje divów podglądu (brak
-  klasy „css"). Warning zniknął. Weryfikacja wizualna headless NIE wyszła (sandbox
-  ubija serwer streamlit, exit 144) → user weryfikuje na dev. (2) **Mobile:** media
+- **Faza G (zrobione — „dajesz z wszystkim"):** (1) **PREVIEW — próba `st.html`
+  COFNIĘTA.** st.components.v1.html→st.html ZEPSUŁO layout (karta z `position:absolute`
+  uciekała w prawo i wystawała — inline render nie trzyma skalowanej karty; iframe
+  jest KONIECZNY do izolacji). Wróciło do `st.components.v1.html(html, height=...)`,
+  BEZ szarej podkładki (czysta wyśrodkowana karta `margin:0 auto` z cieniem/rogami).
+  Warning deprecacji ZAAKCEPTOWANY (działa do 1.58; realna migracja = przerobienie
+  podglądu na nie-absolute layout, osobne większe zadanie). LEKCJA: `st.html` NIE
+  nadaje się do absolute-positioned layoutów mimo braku `<style>`/klas. (2) **Mobile:** media
   query `<=640px` zmniejsza brandbar (klasy `pfm-brandbar*`) + marginesy. (3)
   **Expandery** jako subtelne karty (border+radius, `[data-testid="stExpander"]`).
   (4) **Help „Rodzaj"** zaktualizowany (mówił o nieistniejących ikonach 🟡🔴).
