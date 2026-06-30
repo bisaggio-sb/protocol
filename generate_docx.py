@@ -132,7 +132,9 @@ def parse_group_rows(rows):
     header_idx, header = None, []
     for i, row in enumerate(rows):
         norm = [c.strip().lower() for c in row]
-        if 'tor' in norm:
+        # Wykrywaj nagłówek po 'tor' LUB 'godzina'. gviz bywa kapryśny i gubi
+        # nagłówek 'Tor' (znany bug) — wtedy 'godzina' ratuje detekcję wiersza.
+        if 'tor' in norm or 'godzina' in norm:
             header_idx = i; header = norm; break
     if header_idx is None: return []
     raw_header = rows[header_idx]
@@ -140,6 +142,18 @@ def parse_group_rows(rows):
         try: return header.index(name)
         except ValueError: return None
     col_tor = ci('tor'); col_godz = ci('godzina')
+    # Fallback gdy gviz zgubił nagłówek 'Tor' (kolumna danych zostaje, znika tylko
+    # etykieta). Layout grup: '#' | Godzina | Tor | … → Tor tuż za Godziną.
+    # Wnioskujemy ją i walidujemy że ma numery torów (1-2 cyfry), a nie nazwiska/wyniki.
+    if col_tor is None and col_godz is not None:
+        cand = col_godz + 1
+        vals = [row[cand].strip() for row in rows[header_idx + 1:]
+                if cand < len(row) and row[cand].strip()]
+        def _is_tor_val(v):
+            v = re.sub(r'\.0+$', '', v)
+            return v.isdigit() and 1 <= len(v) <= 2
+        if vals and sum(_is_tor_val(v) for v in vals) >= max(1, int(len(vals) * 0.6)):
+            col_tor = cand
     col_mecz = ci('#')
     if col_mecz is None:
         for n in ('mecz','lp','nr'):
