@@ -286,6 +286,22 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-07-01 — **Tryb „własna lista meczów" (bez arkusza PFM) — DEV.** Dla userów
+  bez wyrafinowanego arkusza. Selektor źródła w sekcji 2 (radio): „Arkusz Google
+  Sheets" (default, stara ścieżka BEZ ZMIAN) vs „Własna lista meczów (Excel/ręcznie)".
+  Tryb ręczny = **izolowany** `_render_manual_generator()` + `st.stop()` → reszta flow
+  (sekcje 2b-5, handler) się NIE renderuje → zero ryzyka dla ścieżki arkusza, zero
+  re-indentu. Oba wejścia (upload xlsx/xls/csv z fuzzy-mapowaniem kolumn + `st.data_editor`
+  ręczny) zbiegają się w jednej edytowalnej tabeli → `build_document` (rdzeń bez zmian,
+  bo już przyjmuje `[(label, matches)]`) → download docx/pdf. Format (2 sety/BoN) →
+  template_type przez `_manual_template_type`. `docx_to_pdf` PRZENIESIONE na górę
+  (tryb ręczny renderuje się w sekcji 2, przed dawną definicją → inaczej NameError).
+  `openpyxl` dodane do requirements. **Płaska lista meczów** (label=nazwa turnieju,
+  bez podziału na grupy/fazy — świadomie na start). Weryfikacja: Google mode 0 wyjątków,
+  build_document z płaską listą OK, pusta tabela → graceful error, regresja 14/14.
+  **Do przetestowania na realnych zawodach zanim pójdzie na prod** (user: prod zostaje
+  w odwodzie). Backlog: podział na grupy/fazy (kolumna „Grupa"), round-robin z samych
+  imion (Faza 2 z propozycji).
 - 2026-06-30 — **Ręczny wybór meczów drabinki do wydruku (puchar single-phase).**
   Use case usera: część par już gotowa (np. wcześniej rozegrana 1/8 utworzyła parę
   1/4) → wydrukuj tylko wybrane mecze bez czekania na resztę i bez dublowania przy
