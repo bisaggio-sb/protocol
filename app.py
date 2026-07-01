@@ -72,6 +72,178 @@ def _section(num, title, subtitle=None):
 """, unsafe_allow_html=True)
 
 
+# ─── Helper: konwersja docx → pdf (przeniesione na górę — używa go też tryb
+# ręczny, który renderuje się w sekcji 2 przed dawną definicją) ──────────
+def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
+    """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
+    co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
+    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
+    import time
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, f"{name}.docx")
+            with open(docx_path, 'wb') as f:
+                f.write(docx_bytes)
+            pdf_filter = ('pdf:writer_pdf_Export:'
+                          '{"SelectPdfVersion":{"type":"long","value":"0"},'
+                          '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
+                          '"ReduceImageResolution":{"type":"boolean","value":"true"},'
+                          '"MaxImageResolution":{"type":"long","value":"150"},'
+                          '"UseLosslessCompression":{"type":"boolean","value":"false"},'
+                          '"Quality":{"type":"long","value":"90"}}')
+            est_total = max(6.0, 5.0 + 0.6 * est_pages)
+            proc = subprocess.Popen(
+                ['libreoffice', '--headless', '--convert-to', pdf_filter,
+                 '--outdir', tmpdir, docx_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            start = time.time()
+            while proc.poll() is None:
+                elapsed = time.time() - start
+                if elapsed > 300:
+                    proc.kill()
+                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
+                if progress_cb:
+                    try: progress_cb(elapsed, est_total)
+                    except Exception: pass
+                time.sleep(0.4)
+            stdout, stderr = proc.communicate()
+            pdf_path = os.path.join(tmpdir, f"{name}.pdf")
+            if os.path.exists(pdf_path):
+                with open(pdf_path, 'rb') as f:
+                    return f.read(), None
+            err = stderr.decode('utf-8', errors='replace') if stderr else 'unknown'
+            return None, err[:500]
+    except FileNotFoundError:
+        return None, "LibreOffice nie jest zainstalowany na serwerze."
+    except Exception as e:
+        return None, str(e)
+
+
+# ─── Tryb „własna lista meczów" (bez arkusza PFM) ───────────────────────
+def _manual_template_type(ttype, fmt):
+    """(typ turnieju, format) → template_type. '2 sety' → grupowy szablon;
+    'Best of N' → szablon pucharowy. Bo7 tylko IND/DWÓJKA."""
+    base = {'Indywidualny': 'IND', 'Drużynowy 2-os.': 'DWOJKA',
+            'Drużynowy 3-os.': 'TROJKA', 'Drużynowy 4-os.': 'CZWORKA'}.get(ttype, 'IND')
+    if fmt.startswith('2 sety'):
+        return base
+    return base + {'Best of 3': '_Bo3', 'Best of 5': '_Bo5', 'Best of 7': '_Bo7'}.get(fmt, '')
+
+
+def _map_upload_to_cols(raw, c1, c2):
+    """Mapuje kolumny wgranego pliku na standardowe [c1, c2, Tor, Godzina, Mecz #].
+    Dopasowanie po nazwach nagłówków (fuzzy); fallback: 2 pierwsze kolumny = nazwy."""
+    import pandas as pd
+    lower = {str(c).strip().lower(): c for c in raw.columns}
+    def find(*keys):
+        for k in keys:
+            for lc, orig in lower.items():
+                if k in lc:
+                    return orig
+        return None
+    s_z1 = find('zawodnik 1', 'drużyna 1', 'druzyna 1', 'gracz 1', 'z1', 'player 1', 'team 1')
+    s_z2 = find('zawodnik 2', 'drużyna 2', 'druzyna 2', 'gracz 2', 'z2', 'player 2', 'team 2')
+    s_tor = find('tor', 'stół', 'stol', 'table')
+    s_godz = find('godz', 'czas', 'time', 'hour')
+    s_mecz = find('mecz', 'nr', 'lp', 'match', '#')
+    if s_z1 is None and len(raw.columns) >= 1: s_z1 = raw.columns[0]
+    if s_z2 is None and len(raw.columns) >= 2: s_z2 = raw.columns[1]
+    col = lambda s: raw[s] if s is not None else ''
+    out = pd.DataFrame({c1: col(s_z1), c2: col(s_z2),
+                        'Tor': col(s_tor), 'Godzina': col(s_godz), 'Mecz #': col(s_mecz)})
+    return out.fillna('').astype(str)
+
+
+def _render_manual_generator(tournament_type, tournament_name, tournament_date):
+    """Samodzielny generator z własnej listy meczów (upload lub ręczna tabela).
+    Renderuje się zamiast ścieżki Google Sheets (wołający robi st.stop())."""
+    import pandas as pd
+    is_ind = tournament_type == 'Indywidualny'
+    side = 'Zawodnik' if is_ind else 'Drużyna'
+    c1, c2 = f'{side} 1', f'{side} 2'
+    COLS = [c1, c2, 'Tor', 'Godzina', 'Mecz #']
+
+    st.caption(f"Wygeneruj protokoły z własnej listy meczów — bez arkusza PFM. Minimum to "
+               f"dwie kolumny z nazwami ({c1} / {c2}); Tor, Godzina i Mecz # są opcjonalne.")
+
+    if is_ind or tournament_type == 'Drużynowy 2-os.':
+        fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5', 'Best of 7']
+    else:
+        fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5']
+    manual_format = st.selectbox('Format protokołu', fmt_opts, key='manual_fmt',
+        help='„2 sety" = protokół grupowy; „Best of N" = protokół pucharowy.')
+
+    up = st.file_uploader('Wgraj Excel/CSV z listą meczów (opcjonalnie)',
+                          type=['xlsx', 'xls', 'csv'], key='manual_upload')
+    if 'manual_df' not in st.session_state:
+        st.session_state['manual_df'] = pd.DataFrame([{c: '' for c in COLS} for _ in range(6)])
+    if up is not None and st.session_state.get('manual_upload_name') != up.name:
+        try:
+            raw = (pd.read_csv(up, dtype=str) if up.name.lower().endswith('.csv')
+                   else pd.read_excel(up, dtype=str)).fillna('')
+            st.session_state['manual_df'] = _map_upload_to_cols(raw, c1, c2)
+            st.session_state['manual_upload_name'] = up.name
+            st.success(f'Wczytano {len(st.session_state["manual_df"])} wierszy — sprawdź i popraw poniżej.')
+        except Exception as e:
+            st.error(f'Nie udało się wczytać pliku: {e}')
+
+    st.caption('Edytuj listę (dodawaj/usuwaj wiersze przyciskami tabeli). Puste wiersze pomijamy.')
+    edited = st.data_editor(st.session_state['manual_df'], num_rows='dynamic',
+                            use_container_width=True, key='manual_editor')
+
+    cc = st.columns(4)
+    with cc[0]: m_logo = st.checkbox('Logo PFM', value=True, key='manual_logo')
+    with cc[1]: m_hdr = st.checkbox('Nazwa/data w rogu', value=True, key='manual_hdr')
+    with cc[2]: m_docx = st.checkbox('Word (.docx)', value=True, key='manual_docx')
+    with cc[3]: m_pdf = st.checkbox('PDF (.pdf)', value=True, key='manual_pdf')
+
+    if st.button('Generuj protokoły z listy', type='primary', key='manual_gen',
+                 use_container_width=True):
+        matches = []
+        for _, row in edited.iterrows():
+            z1 = str(row.get(c1, '') or '').strip()
+            z2 = str(row.get(c2, '') or '').strip()
+            if not z1 or not z2:
+                continue
+            matches.append({'z1': z1, 'z2': z2, 'grupa': '',
+                            'tor': str(row.get('Tor', '') or '').strip(),
+                            'godz': str(row.get('Godzina', '') or '').strip(),
+                            'mecz': str(row.get('Mecz #', '') or '').strip()})
+        if not matches:
+            st.error(f'Brak kompletnych meczów — wypełnij {c1} i {c2} w co najmniej jednym wierszu.')
+            return
+        tt = _manual_template_type(tournament_type, manual_format)
+        is_grp = manual_format.startswith('2 sety')
+        label = (tournament_name or '').strip() or 'Mecze'
+        try:
+            with st.spinner(f'Generuję {len(matches)} protokołów…'):
+                docx = generate_docx.build_document(
+                    '', '', [(label, matches)], logos=None,
+                    tournament_name=((tournament_name or '').strip() if m_hdr else ''),
+                    tournament_date=(tournament_date if m_hdr else ''),
+                    tournament_phase_text=(('Faza grupowa' if is_grp else manual_format) if m_hdr else ''),
+                    include_qr=False, include_pfm_logo=m_logo,
+                    hide_grupa_mecz=(not is_grp),
+                    phase_label=(manual_format if not is_grp else None),
+                    template_type=tt, skip_placeholders=False)
+        except Exception as e:
+            st.error(f'Błąd generowania: {e}')
+            return
+        safe = re.sub(r'[^\w\s-]', '', label).strip().replace(' ', '_') or 'protokoly'
+        st.success(f'Gotowe — {len(matches)} protokołów.')
+        if m_docx:
+            st.download_button('⬇ Pobierz .docx', data=docx, file_name=f'{safe}.docx', key='manual_dl_docx',
+                mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        if m_pdf:
+            pdf, err = docx_to_pdf(docx, safe, est_pages=len(matches))
+            if pdf:
+                st.download_button('⬇ Pobierz .pdf', data=pdf, file_name=f'{safe}.pdf',
+                                   mime='application/pdf', key='manual_dl_pdf')
+            else:
+                st.warning(f'PDF się nie udał ({err}). Pobierz wersję .docx.')
+
+
 @st.cache_data(show_spinner=False)
 def _bytes_to_data_url(img_bytes: bytes) -> str:
     """Cache'owana wersja konwersji bajtów obrazu na data URL.
@@ -410,7 +582,20 @@ with col_form:
     is_ok_pre = is_trojka_pre or is_individual_pre or is_czworka_pre   # zweryfikowane typy
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
-    _section(2, "Arkusz Google Sheets", "Wklej publiczny link do arkusza z wynikami")
+    _section(2, "Dane meczów", "Z arkusza Google Sheets albo z własnej listy")
+    # Selektor źródła. Domyślnie „Arkusz Google Sheets" → cała dotychczasowa
+    # ścieżka bez zmian. „Własna lista" → izolowany generator + st.stop()
+    # (reszta flow się nie renderuje). Zero ryzyka dla ścieżki arkusza.
+    data_source = st.radio(
+        "Skąd wziąć dane?",
+        ["Arkusz Google Sheets", "Własna lista meczów (Excel / ręcznie)"],
+        horizontal=True, key="data_source",
+        help="Nie masz arkusza PFM? Wybierz „Własna lista” — wgraj Excel/CSV lub "
+             "wpisz mecze ręcznie (minimum: dwie kolumny z nazwami).")
+    if data_source.startswith("Własna"):
+        _render_manual_generator(tournament_type, tournament_name, tournament_date)
+        st.stop()
+
     cols_link = st.columns([4, 1])
     with cols_link[0]:
         sheets_url = st.text_input("URL arkusza",
@@ -1660,51 +1845,7 @@ with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=F
                 st.code("\n".join(rows))
 
 
-# ─── Helper: konwersja docx → pdf ───────────────────────────────────────
-def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
-    """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
-    co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
-    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
-    import time
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            docx_path = os.path.join(tmpdir, f"{name}.docx")
-            with open(docx_path, 'wb') as f:
-                f.write(docx_bytes)
-            pdf_filter = ('pdf:writer_pdf_Export:'
-                          '{"SelectPdfVersion":{"type":"long","value":"0"},'
-                          '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
-                          '"ReduceImageResolution":{"type":"boolean","value":"true"},'
-                          '"MaxImageResolution":{"type":"long","value":"150"},'
-                          '"UseLosslessCompression":{"type":"boolean","value":"false"},'
-                          '"Quality":{"type":"long","value":"90"}}')
-            est_total = max(6.0, 5.0 + 0.6 * est_pages)
-            proc = subprocess.Popen(
-                ['libreoffice', '--headless', '--convert-to', pdf_filter,
-                 '--outdir', tmpdir, docx_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            start = time.time()
-            while proc.poll() is None:
-                elapsed = time.time() - start
-                if elapsed > 300:  # timeout
-                    proc.kill()
-                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
-                if progress_cb:
-                    try: progress_cb(elapsed, est_total)
-                    except Exception: pass
-                time.sleep(0.4)
-            stdout, stderr = proc.communicate()
-            pdf_path = os.path.join(tmpdir, f"{name}.pdf")
-            if os.path.exists(pdf_path):
-                with open(pdf_path, 'rb') as f:
-                    return f.read(), None
-            err = stderr.decode('utf-8', errors='replace') if stderr else 'unknown'
-            return None, err[:500]
-    except FileNotFoundError:
-        return None, "LibreOffice nie jest zainstalowany na serwerze."
-    except Exception as e:
-        return None, str(e)
+# (docx_to_pdf przeniesione wyżej — używa go też tryb „własna lista meczów")
 
 
 def build_image_args():
