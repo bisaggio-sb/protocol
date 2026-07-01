@@ -131,8 +131,8 @@ def _manual_template_type(ttype, fmt):
     return base + {'Best of 3': '_Bo3', 'Best of 5': '_Bo5', 'Best of 7': '_Bo7'}.get(fmt, '')
 
 
-def _map_upload_to_cols(raw, c1, c2):
-    """Mapuje kolumny wgranego pliku na standardowe [c1, c2, Tor, Godzina, Mecz #].
+def _map_upload_to_cols(raw):
+    """Mapuje kolumny wgranego pliku na stałe klucze [p1, p2, tor, godz, mecz].
     Dopasowanie po nazwach nagłówków (fuzzy); fallback: 2 pierwsze kolumny = nazwy."""
     import pandas as pd
     lower = {str(c).strip().lower(): c for c in raw.columns}
@@ -142,16 +142,18 @@ def _map_upload_to_cols(raw, c1, c2):
                 if k in lc:
                     return orig
         return None
-    s_z1 = find('zawodnik 1', 'drużyna 1', 'druzyna 1', 'gracz 1', 'z1', 'player 1', 'team 1')
-    s_z2 = find('zawodnik 2', 'drużyna 2', 'druzyna 2', 'gracz 2', 'z2', 'player 2', 'team 2')
+    s_p1 = find('zawodnik 1', 'drużyna 1', 'druzyna 1', 'gracz 1', 'z1', 'player 1', 'team 1')
+    s_p2 = find('zawodnik 2', 'drużyna 2', 'druzyna 2', 'gracz 2', 'z2', 'player 2', 'team 2')
     s_tor = find('tor', 'stół', 'stol', 'table')
     s_godz = find('godz', 'czas', 'time', 'hour')
     s_mecz = find('mecz', 'nr', 'lp', 'match', '#')
-    if s_z1 is None and len(raw.columns) >= 1: s_z1 = raw.columns[0]
-    if s_z2 is None and len(raw.columns) >= 2: s_z2 = raw.columns[1]
+    if s_p1 is None and len(raw.columns) >= 1: s_p1 = raw.columns[0]
+    if s_p2 is None and len(raw.columns) >= 2: s_p2 = raw.columns[1]
     col = lambda s: raw[s] if s is not None else ''
-    out = pd.DataFrame({c1: col(s_z1), c2: col(s_z2),
-                        'Tor': col(s_tor), 'Godzina': col(s_godz), 'Mecz #': col(s_mecz)})
+    # STAŁE klucze kolumn (p1/p2/…) — etykiety wyświetlane ustala column_config.
+    # Dzięki temu dane NIE gubią się przy zmianie typu turnieju (Zawodnik↔Drużyna).
+    out = pd.DataFrame({'p1': col(s_p1), 'p2': col(s_p2),
+                        'tor': col(s_tor), 'godz': col(s_godz), 'mecz': col(s_mecz)})
     return out.fillna('').astype(str)
 
 
@@ -160,64 +162,81 @@ def _render_manual_generator(tournament_type, tournament_name, tournament_date):
     Renderuje się zamiast ścieżki Google Sheets (wołający robi st.stop())."""
     import pandas as pd
     is_ind = tournament_type == 'Indywidualny'
-    side = 'Zawodnik' if is_ind else 'Drużyna'
-    c1, c2 = f'{side} 1', f'{side} 2'
-    COLS = [c1, c2, 'Tor', 'Godzina', 'Mecz #']
+    side = 'Zawodnik' if is_ind else 'Drużyna'   # etykieta zależna od typu turnieju
+    KEYS = ['p1', 'p2', 'tor', 'godz', 'mecz']   # STAŁE klucze (dane przeżywają zmianę typu)
 
     st.caption(f"Wygeneruj protokoły z własnej listy meczów — bez arkusza PFM. Minimum to "
-               f"dwie kolumny z nazwami ({c1} / {c2}); Tor, Godzina i Mecz # są opcjonalne.")
+               f"dwie kolumny z nazwami ({side} 1 / {side} 2); Tor, Godzina i Mecz # są opcjonalne.")
 
     if is_ind or tournament_type == 'Drużynowy 2-os.':
         fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5', 'Best of 7']
     else:
         fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5']
     manual_format = st.selectbox('Format protokołu', fmt_opts, key='manual_fmt',
-        help='„2 sety" = protokół grupowy; „Best of N" = protokół pucharowy.')
+        help='„2 sety” = protokół grupowy; „Best of N” = protokół pucharowy.')
 
     up = st.file_uploader('Wgraj Excel/CSV z listą meczów (opcjonalnie)',
                           type=['xlsx', 'xls', 'csv'], key='manual_upload')
     if 'manual_df' not in st.session_state:
-        st.session_state['manual_df'] = pd.DataFrame([{c: '' for c in COLS} for _ in range(6)])
+        st.session_state['manual_df'] = pd.DataFrame([{k: '' for k in KEYS} for _ in range(6)])
     if up is not None and st.session_state.get('manual_upload_name') != up.name:
         try:
             raw = (pd.read_csv(up, dtype=str) if up.name.lower().endswith('.csv')
                    else pd.read_excel(up, dtype=str)).fillna('')
-            st.session_state['manual_df'] = _map_upload_to_cols(raw, c1, c2)
+            st.session_state['manual_df'] = _map_upload_to_cols(raw)
             st.session_state['manual_upload_name'] = up.name
-            st.success(f'Wczytano {len(st.session_state["manual_df"])} wierszy — sprawdź i popraw poniżej.')
+            _nw = len(st.session_state['manual_df'])
+            st.success(f'Wczytano {_nw} {generate_docx.pluralize(_nw, "wiersz", "wiersze", "wierszy")} '
+                       '— sprawdź i popraw poniżej.')
         except Exception as e:
             st.error(f'Nie udało się wczytać pliku: {e}')
 
     st.caption('Edytuj listę (dodawaj/usuwaj wiersze przyciskami tabeli). Puste wiersze pomijamy.')
+    # Etykiety kolumn przez column_config — klucze danych stałe, więc zmiana typu
+    # (Zawodnik↔Drużyna) NIE gubi wpisanych/wgranych danych.
+    _colcfg = {
+        'p1': st.column_config.TextColumn(f'{side} 1'),
+        'p2': st.column_config.TextColumn(f'{side} 2'),
+        'tor': st.column_config.TextColumn('Tor'),
+        'godz': st.column_config.TextColumn('Godzina'),
+        'mecz': st.column_config.TextColumn('Mecz #'),
+    }
     edited = st.data_editor(st.session_state['manual_df'], num_rows='dynamic',
-                            use_container_width=True, key='manual_editor')
+                            use_container_width=True, key='manual_editor',
+                            column_config=_colcfg)
 
-    cc = st.columns(4)
-    with cc[0]: m_logo = st.checkbox('Logo PFM', value=True, key='manual_logo')
-    with cc[1]: m_hdr = st.checkbox('Nazwa/data w rogu', value=True, key='manual_hdr')
-    with cc[2]: m_docx = st.checkbox('Word (.docx)', value=True, key='manual_docx')
-    with cc[3]: m_pdf = st.checkbox('PDF (.pdf)', value=True, key='manual_pdf')
+    cc = st.columns(2)
+    with cc[0]:
+        st.caption("Wygląd protokołu")
+        m_logo = st.checkbox('Logo PFM', value=True, key='manual_logo')
+        m_hdr = st.checkbox('Nazwa i data w prawym górnym rogu', value=True, key='manual_hdr')
+    with cc[1]:
+        st.caption("Plik do pobrania")
+        m_pdf = st.checkbox('PDF (.pdf)', value=True, key='manual_pdf')
+        m_docx = st.checkbox('Word (.docx)', value=False, key='manual_docx')
 
     if st.button('Generuj protokoły z listy', type='primary', key='manual_gen',
                  use_container_width=True):
         matches = []
         for _, row in edited.iterrows():
-            z1 = str(row.get(c1, '') or '').strip()
-            z2 = str(row.get(c2, '') or '').strip()
+            z1 = str(row.get('p1', '') or '').strip()
+            z2 = str(row.get('p2', '') or '').strip()
             if not z1 or not z2:
                 continue
             matches.append({'z1': z1, 'z2': z2, 'grupa': '',
-                            'tor': str(row.get('Tor', '') or '').strip(),
-                            'godz': str(row.get('Godzina', '') or '').strip(),
-                            'mecz': str(row.get('Mecz #', '') or '').strip()})
+                            'tor': str(row.get('tor', '') or '').strip(),
+                            'godz': str(row.get('godz', '') or '').strip(),
+                            'mecz': str(row.get('mecz', '') or '').strip()})
         if not matches:
-            st.error(f'Brak kompletnych meczów — wypełnij {c1} i {c2} w co najmniej jednym wierszu.')
+            st.error(f'Brak kompletnych meczów — wypełnij {side} 1 i {side} 2 w co najmniej jednym wierszu.')
             return
         tt = _manual_template_type(tournament_type, manual_format)
         is_grp = manual_format.startswith('2 sety')
         label = (tournament_name or '').strip() or 'Mecze'
+        _np = len(matches)
+        _pw = generate_docx.pluralize(_np, 'protokół', 'protokoły', 'protokołów')
         try:
-            with st.spinner(f'Generuję {len(matches)} protokołów…'):
+            with st.spinner(f'Generuję {_np} {_pw}…'):
                 docx = generate_docx.build_document(
                     '', '', [(label, matches)], logos=None,
                     tournament_name=((tournament_name or '').strip() if m_hdr else ''),
@@ -231,7 +250,7 @@ def _render_manual_generator(tournament_type, tournament_name, tournament_date):
             st.error(f'Błąd generowania: {e}')
             return
         safe = re.sub(r'[^\w\s-]', '', label).strip().replace(' ', '_') or 'protokoly'
-        st.success(f'Gotowe — {len(matches)} protokołów.')
+        st.success(f'Gotowe — {_np} {_pw}.')
         if m_docx:
             st.download_button('⬇ Pobierz .docx', data=docx, file_name=f'{safe}.docx', key='manual_dl_docx',
                 mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
