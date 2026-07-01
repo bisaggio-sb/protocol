@@ -119,6 +119,29 @@ def fetch_sheet(sheet_id, sheet_name, gid_map=None):
     return fetch_via_export_name(sheet_id, sheet_name)
 
 
+# Dopasowanie nazwy zakładki grupy: 'Gr. A', 'Gr.A', 'Grupa A', tolerując NBSP,
+# nadmiarowe spacje i wielkość liter.
+_GROUP_TAB_RE = re.compile(r'^gr(?:upa)?\.?\s*([A-Za-z])$', re.IGNORECASE)
+
+def _group_candidate_tabs(gid_map):
+    """Zwraca (candidates, is_fallback) gdzie candidates = [(letter, tab_name)].
+
+    KLUCZOWE: gdy gid_map NIE zawiera zakładek grup (np. `get_sheet_gids` zwróciło
+    mapę bez nich — inny HTML, śmieci z regexa), NIE poddajemy się — robimy
+    fallback na 'Gr. A'..'Gr. Z' po NAZWIE, bo `fetch_via_gviz` i tak fetchuje po
+    nazwie (jak dla drabinki). Bez tego arkusze z „kapryśnym" HTML dawały 0 grup
+    mimo istniejących zakładek (bug IMP 2026). Gdy gid_map MA grupy — używamy ich
+    (szybciej, oryginalne nazwy, rozmyte dopasowanie na NBSP/spacje/case)."""
+    found = {}
+    for name in (gid_map or {}):
+        m = _GROUP_TAB_RE.match(str(name).replace('\xa0', ' ').strip())
+        if m:
+            found.setdefault(m.group(1).upper(), name)
+    if found:
+        return [(L, found[L]) for L in sorted(found)], False
+    return [(L, f'Gr. {L}') for L in string.ascii_uppercase], True
+
+
 # ─── Parser zakładki grupy ────────────────────────────────────────────────────
 
 def _is_valid_match_row(tor, godz, z1, z2):
@@ -128,6 +151,61 @@ def _is_valid_match_row(tor, godz, z1, z2):
     return True
 
 def parse_group_rows(rows):
+    """Parsuje zakładkę grupy. Najpierw po nagłówku (well-formed arkusze, TMP);
+    gdy to da 0 (gviz zepsuł nagłówek — np. IMP 2026 gdzie z całego nagłówka
+    został tylko „Grupa A") → fallback pozycyjny po układzie PFM."""
+    if not rows: return []
+    m = _parse_group_rows_header(rows)
+    if m:
+        return m
+    return _parse_group_rows_positional(rows)
+
+
+def _parse_group_rows_positional(rows):
+    """Fallback gdy gviz skasował nagłówek grupy (zostaje np. tylko 'Grupa X',
+    znikają '#'/'Godzina'/'Tor'/etykiety setów). NIE ufa nagłówkowi: wykrywa
+    kolumnę Godziny (HH:MM) w danych i wyprowadza resztę z układu PFM —
+    Tor=+1, z1=+3, z2=+6, #=−1 względem Godziny (potwierdzone na live IMP 2026)."""
+    if not rows: return []
+    grupa = ''
+    for row in rows:
+        for cell in row:
+            gm = re.match(r'^\s*gr(?:upa)?\.?\s*([A-P])\b', str(cell).strip(), re.IGNORECASE)
+            if gm:
+                grupa = gm.group(1).upper(); break
+        if grupa: break
+    # Kolumna godziny = najczęstsza kolumna z wartościami HH:MM(:SS) w danych.
+    time_votes = {}
+    for row in rows:
+        for ci_, cell in enumerate(row):
+            if re.match(r'^\d{1,2}:\d{2}(:\d{2})?$', str(cell).strip()):
+                time_votes[ci_] = time_votes.get(ci_, 0) + 1
+    if not time_votes:
+        return []
+    col_godz = max(time_votes, key=time_votes.get)
+    col_tor, col_z1, col_z2 = col_godz + 1, col_godz + 3, col_godz + 6
+    col_mecz = col_godz - 1 if col_godz >= 1 else None
+    matches = []
+    for row in rows:
+        def g(c):
+            return row[c].strip() if (c is not None and 0 <= c < len(row)) else ''
+        tor = g(col_tor); godz = g(col_godz); z1 = g(col_z1); z2 = g(col_z2)
+        if re.match(r'^\d+\.0+$', tor):
+            tor = tor.split('.')[0]
+        _gm = re.match(r'^(\d{1,2}:\d{2})(?::\d{2})?$', godz)
+        if _gm:
+            godz = _gm.group(1)
+        if not _is_valid_match_row(tor, godz, z1, z2):
+            continue
+        mecz = g(col_mecz)
+        if re.match(r'^\d+\.0+$', mecz):
+            mecz = mecz.split('.')[0]
+        matches.append({'tor': tor, 'godz': godz, 'grupa': grupa,
+                        'mecz': mecz, 'z1': z1, 'z2': z2})
+    return matches
+
+
+def _parse_group_rows_header(rows):
     if not rows: return []
     header_idx, header = None, []
     for i, row in enumerate(rows):
@@ -202,15 +280,13 @@ def fetch_all_group_sheets(sheet_id, progress_cb=None):
     naprawdę istnieją (zazwyczaj 4-10 grup zamiast 26 zbędnych HTTP).
     progress_cb: callable(done, total, label) — wywoływany dla każdej zakładki."""
     gid_map = get_sheet_gids(sheet_id)
-    if gid_map:
-        candidates = [f"Gr. {L}" for L in string.ascii_uppercase if f"Gr. {L}" in gid_map]
-        if not candidates:
-            candidates = [f"Gr. {L}" for L in string.ascii_uppercase]
-    else:
-        candidates = [f"Gr. {L}" for L in string.ascii_uppercase]
+    # Te same kandydatury co w detekcji: gid_map (rozmyte) LUB fallback po nazwie.
+    # KLUCZOWE: gdy gid_map nie ma grup → skan 'Gr. A'..'Gr. Z' po nazwie (gviz),
+    # inaczej arkusze z kapryśnym HTML dawały 0 protokołów mimo istniejących grup.
+    candidate_pairs, is_fallback = _group_candidate_tabs(gid_map)
+    candidates = [name for _, name in candidate_pairs]
     results = []
     total = max(1, len(candidates))
-    is_fallback = not gid_map
     empty_streak = 0
     for i, name in enumerate(candidates):
         if progress_cb:
@@ -233,8 +309,10 @@ def fetch_all_group_sheets(sheet_id, progress_cb=None):
         except Exception:
             empty_streak += 1
             continue
-        # Early stop: po 3 pustych pod rząd w fallback mode (gdy mamy już 1+ wynik)
-        if is_fallback and results and empty_streak >= 3:
+        # Early stop w fallback: 3 puste z rzędu gdy już coś mamy (koniec grup),
+        # albo po 5 próbach bez żadnego wyniku (arkusz bez grup) — by nie robić
+        # 26 wolnych HTTP, ale nie poddać się przy chwilowym błędzie pierwszej.
+        if is_fallback and ((results and empty_streak >= 3) or (not results and i + 1 >= 5)):
             break
     return results
 
@@ -1056,32 +1134,19 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
         _p(8, "⚠️ Lista zakładek niedostępna — skanuję A-Z")
 
     # Faza grupowa - zakładki Gr. A, Gr. B, ...
-    # Optymalizacja: filtrujemy LETTERS do tych dla których nazwa zakładki
-    # FAKTYCZNIE istnieje w gid_map. Zamiast 26 × 3 = 78 prób HTTP (większość
-    # nieudanych), robimy tylko realne zapytania dla istniejących zakładek.
-    # Fallback do pełnego skanu jeśli gid_map jest puste (np. arkusz nieskanowany).
-    LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    candidate_tabs = []  # [(letter, tab_name)]
-    if gid_map:
-        for letter in LETTERS:
-            for prefix in ('Gr. ', 'Gr.', 'Grupa '):
-                tab_name = f'{prefix}{letter}'
-                if tab_name in gid_map:
-                    candidate_tabs.append((letter, tab_name))
-                    break
-    else:
-        # Fallback: bez gid_map skanujemy wszystkie litery (jak poprzednio)
-        candidate_tabs = [(L, f'Gr. {L}') for L in LETTERS]
+    # Kandydaci z gid_map (rozmyte dopasowanie) LUB fallback 'Gr. A'..'Gr. Z' po
+    # nazwie gdy gid_map ich nie ma. fetch_via_gviz fetchuje po nazwie, więc skan
+    # po nazwie działa nawet gdy gid_map jest „kapryśne" (bug IMP 2026 → 0 grup).
+    candidate_tabs, is_fallback_scan = _group_candidate_tabs(gid_map)
 
     group_count = 0
     group_matches_total = 0
     total = max(1, len(candidate_tabs))
-    is_fallback_scan = not gid_map
     EMPTY_STOP = 3
     empty_streak = 0
+    group_debug = []  # diagnostyka: co się stało z każdą próbą
+    group_sample = []  # surowe wiersze pierwszej zakładki która coś zwróciła
     for li, (letter, tab_name) in enumerate(candidate_tabs):
-        # W trybie fallback (A-Z scan) NIE pokazujemy litery — bo zwykle 80%
-        # to puste sprawdzenia. Pokazujemy tylko liczbę faktycznie znalezionych.
         if is_fallback_scan:
             _p(10 + int(35 * (li + 1) / total),
                f"🔍 Skanuję grupy… (znaleziono: {group_count})")
@@ -1092,20 +1157,37 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
             rows = fetch_sheet(sheet_id, tab_name, gid_map)
             if rows:
                 matches = parse_group_rows(rows)
+                group_debug.append(f"{tab_name}: {len(rows)} wierszy → {len(matches)} meczów")
+                # Próbka surowych wierszy pierwszej niepustej zakładki — by zobaczyć
+                # JAK live gviz zwraca strukturę (różną od xlsx) gdy parse daje 0.
+                if not group_sample:
+                    for _ri, _row in enumerate(rows[:6]):
+                        group_sample.append(f"R{_ri}: " + " | ".join(str(c)[:18] for c in _row[:11]))
                 if matches:
                     group_count += 1
                     group_matches_total += len(matches)
                     empty_streak = 0
                     continue
-        except Exception:
-            pass
+            else:
+                group_debug.append(f"{tab_name}: brak danych (fetch pusty)")
+        except Exception as e:
+            group_debug.append(f"{tab_name}: błąd {type(e).__name__}")
         empty_streak += 1
-        if is_fallback_scan and group_count > 0 and empty_streak >= EMPTY_STOP:
+        # Early-stop w trybie fallback: po znalezieniu grup — EMPTY_STOP pustych
+        # z rzędu (koniec grup); bez żadnej grupy — dopiero po 5 próbach (arkusz
+        # bez grup / czysta drabinka), by nie robić 26 wolnych HTTP, ale i nie
+        # poddać się przy chwilowym błędzie pierwszej zakładki.
+        if is_fallback_scan and ((group_count > 0 and empty_streak >= EMPTY_STOP)
+                                 or (group_count == 0 and li + 1 >= 5)):
             break
     if group_count > 0:
         result['has_grupowa'] = True
         result['group_count'] = group_count
         result['group_total_matches'] = group_matches_total
+    # Diagnostyka (widoczna w UI gdy 0 grup) — by zdiagnozować bez dostępu do live.
+    result['_group_debug'] = group_debug
+    result['_group_sample'] = group_sample
+    result['_gid_map_tabs'] = sorted(gid_map.keys()) if gid_map else []
 
     _p(48, "🏆 Wczytuję zakładkę Drabinka…")
     # Drabinka — zbieramy wszystkie wykryte fazy
