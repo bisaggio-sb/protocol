@@ -125,6 +125,10 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
   zgadywanie z xlsx kosztowało 2 nietrafione iteracje (drop-Tor, gid_map) zanim
   diagnostyka pokazała prawdziwą przyczynę: gviz KASUJE cały nagłówek grupy poza
   „Grupa X" (parser ma fallback pozycyjny `_parse_group_rows_positional`).
+- **Liczebniki PL — ZAWSZE `generate_docx.pluralize(n, l1, l2_4, l5)`, NIGDY hardcode.**
+  Powtarzalny błąd (np. „2 protokołów" zamiast „2 protokoły"). Reguła: 1→l1,
+  2-4→l2_4, 5+→l5 (z wyjątkami 12-14→l5). Każdy komunikat z liczbą rzeczowników
+  (protokoły, mecze, grupy, wiersze, zawodnicy, drużyny…) MUSI iść przez `pluralize`.
 - **Czcionka:** docelowo Calibri → renderowane przez Carlito; bez `fonts-crosextra-carlito`
   szeryfy/metryki się psują. Nazwiska celowo bywają serif — sprawdzaj świadomie.
 - **Paginacja Bo5/IND** bywała problematyczna (treść str.2 wchodziła na str.1) —
