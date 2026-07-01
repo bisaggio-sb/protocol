@@ -229,6 +229,22 @@ try:
     # Tor musi być poprawny (numer), nie pusty/nazwisko
     if _gm_drop and _gm_drop[0].get('tor') != '5':
         failures.append(f"parse_group_rows (gviz drop Tor): Tor={_gm_drop[0].get('tor')}, oczek. '5'")
+    # Najgorszy przypadek (IMP 2026 live): gviz KASUJE cały nagłówek poza 'Grupa A'
+    # (znika '#'/'Godzina'/'Tor'/etykiety setów). Fallback pozycyjny MUSI ratować.
+    _grp_killed = [
+        ['', '', '', 'Grupa A', '', '', '', '', '15'],
+        ['1', '09:00', '5',  'Krzysztof D', 'Krzysztof D', '39', '50', 'Małgorzata H', '50', '43', '-1'],
+        ['2', '09:00', '6',  'Wojciech K',  'Wojciech K',  '50', '50', 'Przemysław L', '48', '11', '-1'],
+        ['3', '09:30', '7',  'Bartosz K',   'Bartosz K',   '32', '50', 'Leszek Ś',     '50', '27', '-1'],
+    ]
+    _gm_killed = g.parse_group_rows(_grp_killed)
+    if len(_gm_killed) != 3:
+        failures.append(f'parse_group_rows (gviz skasowany nagłówek, IMP 2026 live): '
+                        f'{len(_gm_killed)} meczów, oczek. 3 (fallback pozycyjny)')
+    if _gm_killed and (_gm_killed[0].get('z1') != 'Krzysztof D' or
+                       _gm_killed[0].get('z2') != 'Małgorzata H' or
+                       _gm_killed[0].get('grupa') != 'A'):
+        failures.append(f'parse_group_rows (skasowany nagłówek): zła detekcja kolumn: {_gm_killed[0]}')
 except Exception as e:
     failures.append(f'parse_group_rows gviz-drop: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
