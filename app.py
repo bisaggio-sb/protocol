@@ -529,10 +529,11 @@ with col_form:
                 for t, label, n_m, dr in all_phase_entries:
                     by_time[t].append((label, n_m, dr))
                 
-                # Sortuj godziny (— na końcu jako grupowa bez fixed time)
+                # Faza grupowa („—", bez stałej godziny) NAJPIERW, potem drabinki
+                # chronologicznie (user: grupowa to pierwszy etap turnieju).
                 def _time_sort_key(t):
-                    if t == "—": return (1, "")
-                    return (0, t)
+                    if t == "—": return (0, "")
+                    return (1, t)
                 
                 sorted_times = sorted(by_time.keys(), key=_time_sort_key)
                 
