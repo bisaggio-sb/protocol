@@ -210,10 +210,11 @@ w wierszu tabeli (PIL).
 - [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
-### Redesign UI (branch `development`, w toku — 2026-06-26)
-> Cel usera: mniej „AI-feel", nowocześnie/schludnie, branding PFM. Praca TYLKO
-> na `development` (deploy: protocol-dev.streamlit.app). NIE mergować na `main`
-> dopóki user nie zobaczy i nie zaakceptuje wizualnie.
+### Redesign UI (ZMERGOWANE NA PROD 2026-07-16 — user zaakceptował)
+> Cel usera: mniej „AI-feel", nowocześnie/schludnie, branding PFM. Całość
+> (fazy A-G + tryb ręczny + fixy parsera) poszła na `main` 2026-07-16 na
+> wyraźne polecenie usera („przenieś deva na prod"). `development` dalej
+> służy do kolejnych eksperymentów przed prod.
 - **Faza A (zrobione):** theme PFM red `#D81F26` (wyciągnięty z logo), favicon =
   logo PFM zamiast 🎯, font systemowy (CSS), wycięte 43 ozdobne emoji z
   buttonów/nagłówków/komunikatów (semantyczne 🟢🔵🟣 legendy drabinek + 🟡🔴
@@ -290,6 +291,18 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-07-16 — **MERGE development → main (redesign + tryb ręczny NA PRODUKCJI)**
+  na polecenie usera. Wcześniej tego dnia user zgłosił „0 grup" na prod dla
+  arkusza IMP — okazało się NIE-bugiem (losowanie grup było w toku, puste
+  komórki zawodników → parser poprawnie pomija niekompletne mecze; user: „aaa
+  ok sorki faktycznie"). Dodatkowo przed merge: (a) **Word (.docx) domyślnie
+  ODznaczony** w sekcji Generuj (PDF pierwszy, zaznaczony) — standardowy wydruk
+  to sam PDF; (b) **info o formatach w trybie multi-phase**: gdy godzina łączy
+  drabinkę główną i B a format ≠ Bo3, `st.info` wypisuje per-fazowo: drabinka B
+  (Miejsca X-Y, mecze o miejsca >3) → Best of 3 + osobne pliki (lub format
+  główny gdy checkbox odznaczony), mecze o podium (o 1./2./3. miejsce) →
+  ZAWSZE format główny jak finał. Blok po selectboxie Format (pełna szerokość,
+  poza cols_t2), guard `selected_phase_keys_multi and sets_format != "Best of 3"`.
 - 2026-07-01 — **Tryb „własna lista meczów" (bez arkusza PFM) — DEV.** Dla userów
   bez wyrafinowanego arkusza. Selektor źródła w sekcji 2 (radio): „Arkusz Google
   Sheets" (default, stara ścieżka BEZ ZMIAN) vs „Własna lista meczów (Excel/ręcznie)".
