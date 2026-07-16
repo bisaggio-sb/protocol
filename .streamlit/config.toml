@@ -1,8 +1,9 @@
 [theme]
-primaryColor = "#E8511A"
+# Czerwień PFM (wyciągnięta z logo, lekko pogłębiona dla kontrastu na białym).
+primaryColor = "#D81F26"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F5F5"
-textColor = "#1A1A1A"
+secondaryBackgroundColor = "#F6F7F9"
+textColor = "#16181D"
 font = "sans serif"
 
 [server]
