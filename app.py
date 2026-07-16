@@ -8,10 +8,259 @@ from datetime import date, timedelta
 from PIL import Image
 import generate_docx
 
-st.set_page_config(page_title="Protokoły Mölkky", page_icon="🎯", layout="wide")
-
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PFM_PATH = os.path.join(APP_DIR, 'assets_pfm_logo.png')
+
+# Favicon = logo PFM (zamiast generycznego emoji). Fallback na literę gdy brak pliku.
+try:
+    _page_icon = Image.open(PFM_PATH)
+except Exception:
+    _page_icon = "🟥"
+st.set_page_config(page_title="Protokoły Mölkky · PFM", page_icon=_page_icon, layout="wide")
+
+# ── Globalny styl: font systemowy (naturalny dla każdego OS) + drobne dociągnięcia.
+# Cel: mniej „domyślnego Streamlita", spójniej, schludniej. Bez zmiany logiki.
+st.markdown("""
+<style>
+  html, body, [class*="css"], .stApp, button, input, textarea, select {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter",
+                 Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  }
+  /* Tytuły sekcji ciaśniej, mniej „dokumentowo" */
+  .stApp h2 { font-weight: 650; letter-spacing: -0.01em; }
+  /* Przyciski: spokojniejsze rogi, bez krzykliwego cienia */
+  .stButton > button, .stDownloadButton > button {
+    border-radius: 8px; font-weight: 600;
+  }
+  /* Divider lżejszy */
+  hr { margin: 1.1rem 0; opacity: 0.5; }
+  /* Górny margines — czyści górny toolbar Streamlit (mniej niż domyślne, ale bez ucinania) */
+  .block-container { padding-top: 4rem; }
+  /* Expandery jako subtelne karty (zamiast gołej linii) */
+  [data-testid="stExpander"] {
+    border: 1px solid #e6e8eb; border-radius: 10px; overflow: hidden;
+  }
+  [data-testid="stExpander"] summary { font-weight: 600; }
+  /* Responsywność: na wąskich ekranach (telefon/tablet) zmniejsz brandbar i marginesy */
+  @media (max-width: 640px) {
+    .block-container { padding-top: 3rem; padding-left: 0.8rem; padding-right: 0.8rem; }
+    .pfm-brandbar { gap: 12px !important; }
+    .pfm-brandbar-logo { height: 40px !important; }
+    .pfm-brandbar-title { font-size: 1.2rem !important; }
+    .pfm-brandbar-sub { font-size: 0.78rem !important; }
+  }
+</style>
+""", unsafe_allow_html=True)
+
+
+def _section(num, title, subtitle=None):
+    """Czysty nagłówek sekcji: czerwony numerek PFM + tytuł (zamiast „1. Tytuł"
+    w stylu nagłówka Worda). Spójny, designerski, mniej „AI/dokument"."""
+    sub = (f'<div style="color:#6b7280; font-size:0.85rem; margin-top:2px;">{subtitle}</div>'
+           if subtitle else '')
+    st.markdown(f"""
+<div style="display:flex; align-items:center; gap:12px; margin:0.2rem 0 0.9rem 0;">
+  <div style="flex-shrink:0; width:30px; height:30px; border-radius:8px;
+              background:#D81F26; color:#fff; font-weight:700; font-size:0.95rem;
+              display:flex; align-items:center; justify-content:center;">{num}</div>
+  <div>
+    <div style="font-size:1.25rem; font-weight:650; line-height:1.15;
+                letter-spacing:-0.01em; color:#16181D;">{title}</div>
+    {sub}
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ─── Helper: konwersja docx → pdf (przeniesione na górę — używa go też tryb
+# ręczny, który renderuje się w sekcji 2 przed dawną definicją) ──────────
+def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
+    """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
+    co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
+    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
+    import time
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, f"{name}.docx")
+            with open(docx_path, 'wb') as f:
+                f.write(docx_bytes)
+            pdf_filter = ('pdf:writer_pdf_Export:'
+                          '{"SelectPdfVersion":{"type":"long","value":"0"},'
+                          '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
+                          '"ReduceImageResolution":{"type":"boolean","value":"true"},'
+                          '"MaxImageResolution":{"type":"long","value":"150"},'
+                          '"UseLosslessCompression":{"type":"boolean","value":"false"},'
+                          '"Quality":{"type":"long","value":"90"}}')
+            est_total = max(6.0, 5.0 + 0.6 * est_pages)
+            proc = subprocess.Popen(
+                ['libreoffice', '--headless', '--convert-to', pdf_filter,
+                 '--outdir', tmpdir, docx_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            start = time.time()
+            while proc.poll() is None:
+                elapsed = time.time() - start
+                if elapsed > 300:
+                    proc.kill()
+                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
+                if progress_cb:
+                    try: progress_cb(elapsed, est_total)
+                    except Exception: pass
+                time.sleep(0.4)
+            stdout, stderr = proc.communicate()
+            pdf_path = os.path.join(tmpdir, f"{name}.pdf")
+            if os.path.exists(pdf_path):
+                with open(pdf_path, 'rb') as f:
+                    return f.read(), None
+            err = stderr.decode('utf-8', errors='replace') if stderr else 'unknown'
+            return None, err[:500]
+    except FileNotFoundError:
+        return None, "LibreOffice nie jest zainstalowany na serwerze."
+    except Exception as e:
+        return None, str(e)
+
+
+# ─── Tryb „własna lista meczów" (bez arkusza PFM) ───────────────────────
+def _manual_template_type(ttype, fmt):
+    """(typ turnieju, format) → template_type. '2 sety' → grupowy szablon;
+    'Best of N' → szablon pucharowy. Bo7 tylko IND/DWÓJKA."""
+    base = {'Indywidualny': 'IND', 'Drużynowy 2-os.': 'DWOJKA',
+            'Drużynowy 3-os.': 'TROJKA', 'Drużynowy 4-os.': 'CZWORKA'}.get(ttype, 'IND')
+    if fmt.startswith('2 sety'):
+        return base
+    return base + {'Best of 3': '_Bo3', 'Best of 5': '_Bo5', 'Best of 7': '_Bo7'}.get(fmt, '')
+
+
+def _map_upload_to_cols(raw):
+    """Mapuje kolumny wgranego pliku na stałe klucze [p1, p2, tor, godz, mecz].
+    Dopasowanie po nazwach nagłówków (fuzzy); fallback: 2 pierwsze kolumny = nazwy."""
+    import pandas as pd
+    lower = {str(c).strip().lower(): c for c in raw.columns}
+    def find(*keys):
+        for k in keys:
+            for lc, orig in lower.items():
+                if k in lc:
+                    return orig
+        return None
+    s_p1 = find('zawodnik 1', 'drużyna 1', 'druzyna 1', 'gracz 1', 'z1', 'player 1', 'team 1')
+    s_p2 = find('zawodnik 2', 'drużyna 2', 'druzyna 2', 'gracz 2', 'z2', 'player 2', 'team 2')
+    s_tor = find('tor', 'stół', 'stol', 'table')
+    s_godz = find('godz', 'czas', 'time', 'hour')
+    s_mecz = find('mecz', 'nr', 'lp', 'match', '#')
+    if s_p1 is None and len(raw.columns) >= 1: s_p1 = raw.columns[0]
+    if s_p2 is None and len(raw.columns) >= 2: s_p2 = raw.columns[1]
+    col = lambda s: raw[s] if s is not None else ''
+    # STAŁE klucze kolumn (p1/p2/…) — etykiety wyświetlane ustala column_config.
+    # Dzięki temu dane NIE gubią się przy zmianie typu turnieju (Zawodnik↔Drużyna).
+    out = pd.DataFrame({'p1': col(s_p1), 'p2': col(s_p2),
+                        'tor': col(s_tor), 'godz': col(s_godz), 'mecz': col(s_mecz)})
+    return out.fillna('').astype(str)
+
+
+def _render_manual_generator(tournament_type, tournament_name, tournament_date):
+    """Samodzielny generator z własnej listy meczów (upload lub ręczna tabela).
+    Renderuje się zamiast ścieżki Google Sheets (wołający robi st.stop())."""
+    import pandas as pd
+    is_ind = tournament_type == 'Indywidualny'
+    side = 'Zawodnik' if is_ind else 'Drużyna'   # etykieta zależna od typu turnieju
+    KEYS = ['p1', 'p2', 'tor', 'godz', 'mecz']   # STAŁE klucze (dane przeżywają zmianę typu)
+
+    st.caption(f"Wygeneruj protokoły z własnej listy meczów — bez arkusza PFM. Minimum to "
+               f"dwie kolumny z nazwami ({side} 1 / {side} 2); Tor, Godzina i Mecz # są opcjonalne.")
+
+    if is_ind or tournament_type == 'Drużynowy 2-os.':
+        fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5', 'Best of 7']
+    else:
+        fmt_opts = ['2 sety (grupowa)', 'Best of 3', 'Best of 5']
+    manual_format = st.selectbox('Format protokołu', fmt_opts, key='manual_fmt',
+        help='„2 sety” = protokół grupowy; „Best of N” = protokół pucharowy.')
+
+    up = st.file_uploader('Wgraj Excel/CSV z listą meczów (opcjonalnie)',
+                          type=['xlsx', 'xls', 'csv'], key='manual_upload')
+    if 'manual_df' not in st.session_state:
+        st.session_state['manual_df'] = pd.DataFrame([{k: '' for k in KEYS} for _ in range(6)])
+    if up is not None and st.session_state.get('manual_upload_name') != up.name:
+        try:
+            raw = (pd.read_csv(up, dtype=str) if up.name.lower().endswith('.csv')
+                   else pd.read_excel(up, dtype=str)).fillna('')
+            st.session_state['manual_df'] = _map_upload_to_cols(raw)
+            st.session_state['manual_upload_name'] = up.name
+            _nw = len(st.session_state['manual_df'])
+            st.success(f'Wczytano {_nw} {generate_docx.pluralize(_nw, "wiersz", "wiersze", "wierszy")} '
+                       '— sprawdź i popraw poniżej.')
+        except Exception as e:
+            st.error(f'Nie udało się wczytać pliku: {e}')
+
+    st.caption('Edytuj listę (dodawaj/usuwaj wiersze przyciskami tabeli). Puste wiersze pomijamy.')
+    # Etykiety kolumn przez column_config — klucze danych stałe, więc zmiana typu
+    # (Zawodnik↔Drużyna) NIE gubi wpisanych/wgranych danych.
+    _colcfg = {
+        'p1': st.column_config.TextColumn(f'{side} 1'),
+        'p2': st.column_config.TextColumn(f'{side} 2'),
+        'tor': st.column_config.TextColumn('Tor'),
+        'godz': st.column_config.TextColumn('Godzina'),
+        'mecz': st.column_config.TextColumn('Mecz #'),
+    }
+    edited = st.data_editor(st.session_state['manual_df'], num_rows='dynamic',
+                            use_container_width=True, key='manual_editor',
+                            column_config=_colcfg)
+
+    cc = st.columns(2)
+    with cc[0]:
+        st.caption("Wygląd protokołu")
+        m_logo = st.checkbox('Logo PFM', value=True, key='manual_logo')
+        m_hdr = st.checkbox('Nazwa i data w prawym górnym rogu', value=True, key='manual_hdr')
+    with cc[1]:
+        st.caption("Plik do pobrania")
+        m_pdf = st.checkbox('PDF (.pdf)', value=True, key='manual_pdf')
+        m_docx = st.checkbox('Word (.docx)', value=False, key='manual_docx')
+
+    if st.button('Generuj protokoły z listy', type='primary', key='manual_gen',
+                 use_container_width=True):
+        matches = []
+        for _, row in edited.iterrows():
+            z1 = str(row.get('p1', '') or '').strip()
+            z2 = str(row.get('p2', '') or '').strip()
+            if not z1 or not z2:
+                continue
+            matches.append({'z1': z1, 'z2': z2, 'grupa': '',
+                            'tor': str(row.get('tor', '') or '').strip(),
+                            'godz': str(row.get('godz', '') or '').strip(),
+                            'mecz': str(row.get('mecz', '') or '').strip()})
+        if not matches:
+            st.error(f'Brak kompletnych meczów — wypełnij {side} 1 i {side} 2 w co najmniej jednym wierszu.')
+            return
+        tt = _manual_template_type(tournament_type, manual_format)
+        is_grp = manual_format.startswith('2 sety')
+        label = (tournament_name or '').strip() or 'Mecze'
+        _np = len(matches)
+        _pw = generate_docx.pluralize(_np, 'protokół', 'protokoły', 'protokołów')
+        try:
+            with st.spinner(f'Generuję {_np} {_pw}…'):
+                docx = generate_docx.build_document(
+                    '', '', [(label, matches)], logos=None,
+                    tournament_name=((tournament_name or '').strip() if m_hdr else ''),
+                    tournament_date=(tournament_date if m_hdr else ''),
+                    tournament_phase_text=(('Faza grupowa' if is_grp else manual_format) if m_hdr else ''),
+                    include_qr=False, include_pfm_logo=m_logo,
+                    hide_grupa_mecz=(not is_grp),
+                    phase_label=(manual_format if not is_grp else None),
+                    template_type=tt, skip_placeholders=False)
+        except Exception as e:
+            st.error(f'Błąd generowania: {e}')
+            return
+        safe = re.sub(r'[^\w\s-]', '', label).strip().replace(' ', '_') or 'protokoly'
+        st.success(f'Gotowe — {_np} {_pw}.')
+        if m_docx:
+            st.download_button('⬇ Pobierz .docx', data=docx, file_name=f'{safe}.docx', key='manual_dl_docx',
+                mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        if m_pdf:
+            pdf, err = docx_to_pdf(docx, safe, est_pages=len(matches))
+            if pdf:
+                st.download_button('⬇ Pobierz .pdf', data=pdf, file_name=f'{safe}.pdf',
+                                   mime='application/pdf', key='manual_dl_pdf')
+            else:
+                st.warning(f'PDF się nie udał ({err}). Pobierz wersję .docx.')
 
 
 @st.cache_data(show_spinner=False)
@@ -89,20 +338,21 @@ def _load_pfm_assets():
 pfm_data_url, pfm_aspect = _load_pfm_assets()
 
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
-  <img src="{pfm_data_url}" style="height:64px; width:auto; flex-shrink:0;"/>
+<div class="pfm-brandbar" style="display:flex; align-items:center; gap:18px; padding-bottom:14px;
+            border-bottom:2px solid #D81F26; margin-bottom:18px;">
+  <img class="pfm-brandbar-logo" src="{pfm_data_url}" style="height:58px; width:auto; flex-shrink:0;"/>
   <div>
-    <h1 style="margin:0; padding:0; font-size:2.0rem; line-height:1.2;">
+    <div class="pfm-brandbar-title" style="font-size:1.7rem; font-weight:700; line-height:1.15;
+                letter-spacing:-0.02em; color:#16181D;">
       Generator protokołów meczowych Mölkky
-    </h1>
-    <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
-      Wygeneruj protokoły meczowe z arkusza Google Sheets.
-    </p>
+    </div>
+    <div class="pfm-brandbar-sub" style="margin-top:3px; color:#6b7280; font-size:0.92rem;">
+      Protokoły meczowe z arkusza Google Sheets · Polska Federacja Mölkky
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-st.divider()
 
 
 def extract_id(url):
@@ -308,13 +558,17 @@ def compute_default_positions(active_keys, logos_aspect=None,
 
 
 # ════════════════════════════════════════════════════════════════════════
-col_form, col_preview = st.columns([3, 2])
+# Layout jednokolumnowy. Wcześniej 2 kolumny [3,2] robiły WIELKĄ pustą przerwę:
+# lewa (formularz) bywa krótsza niż prawy podgląd → następna sekcja czekała na
+# wyższą kolumnę. Teraz pełna szerokość, a podgląd → opcjonalny expander niżej
+# (większość userów wrzuca grafiki i generuje, nie dostraja pozycji ręcznie).
+col_form = st.container()
 # ════════════════════════════════════════════════════════════════════════
 
 with col_form:
 
     # ─── 1. Turniej ──────────────────────────────────────────────────────
-    st.header("1. Turniej")
+    _section(1, "Turniej", "Nazwa, data i rodzaj rozgrywek")
     
     # ─── Wiersz 1: Nazwa | Data | Rodzaj ──────────────────────────────
     cols_t1 = st.columns([5, 3, 4])
@@ -337,7 +591,8 @@ with col_form:
             list(rodzaj_options.keys()),
             format_func=lambda k: rodzaj_options[k],
             index=0,
-            help="bez ikony = w pełni działa, 🟡 = w testach, 🔴 = niedostępne"
+            help="Typ turnieju — wybiera szablon protokołu: indywidualny lub "
+                 "drużynowy (2, 3 lub 4-osobowy). Wszystkie typy są dostępne."
         )
     
     is_trojka_pre = tournament_type == "Drużynowy 3-os."
@@ -346,7 +601,20 @@ with col_form:
     is_ok_pre = is_trojka_pre or is_individual_pre or is_czworka_pre   # zweryfikowane typy
 
     # ─── 2. Link do arkusza ─────────────────────────────────────────────
-    st.header("2. Link do arkusza Google Sheets")
+    _section(2, "Dane meczów", "Z arkusza Google Sheets albo z własnej listy")
+    # Selektor źródła. Domyślnie „Arkusz Google Sheets" → cała dotychczasowa
+    # ścieżka bez zmian. „Własna lista" → izolowany generator + st.stop()
+    # (reszta flow się nie renderuje). Zero ryzyka dla ścieżki arkusza.
+    data_source = st.radio(
+        "Skąd wziąć dane?",
+        ["Arkusz Google Sheets", "Własna lista meczów (Excel / ręcznie)"],
+        horizontal=True, key="data_source",
+        help="Nie masz arkusza PFM? Wybierz „Własna lista” — wgraj Excel/CSV lub "
+             "wpisz mecze ręcznie (minimum: dwie kolumny z nazwami).")
+    if data_source.startswith("Własna"):
+        _render_manual_generator(tournament_type, tournament_name, tournament_date)
+        st.stop()
+
     cols_link = st.columns([4, 1])
     with cols_link[0]:
         sheets_url = st.text_input("URL arkusza",
@@ -355,7 +623,7 @@ with col_form:
             label_visibility="collapsed",
             key='sheets_url_input')
     with cols_link[1]:
-        check_clicked = st.button("🔍 Wczytaj zakładki", use_container_width=True)
+        check_clicked = st.button("Wczytaj zakładki", use_container_width=True)
     
     if check_clicked:
         sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
@@ -364,7 +632,7 @@ with col_form:
         else:
             # Progress bar z etapami: metadane → grupy → drabinka → fazy.
             # Bez tego long-running fetch wyglądał jak zacięty spinner.
-            progress_bar = st.progress(0, text="🔌 Łączę z arkuszem…")
+            progress_bar = st.progress(0, text="Łączę z arkuszem…")
             def _on_progress(pct, msg):
                 try:
                     progress_bar.progress(min(100, max(0, int(pct))), text=msg)
@@ -380,10 +648,34 @@ with col_form:
             except Exception as e:
                 st.warning(f"Wykrywanie faz drabinki nie powiodło się: {e}")
                 st.session_state.pop('detected', None)
-                info = [f"❌ Błąd: {e}"]
+                info = [f"Błąd: {e}"]
             finally:
                 progress_bar.empty()
-            st.code("\n".join(info))
+            # Zwięzłe potwierdzenie zamiast surowego dumpu (`st.code`) — pełne
+            # zestawienie faz jest w expanderze „Lista wszystkich faz" poniżej
+            # (user: te same mecze były wypisane 2 razy).
+            _d = st.session_state.get('detected')
+            if _d:
+                _ng = _d.get('group_count', 0)
+                _nf = len(_d.get('glowna', [])) + len(_d.get('b', []))
+                st.success(
+                    f"Wczytano: {_ng} {generate_docx.pluralize(_ng,'grupa','grupy','grup')} "
+                    f"fazy grupowej · {_nf} {generate_docx.pluralize(_nf,'faza','fazy','faz')} "
+                    "drabinki. Szczegóły w sekcji „Lista wszystkich faz” poniżej.")
+                # Diagnostyka gdy 0 grup mimo że arkusz ma zakładki Gr. * — pomaga
+                # ustalić przyczynę bez dostępu do live (gid_map vs fetch vs parse).
+                if _ng == 0:
+                    with st.expander("Diagnostyka — czemu 0 grup? (rozwiń jeśli powinny być)"):
+                        _tabs = _d.get('_gid_map_tabs', [])
+                        st.caption(f"Zakładki wykryte w arkuszu (gid_map: {len(_tabs)}):")
+                        st.code(", ".join(_tabs) if _tabs else "(gid_map puste — skan po nazwie)")
+                        st.caption("Próby wczytania grup (Gr. A…):")
+                        _gd = _d.get('_group_debug', [])
+                        st.code("\n".join(_gd) if _gd else "(brak prób — candidate_tabs puste)")
+                        _gs = _d.get('_group_sample', [])
+                        if _gs:
+                            st.caption("Surowe wiersze pierwszej wczytanej zakładki grupy (live):")
+                            st.code("\n".join(_gs))
     
     # Pokaż info o aktywnym cache (jeśli URL match)
     if 'detected' in st.session_state and sheets_url.strip():
@@ -396,14 +688,14 @@ with col_form:
             grp_w = generate_docx.pluralize(n_grp, 'grupa', 'grupy', 'grup')
             faza_g = generate_docx.pluralize(n_g, 'faza', 'fazy', 'faz')
             faza_b = generate_docx.pluralize(n_b, 'faza', 'fazy', 'faz')
-            st.caption(f"📋 **Arkusz wczytany** · faza grupowa: {n_grp} {grp_w} · "
+            st.caption(f"**Arkusz wczytany** · faza grupowa: {n_grp} {grp_w} · "
                        f"drabinka główna: {n_g} {faza_g} · drabinka B: {n_b} {faza_b} · "
                        "**fazy w sekcji 1. zostały ograniczone do tych z arkusza** "
                        "(zmień URL i kliknij Wczytaj ponownie żeby odświeżyć)")
             
             # ── PUNKT C: Permanent summary wszystkich faz z arkusza, grupowanie po godzinie
             # Lista co user dostanie jako protokoły, BEZ konieczności klikania Sprawdź zakładki.
-            with st.expander("📊 Lista wszystkich faz w arkuszu (grupowanie po godzinie)", expanded=False):
+            with st.expander("Lista wszystkich faz w arkuszu (grupowanie po godzinie)", expanded=False):
                 # Zbierz wszystkie fazy (głowna + B) z ich godzinami i liczbą meczów
                 all_phase_entries = []  # list of (time, label, n_matches, drabinka_type)
                 if n_grp > 0:
@@ -441,10 +733,11 @@ with col_form:
                 for t, label, n_m, dr in all_phase_entries:
                     by_time[t].append((label, n_m, dr))
                 
-                # Sortuj godziny (— na końcu jako grupowa bez fixed time)
+                # Faza grupowa („—", bez stałej godziny) NAJPIERW, potem drabinki
+                # chronologicznie (user: grupowa to pierwszy etap turnieju).
                 def _time_sort_key(t):
-                    if t == "—": return (1, "")
-                    return (0, t)
+                    if t == "—": return (0, "")
+                    return (1, t)
                 
                 sorted_times = sorted(by_time.keys(), key=_time_sort_key)
                 
@@ -474,7 +767,7 @@ with col_form:
     # SHEET-DRIVEN: po wczytaniu arkusza (sekcja 2) dropdowny pokazują tylko
     # fazy obecne w arkuszu. Godzina (góra) jest GŁÓWNYM filtrem — wybór
     # godziny zawęża Drabinkę i Fazę do tych granych o tej porze.
-    st.header("3. Wybór fazy")
+    _section(3, "Wybór fazy", "Drabinka, faza i format setów")
     
     # Cache (filled by Wczytaj button w sekcji 2)
     detected = None
@@ -484,7 +777,7 @@ with col_form:
             detected = _cached
     
     if detected is None:
-        st.caption("💡 Wklej URL w sekcji 2 i kliknij **Wczytaj zakładki** żeby zobaczyć "
+        st.caption("Wklej URL w sekcji 2 i kliknij **Wczytaj zakładki** żeby zobaczyć "
                    "tylko fazy obecne w arkuszu. Bez wczytania — pokazujemy pełną listę.")
     
     # ── Godzina filter (góra, full width) — pierwszorzędny filtr ──
@@ -499,7 +792,7 @@ with col_form:
             label = f"{t} — {', '.join(phases_at_t)}" if phases_at_t else t
             time_opts.append(label)
             time_label_to_value[label] = t
-        picked = st.selectbox("🕐 Godzina startu",
+        picked = st.selectbox("Godzina startu",
                               time_opts, index=0, key="godzina_top",
                               help=("Wybierz godzinę → Drabinka i Faza poniżej "
                                     "zostaną zawężone do faz granych o tej porze. "
@@ -576,7 +869,7 @@ with col_form:
             multi_opts[ui_key] = f"{label}  ·  {n_m} {generate_docx.pluralize(n_m,'mecz','mecze','meczów')}"
         
         if multi_opts:
-            st.markdown(f"##### 🎯 Fazy do wygenerowania (godzina **{time_filter}**)")
+            st.markdown(f"##### Fazy do wygenerowania (godzina **{time_filter}**)")
             selected_phase_keys_multi = st.multiselect(
                 "Fazy",
                 options=list(multi_opts.keys()),
@@ -589,7 +882,7 @@ with col_form:
                       "inny format (Bo3) niż główna — powstaną osobne pliki.")
             )
             if not selected_phase_keys_multi:
-                st.warning("⚠️ Odznaczyłeś wszystkie fazy — nic do wygenerowania.")
+                st.warning("Odznaczyłeś wszystkie fazy — nic do wygenerowania.")
             # Checkbox: drabinka B w skróconym Best of 3. Pokazujemy tylko gdy
             # w zaznaczeniu jest faza B i główny format ≠ Bo3 (inaczej bez sensu).
             _has_b = any(_is_b_phase(k) for k in (selected_phase_keys_multi or []))
@@ -624,7 +917,7 @@ with col_form:
                 drabinka_options['Drabinka B'] = drabinka_options_full['Drabinka B']
             if not drabinka_options:
                 if time_filter:
-                    st.warning(f"⚠️ Brak faz o godzinie **{time_filter}** w arkuszu.")
+                    st.warning(f"Brak faz o godzinie **{time_filter}** w arkuszu.")
                 drabinka_options = drabinka_options_full
         else:
             drabinka_options = drabinka_options_full
@@ -810,9 +1103,38 @@ with col_form:
                      "Best of 7 dostępny dla turnieju indywidualnego i 2-os. (finały)."
             )
 
+    # ── Info o formatach w trybie multi-phase (godzina z wieloma drabinkami) ──
+    # User widzi CZARNO NA BIAŁYM co się wydrukuje w jakim formacie, zamiast
+    # odkrywać to po fakcie w nazwach plików:
+    # • drabinka B (Miejsca X-Y, mecze o miejsca >3) → skrócony Bo3 (checkbox wyżej),
+    # • mecze podium (o 1./2./3. miejsce) → ZAWSZE format główny, jak finał.
+    if selected_phase_keys_multi and sets_format != "Best of 3":
+        _b_sel = [k for k in selected_phase_keys_multi if _is_b_phase(k)]
+        _podium_sel = [k for k in selected_phase_keys_multi
+                       if re.match(r'Mecz o [123]\. miejsce', k)]
+        _fmt_notes = []
+        if _b_sel:
+            _b_list = ", ".join(_b_sel)
+            if drabinka_b_bo3:
+                _fmt_notes.append(
+                    f"**Drabinka B** ({_b_list}) drukuje się w **Best of 3** "
+                    f"(skrót — checkbox wyżej), główna w **{sets_format}** → powstaną "
+                    f"**osobne pliki** per format.")
+            else:
+                _fmt_notes.append(
+                    f"**Drabinka B** ({_b_list}) drukuje się w **{sets_format}** "
+                    f"(skrót Bo3 odznaczony) — jeden wspólny format.")
+        if _podium_sel:
+            _p_list = ", ".join(_podium_sel)
+            _fmt_notes.append(
+                f"**{_p_list}** drukuje się w formacie głównym (**{sets_format}**) — "
+                f"jak finał, meczów o podium nie skracamy.")
+        if _fmt_notes:
+            st.info("Formaty w tym wydruku:\n\n" + "\n\n".join(f"• {n}" for n in _fmt_notes))
+
     # Walidacja - obecnie sprawdzone i zweryfikowane:
-    # 1. Indywidualny + Grupowa + 2 sety  → ✅
-    # 2. Drużynowy 3-os. + Grupowa + 2 sety  → ✅
+    # 1. Indywidualny + Grupowa + 2 sety  → 
+    # 2. Drużynowy 3-os. + Grupowa + 2 sety  → 
     # Wszystko inne — eksperymentalne lub w trakcie przygotowywania.
     is_individual = tournament_type == "Indywidualny"
     is_trojka = tournament_type == "Drużynowy 3-os."
@@ -863,20 +1185,28 @@ with col_form:
             phase_label_short = "Finał"
     
     if not is_supported_type:
-        st.warning(f"⚠️ **{tournament_type} — faza pucharowa** nie jest jeszcze obsługiwana "
+        st.warning(f"**{tournament_type} — faza pucharowa** nie jest jeszcze obsługiwana "
                    "(brak szablonu Bo3/Bo5 dla 4-osobowych). "
                    "Dostępne: Indywidualny (wszystkie fazy), Drużynowy 3-os. (wszystkie fazy), "
                    "Drużynowy 4-os. (tylko grupowa).")
     
     if is_pucharowa and is_supported_type:
-        st.info(f"ℹ️ Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
+        st.info(f"Wczytam mecze z fazy **{tournament_phase}** z zakładki **Drabinka**.")
+
+# ─── Wygląd protokołu (sekcja w głównym flow) ───────────────────────────
+# Config grafik w głównym, jednokolumnowym flow. Po feedbacku usera: sidebar
+# miał dylemat „otwarty zawala ekran / zamknięty niewidoczny", a upload grafik
+# to częsta ścieżka → ma być widoczny w liniowym flow. `st.container()` zamiast
+# `st.sidebar` → body BEZ re-indentu, pełna szerokość. Wykonuje się PRZED
+# expanderem podglądu, więc zmienne (image_positions, elements_active…) gotowe.
+with st.container():
+    _section(4, "Wygląd protokołu", "Logo, kod QR i grafiki na protokole")
     # ─── 4. Domyślne elementy ───────────────────────────────────────────
     # Każda faza pucharowa NIE używa grafik (Bo3/Bo5 i 2 sety) — całe miejsce
     # potrzebne na rozszerzoną tabelę wyników. Tylko faza GRUPOWA ma grafiki.
     is_no_graphics = is_pucharowa
     if is_no_graphics:
-        st.header("4. Domyślne elementy")
-        st.info("ℹ️ **Faza pucharowa nie używa grafik** — "
+        st.info("**Faza pucharowa nie używa grafik** — "
                 "całe miejsce jest potrzebne na rozszerzoną tabelę wyników. "
                 "Ta sekcja oraz Grafiki sponsorów są pominięte przy generowaniu.")
         # Wyłącz wszystko poza nagłówkiem (ten i tak chcemy w prawym górnym rogu)
@@ -894,24 +1224,20 @@ with col_form:
         else:
             skip_placeholders = False
     else:
-        st.header("4. Domyślne elementy")
-        cols_dom = st.columns(2)
-        with cols_dom[0]:
-            include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
-            show_header_on_protocol = st.checkbox(
-                "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
-        with cols_dom[1]:
-            include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
-            if is_individual:
-                skip_placeholders = st.checkbox(
-                    "Ignoruj protokoły dla placeholderów (Gracz ##) w grupie "
-                    "oraz wolnych losów (bye) w drabince",
-                    value=True,
-                    help=("Pomija mecze, w których po dowolnej stronie jest 'Gracz N' "
-                          "(np. 'Gracz 44') lub 'bye' — tylko dla turnieju indywidualnego.")
-                )
-            else:
-                skip_placeholders = False
+        include_qr = st.checkbox("Kod QR (link do arkusza)", value=True)
+        show_header_on_protocol = st.checkbox(
+            "Nazwa, data i faza turnieju w prawym górnym rogu", value=True)
+        include_pfm_logo = st.checkbox("Logo Polskiej Federacji Mölkky", value=True)
+        if is_individual:
+            skip_placeholders = st.checkbox(
+                "Ignoruj protokoły dla placeholderów (Gracz ##) w grupie "
+                "oraz wolnych losów (bye) w drabince",
+                value=True,
+                help=("Pomija mecze, w których po dowolnej stronie jest 'Gracz N' "
+                      "(np. 'Gracz 44') lub 'bye' — tylko dla turnieju indywidualnego.")
+            )
+        else:
+            skip_placeholders = False
 
     # ─── Grafiki (expander wewnątrz "4. Domyślne elementy") ─────────────
     NUM_LOGOS = 4
@@ -942,29 +1268,28 @@ with col_form:
         
         with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
             st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
-            cols_log = st.columns(2)
             # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
-            # Korzystamy z prostego wrappera _CachedUpload.
+            # Korzystamy z prostego wrappera _CachedUpload. W sidebarze układamy
+            # uploadery w jednej kolumnie (wąsko — 2 kolumny by się ścisnęły).
             for i in range(NUM_LOGOS):
-                with cols_log[i % 2]:
-                    # Nonce per grafika — inkrementowany przy "Usuń" by zresetować file_uploader.
-                    _ln = st.session_state.get(f'logo_nonce_{i}', 0)
-                    f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
-                                         key=f"logo_{i}_{_ln}", label_visibility="visible")
-                    if f is not None:
-                        # Świeży upload — cache bajtów do session_state
-                        f.seek(0)
-                        raw_bytes = f.read()
-                        f.seek(0)
-                        st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
-                        logo_files.append(_CachedUpload(f.name, raw_bytes))
-                    else:
-                        # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
-                        # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
-                        # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
-                        # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
-                        st.session_state.pop(f'logo_bytes_{i}', None)
-                        logo_files.append(None)
+                # Nonce per grafika — inkrementowany przy "Usuń" by zresetować file_uploader.
+                _ln = st.session_state.get(f'logo_nonce_{i}', 0)
+                f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
+                                     key=f"logo_{i}_{_ln}", label_visibility="visible")
+                if f is not None:
+                    # Świeży upload — cache bajtów do session_state
+                    f.seek(0)
+                    raw_bytes = f.read()
+                    f.seek(0)
+                    st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                    logo_files.append(_CachedUpload(f.name, raw_bytes))
+                else:
+                    # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
+                    # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
+                    # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
+                    # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
+                    st.session_state.pop(f'logo_bytes_{i}', None)
+                    logo_files.append(None)
             
             # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
             logos_aspect = {}
@@ -1009,7 +1334,7 @@ with col_form:
             image_positions[key] = dict(default_pos[key])
         
         if elements_active:
-            st.caption("📍 **Pozycje grafik** możesz dostosować pod podglądem po prawej.")
+            st.caption("**Pozycje grafik** możesz dostosować pod podglądem po prawej.")
     
     # Po expanderze: dla bezpieczeństwa fallback gdyby któraś zmienna nie była ustawiona
     if 'logo_files' not in dir():
@@ -1050,10 +1375,12 @@ with col_form:
                     pass
 
 
-# ─── PODGLĄD HTML/CSS po prawej (przesunięty 5cm w dół) ───────────────
-with col_preview:
-    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
-    st.markdown("##### 📄 Podgląd")
+# ─── PODGLĄD HTML/CSS (opcjonalny expander) ──────────────────────────────
+# Expander tworzony TU (nie na górze), żeby renderował się PO sekcji „Wygląd
+# protokołu" w jednokolumnowym flow — inaczej slot zarezerwowałby się za wcześnie.
+with st.expander("Podgląd protokołu i pozycje grafik (opcjonalne)", expanded=False):
+    st.caption("Schematyczny podgląd. Pozycje grafik dostroisz suwakami poniżej "
+               "— dokładny wygląd zobaczysz w pobranym pliku.")
 
     SCALE = 16   # Większy podgląd dla lepszej czytelności (kolumna prawa 2/5 szerokości)
     PAGE_W_CM = 18.46
@@ -1184,7 +1511,7 @@ with col_preview:
         <div style="background:white; border:1px solid #ccc;
                     width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                     position:relative; font-family:Arial, sans-serif;
-                    box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+                    box-shadow:0 6px 24px rgba(0,0,0,0.14); border-radius:6px; margin:0 auto;">
           
           <div style="position:absolute; right:8px; top:6px;
                       font-size:9px; color:#666; font-style:italic;">
@@ -1343,7 +1670,7 @@ with col_preview:
     <div style="background:white; border:1px solid #ccc; 
                 width:{PAGE_W_PX}px; height:{PAGE_H_PX}px;
                 position:relative; font-family:Arial, sans-serif;
-                box-shadow:0 2px 8px rgba(0,0,0,0.1); margin:0 auto;">
+                box-shadow:0 6px 24px rgba(0,0,0,0.14); border-radius:6px; margin:0 auto;">
       
       <div style="position:absolute; right:8px; top:6px; 
                   font-size:9px; color:#666; font-style:italic;">
@@ -1461,8 +1788,15 @@ with col_preview:
       </div>
     </div>
     """
+    # Render w iframe (`st.components.v1.html`) — KONIECZNY: podgląd ma
+    # `position:absolute` w skalowanej karcie i `st.html` (inline) rozjeżdżał
+    # layout (karta uciekała w prawo i wystawała). Iframe izoluje i daje stałą
+    # ramkę. Karta sama się centruje (`margin:0 auto`); bez szarej podkładki —
+    # czysta wyśrodkowana kartka z cieniem wygląda schludniej niż pusty box.
+    # (Warning o deprecacji `st.components.v1.html` zaakceptowany — działa do
+    # 1.58; realna migracja wymaga przerobienia podglądu, osobne zadanie.)
     st.components.v1.html(html, height=PAGE_H_PX + 30, scrolling=False)
-    st.caption("📝 Schemat. Dokładny wygląd w pobranym pliku.")
+    st.caption("Schemat — dokładny wygląd w pobranym pliku.")
     
     # ─── Pozycje grafik ──────────────────────────────────────────────────
     # Sekcja edycji pozycji obrazów - bezpośrednio pod podglądem żeby
@@ -1470,7 +1804,7 @@ with col_preview:
     if elements_active:
         cols_pos = st.columns([3, 1])
         with cols_pos[0]:
-            st.markdown("**📍 Pozycje grafik**")
+            st.markdown("**Pozycje grafik**")
         with cols_pos[1]:
             if st.button("↻ Reset",
                          help="Przywróć automatyczne rozmieszczenie",
@@ -1504,7 +1838,7 @@ with col_preview:
         for key, label in elements_active:
             if key not in image_positions:
                 continue
-            with st.expander(f"📍 {label}", expanded=False):
+            with st.expander(f"{label}", expanded=False):
                 cols = st.columns(4)
                 pos = image_positions[key]
                 slider_key_base = f"{key}_{active_keys_signature}_{nonce}"
@@ -1546,7 +1880,7 @@ with col_preview:
         # Debug dla CZWORKA — pokazuje faktyczne pozycje używane do docx.
         # Jak layout w docx kuleje a tu wszystko wygląda OK → problem nie jest w sliderach.
         if is_czworka and elements_active:
-            with st.expander("🔧 Debug pozycji (dla diagnostyki)", expanded=False):
+            with st.expander("Debug pozycji (dla diagnostyki)", expanded=False):
                 _table_w = 18.46
                 rows = [f"TABLE_RIGHT = {_table_w} cm (lewa krawędź = 0)"]
                 for k, _ in elements_active:
@@ -1559,51 +1893,7 @@ with col_preview:
                 st.code("\n".join(rows))
 
 
-# ─── Helper: konwersja docx → pdf ───────────────────────────────────────
-def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
-    """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
-    co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
-    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
-    import time
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            docx_path = os.path.join(tmpdir, f"{name}.docx")
-            with open(docx_path, 'wb') as f:
-                f.write(docx_bytes)
-            pdf_filter = ('pdf:writer_pdf_Export:'
-                          '{"SelectPdfVersion":{"type":"long","value":"0"},'
-                          '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
-                          '"ReduceImageResolution":{"type":"boolean","value":"true"},'
-                          '"MaxImageResolution":{"type":"long","value":"150"},'
-                          '"UseLosslessCompression":{"type":"boolean","value":"false"},'
-                          '"Quality":{"type":"long","value":"90"}}')
-            est_total = max(6.0, 5.0 + 0.6 * est_pages)
-            proc = subprocess.Popen(
-                ['libreoffice', '--headless', '--convert-to', pdf_filter,
-                 '--outdir', tmpdir, docx_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            start = time.time()
-            while proc.poll() is None:
-                elapsed = time.time() - start
-                if elapsed > 300:  # timeout
-                    proc.kill()
-                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
-                if progress_cb:
-                    try: progress_cb(elapsed, est_total)
-                    except Exception: pass
-                time.sleep(0.4)
-            stdout, stderr = proc.communicate()
-            pdf_path = os.path.join(tmpdir, f"{name}.pdf")
-            if os.path.exists(pdf_path):
-                with open(pdf_path, 'rb') as f:
-                    return f.read(), None
-            err = stderr.decode('utf-8', errors='replace') if stderr else 'unknown'
-            return None, err[:500]
-    except FileNotFoundError:
-        return None, "LibreOffice nie jest zainstalowany na serwerze."
-    except Exception as e:
-        return None, str(e)
+# (docx_to_pdf przeniesione wyżej — używa go też tryb „własna lista meczów")
 
 
 def build_image_args():
@@ -1626,13 +1916,14 @@ def build_image_args():
 
 # ─── Generuj ────────────────────────────────────────────────────────────
 st.divider()
-st.header("5. Generuj")
+_section(5, "Generuj protokoły")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
-    fmt_docx = st.checkbox("📄 Word (.docx)", value=True)
+    fmt_pdf = st.checkbox("PDF (.pdf)", value=True)
 with cols_fmt[1]:
-    fmt_pdf = st.checkbox("📕 PDF (.pdf)", value=True)
+    # Word domyślnie ODznaczony (user: standardowy wydruk to sam PDF).
+    fmt_docx = st.checkbox("Word (.docx)", value=False)
 
 # Sortowanie protokołów — tylko dla fazy grupowej, gdzie jest sens
 # (puchar / multi-phase generuje single phase z natury sekwencyjnie).
@@ -1642,9 +1933,9 @@ if tournament_phase == "Grupowa":
     cols_sort = st.columns([2, 5])
     with cols_sort[0]:
         sort_options = {
-            "tor":    "🎯 Po torach (default)",
-            "godz":   "🕐 Po godzinie",
-            "grupa":  "📋 Po grupach",
+            "tor":    "Po torach (default)",
+            "godz":   "Po godzinie",
+            "grupa":  "Po grupach",
         }
         sort_mode = st.selectbox(
             "Sortowanie protokołów",
@@ -1665,7 +1956,13 @@ if tournament_phase == "Grupowa":
 sel_groups = []
 sel_players = []
 if tournament_phase == "Grupowa":
-    with st.expander("🎯 Wybierz konkretne protokoły do wydruku (opcjonalnie)"):
+    # Etykiety zależne od typu turnieju: drużynowy (2/3/4-os.) operuje DRUŻYNAMI,
+    # indywidualny ZAWODNIKAMI (user: w turniejach drużynowych ma być „drużyny").
+    _sel_is_team = not is_individual
+    _sel_ent_label = "Drużyny" if _sel_is_team else "Zawodnicy"
+    _sel_ent_gen = ("drużyna", "drużyny", "drużyn") if _sel_is_team else ("zawodnik", "zawodników", "zawodników")
+    _sel_ent_word = "drużyn" if _sel_is_team else "zawodników"
+    with st.expander("Wybierz konkretne protokoły do wydruku (opcjonalnie)"):
         st.caption("Przydatne gdy chcesz przedrukować pojedyncze protokoły "
                    "(np. po przesunięciu zawodnika między grupami). "
                    "Puste pola = bez filtra (wszystkie protokoły).")
@@ -1676,7 +1973,7 @@ if tournament_phase == "Grupowa":
 
         c1, c2 = st.columns([1, 3])
         with c1:
-            _load_btn = st.button("📋 Wczytaj listę",
+            _load_btn = st.button("Wczytaj listę",
                                   disabled=not _sel_sid,
                                   help="Pobiera grupy i zawodników z arkusza, "
                                        "żeby pokazać je niżej w listach wyboru.",
@@ -1684,14 +1981,14 @@ if tournament_phase == "Grupowa":
         with c2:
             if _cache:
                 st.caption(f"✓ Wczytano {len(_cache['groups'])} grup, "
-                           f"{len(_cache['players'])} zawodników.")
+                           f"{len(_cache['players'])} {_sel_ent_word}.")
             elif _sel_sid:
                 st.caption("Kliknij **Wczytaj listę** żeby zobaczyć grupy i nazwiska z arkusza.")
             else:
                 st.caption("Najpierw wklej URL arkusza w sekcji 2.")
 
         if _load_btn and _sel_sid:
-            with st.spinner("Pobieram grupy i zawodników…"):
+            with st.spinner(f"Pobieram grupy i {_sel_ent_word}…"):
                 try:
                     _sd = generate_docx.fetch_all_group_sheets(_sel_sid)
                     _groups = []
@@ -1721,7 +2018,7 @@ if tournament_phase == "Grupowa":
                 help="Puste = wszystkie grupy. Wybierz konkretne litery aby przedrukować tylko ich protokoły.",
             )
             sel_players = st.multiselect(
-                "Zawodnicy (filtruj mecze z udziałem wybranych)",
+                f"{_sel_ent_label} (filtruj mecze z udziałem wybranych)",
                 _cache['players'],
                 default=[],
                 key=f'sel_players_{_sel_sid}',
@@ -1731,15 +2028,86 @@ if tournament_phase == "Grupowa":
             if sel_groups or sel_players:
                 _parts = []
                 if sel_groups: _parts.append(f"{len(sel_groups)} {generate_docx.pluralize(len(sel_groups), 'grupa','grupy','grup')}")
-                if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), 'zawodnik','zawodników','zawodników')}")
-                st.info(f"🎯 Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
+                if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), *_sel_ent_gen)}")
+                st.info(f"Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
+
+# ── Selektywny wydruk meczów drabinki (puchar, pojedyncza faza) ─────────
+# Use case: część par już gotowa (np. wcześniej rozegrana 1/8 utworzyła parę
+# 1/4) — wydrukuj tylko wybrane mecze, bez czekania na resztę i bez dublowania
+# przy kolejnym wydruku. Prosta wersja: ręczny wybór, BEZ pamiętania co już
+# wydrukowane (user sam decyduje za każdym razem). Tylko single-phase (multi-
+# phase po godzinie generuje wiele faz naraz — inny przepływ).
+_INCOMPLETE_MARKERS = {'#n/a', 'n/a', 'tbd', '?', 'bye', '-', '—', 'wolny',
+                       'puste', 'tba', 'nieznany'}
+def _match_is_ready(m):
+    z1 = (m.get('z1') or '').strip(); z2 = (m.get('z2') or '').strip()
+    return (z1 and z2 and len(z1) >= 3 and len(z2) >= 3 and
+            z1.lower() not in _INCOMPLETE_MARKERS and z2.lower() not in _INCOMPLETE_MARKERS)
+
+sel_drabinka_matches = None  # None = brak filtra (wszystkie gotowe mecze)
+if is_pucharowa and selected_phase_keys_multi is None:
+    with st.expander("Wybierz konkretne mecze do wydruku (opcjonalnie)"):
+        st.caption("Przydatne gdy część par już gotowa (np. wcześniej rozegrana "
+                   "1/8 utworzyła parę 1/4) — wydrukuj tylko wybrane mecze, bez "
+                   "czekania na resztę fazy. Puste = wszystkie gotowe mecze.")
+        _pm_sid = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+        _pm_key = f'pm_cache_{_pm_sid}_{tournament_phase}' if _pm_sid else None
+        _pm_cache = st.session_state.get(_pm_key) if _pm_key else None
+
+        _pc1, _pc2 = st.columns([1, 3])
+        with _pc1:
+            _pm_load = st.button("Wczytaj mecze", disabled=not _pm_sid,
+                                 use_container_width=True, key='pm_load_btn',
+                                 help="Pobiera gotowe pary tej fazy z zakładki Drabinka.")
+        with _pc2:
+            if _pm_cache is not None:
+                st.caption(f"✓ Wczytano {len(_pm_cache)} gotowych meczów fazy.")
+            elif _pm_sid:
+                st.caption("Kliknij **Wczytaj mecze** żeby zobaczyć gotowe pary fazy.")
+            else:
+                st.caption("Najpierw wklej URL arkusza w sekcji 2.")
+
+        if _pm_load and _pm_sid:
+            with st.spinner("Pobieram mecze fazy z zakładki Drabinka…"):
+                try:
+                    _pn, _ms = generate_docx.fetch_drabinka_phase(_pm_sid, tournament_phase)
+                    st.session_state[_pm_key] = [m for m in (_ms or []) if _match_is_ready(m)]
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się pobrać meczów: {e}")
+
+        if _pm_cache:
+            _pm_labels = [
+                f"{i+1}. Tor {m.get('tor','?')} · {m.get('godz','—')} · "
+                f"{m.get('z1','?')} — {m.get('z2','?')}"
+                for i, m in enumerate(_pm_cache)
+            ]
+            _pm_picked = st.multiselect(
+                "Mecze do wydruku", _pm_labels, default=[],
+                key=f'pm_sel_{_pm_sid}_{tournament_phase}',
+                help="Puste = wszystkie gotowe mecze. Wybór = drukujemy tylko zaznaczone.")
+            if _pm_picked:
+                _pm_idx = sorted({int(l.split('.', 1)[0]) - 1 for l in _pm_picked})
+                sel_drabinka_matches = [_pm_cache[i] for i in _pm_idx]
+                st.info(f"Filtr aktywny: {len(sel_drabinka_matches)} z {len(_pm_cache)} "
+                        f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}. Generuj poniżej.")
+        elif _pm_cache is not None:
+            st.caption("Brak gotowych (kompletnych) par w tej fazie — wszystkie czekają na zawodników.")
 
 cols_main = st.columns([1, 2, 1])
 with cols_main[1]:
-    gen_clicked = st.button("🚀 Generuj protokoły z arkusza",
+    gen_clicked = st.button("Generuj protokoły z arkusza",
                             type="primary", use_container_width=True)
 
-with st.expander("➕ Pobierz pusty formularz"):
+# ─── Dodatkowe wydruki (opcjonalne) ──────────────────────────────────────
+# Drugorzędne akcje pod głównym CTA, zgrupowane pod wspólnym nagłówkiem żeby
+# nie wyglądały jak luźno doczepione expandery (feedback usera o umiejscowieniu).
+st.markdown("")
+st.markdown("###### Dodatkowe wydruki")
+st.caption("Opcjonalne — pusty formularz do ręcznego wypełnienia oraz rozpiski "
+           "meczowe do wycięcia i rozdania przed turniejem.")
+
+with st.expander("Pobierz pusty formularz"):
     st.caption("Pusty formularz przyda się gdy chcesz wydrukować protokół do ręcznego wypełnienia "
                "(bez pobierania danych z arkusza). Wybierz typ + format setów.")
     
@@ -1783,7 +2151,7 @@ with st.expander("➕ Pobierz pusty formularz"):
                  "Jeśli nie — totalnie czysty (do ręcznego wpisania)."
         )
     
-    blank_clicked = st.button("📝 Pobierz pusty formularz",
+    blank_clicked = st.button("Pobierz pusty formularz",
                               use_container_width=False, key="blank_btn")
 
 # ─── Rozpiski meczowe per zawodnik (IND) ────────────────────────────────
@@ -1800,7 +2168,7 @@ rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
 rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'
 rozp_side = 'drużyna' if rozp_is_team else 'gracz'
 if is_individual or is_trojka or is_czworka or is_dwojka:
-    with st.expander(f"🃏 Rozpiski meczowe dla {rozp_entity} (do druku i rozdania)"):
+    with st.expander(f"Rozpiski meczowe dla {rozp_entity} (do druku i rozdania)"):
         st.caption(
             f"Generuje **karty A4 z rozpiskami meczowymi** każdej "
             f"{'drużyny' if rozp_is_team else 'osoby'} "
@@ -1815,7 +2183,7 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
                                 key="rozp_fmt",
                                 help="PDF do druku, DOCX do dalszej edycji.")
         with cols_rozp[1]:
-            rozp_clicked = st.button(f"🃏 Generuj rozpiski {rozp_entity}",
+            rozp_clicked = st.button(f"Generuj rozpiski {rozp_entity}",
                                      use_container_width=True, key="rozp_btn",
                                      type="secondary")
 
@@ -1881,7 +2249,7 @@ if gen_clicked:
         total_matches = 0
 
         for idx, phase_key in enumerate(selected_phase_keys_multi, 1):
-            progress_msg.info(f"⚙️ Wczytuję {idx}/{len(selected_phase_keys_multi)}: **{phase_key}**...")
+            progress_msg.info(f"Wczytuję {idx}/{len(selected_phase_keys_multi)}: **{phase_key}**...")
             try:
                 phase_name, matches = generate_docx.fetch_drabinka_phase(sid, phase_key)
             except Exception as e:
@@ -2007,7 +2375,7 @@ if gen_clicked:
             })
 
         if skipped:
-            with st.expander(f"⚠️ Pominięto {len(skipped)} {generate_docx.pluralize(len(skipped),'fazę','fazy','faz')}"):
+            with st.expander(f"Pominięto {len(skipped)} {generate_docx.pluralize(len(skipped),'fazę','fazy','faz')}"):
                 for pk, reason in skipped:
                     st.markdown(f"- **{pk}**: {reason}")
 
@@ -2048,7 +2416,7 @@ if gen_clicked:
                              f"Sprawdź godzinę startu fazy w arkuszu.")
                     st.stop()
                 elif len(matches) != all_matches_count:
-                    st.info(f"🕐 Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
+                    st.info(f"Filtr po godzinie **{tf}**: pokazuję {len(matches)} z {all_matches_count} meczów fazy.")
         
             # Detekcja niekompletnych par (placeholder typu #N/A, TBD, BYE)
             # i mocno krótkich nazw. Te mecze są POMIJANE z ostrzeżeniem.
@@ -2072,7 +2440,7 @@ if gen_clicked:
                 n_total = len(matches)
                 example = incomplete_matches[0]
                 ex_text = f"{example.get('z1','?')} vs {example.get('z2','?')}"
-                st.warning(f"⚠️ **{n_inc} z {n_total}** {generate_docx.pluralize(n_inc,'mecz','mecze','meczów')} "
+                st.warning(f"**{n_inc} z {n_total}** {generate_docx.pluralize(n_inc,'mecz','mecze','meczów')} "
                            f"{generate_docx.pluralize(n_inc,'ma','ma','ma')} niekompletne pary "
                            f"(np. brak drugiego gracza, #N/A, BYE). Przykład: *{ex_text}*. "
                            f"**Te mecze zostaną pominięte przy generowaniu** — wygenerujemy "
@@ -2082,7 +2450,21 @@ if gen_clicked:
             if not matches:
                 st.error("Wszystkie mecze są niekompletne — nic do wygenerowania.")
                 st.stop()
-        
+
+            # Filtr per-mecz z sekcji „Wybierz konkretne mecze do wydruku".
+            # sel_drabinka_matches=None → bez filtra (wszystkie). Identyfikacja
+            # meczu po (tor, godz, z1, z2) — pochodzą z tego samego fetcha.
+            if sel_drabinka_matches is not None:
+                _sel_keys = {(m.get('tor'), m.get('godz'), m.get('z1'), m.get('z2'))
+                             for m in sel_drabinka_matches}
+                matches = [m for m in matches
+                           if (m.get('tor'), m.get('godz'), m.get('z1'), m.get('z2')) in _sel_keys]
+                if not matches:
+                    st.error("Wybrane mecze nie pasują do aktualnych danych fazy "
+                             "(arkusz mógł się zmienić) — odśwież listę przyciskiem „Wczytaj mecze”.")
+                    st.stop()
+                st.info(f"Wybrano ręcznie {len(matches)} {generate_docx.pluralize(len(matches),'mecz','mecze','meczów')} do wydruku.")
+
             sheets_data = [(phase_name or tournament_phase, matches)]
         else:
             _fetch_pb = st.progress(0.0, text="Pobieram dane z grup…")
@@ -2132,7 +2514,7 @@ if gen_clicked:
                 if not sheets_data:
                     st.error("Wybrane filtry nie dopasowały żadnego meczu. Zmień wybór lub wyczyść filtry.")
                     st.stop()
-                st.info(f"🎯 Filtr aktywny: {_matched} {generate_docx.pluralize(_matched,'mecz','mecze','meczów')} "
+                st.info(f"Filtr aktywny: {_matched} {generate_docx.pluralize(_matched,'mecz','mecze','meczów')} "
                         f"z {len(sheets_data)} {generate_docx.pluralize(len(sheets_data),'grupy','grup','grup')}.")
 
             # ── Sortowanie protokołów (sort_mode z sekcji 5) ──
@@ -2351,7 +2733,7 @@ if rozp_clicked:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
         else:
-            st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {plural}")
+            st.success(f"Wygenerowano rozpiski dla {len(schedules)} {plural}")
             st.download_button(
                 f"⬇️ Pobierz {safe_name}.pdf",
                 data=pdf_bytes, file_name=f"{safe_name}.pdf",
@@ -2359,7 +2741,7 @@ if rozp_clicked:
             )
     else:
         progress_box.empty()
-        st.success(f"✅ Wygenerowano rozpiski dla {len(schedules)} {plural}")
+        st.success(f"Wygenerowano rozpiski dla {len(schedules)} {plural}")
         st.download_button(
             f"⬇️ Pobierz {safe_name}.docx",
             data=docx_bytes, file_name=f"{safe_name}.docx",
@@ -2472,11 +2854,11 @@ if 'last_gen' in st.session_state:
         p_word = generate_docx.pluralize(n_p, 'protokół', 'protokoły', 'protokołów')
         f_word = generate_docx.pluralize(n_f, 'fazy', 'faz', 'faz')
         if len(_files) > 1:
-            st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
+            st.success(f"Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
                        f"(godzina **{gen['time_filter']}**) — **{len(_files)} pliki** "
                        f"(różne formaty drabinek).")
         else:
-            st.success(f"✅ Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
+            st.success(f"Gotowe! **{n_p}** {p_word} z **{n_f}** {f_word} "
                        f"(godzina **{gen['time_filter']}**).")
         # Download per plik (1 plik = jeden format; 2 = główna + drabinka B Bo3).
         for _fi, _f in enumerate(_files):
@@ -2518,7 +2900,7 @@ if 'last_gen' in st.session_state:
         else:
             p_word = "protokołów"
         if gen.get('is_pucharowa'):
-            st.success(f"✅ Gotowe! {n_p} {p_word} dla fazy {gen.get('phase_name','')}.")
+            st.success(f"Gotowe! {n_p} {p_word} dla fazy {gen.get('phase_name','')}.")
         else:
             n_g = gen['groups']
             g_last = n_g % 10
@@ -2529,9 +2911,9 @@ if 'last_gen' in st.session_state:
                 g_word = "grupach"
             else:
                 g_word = "grupach"
-            st.success(f"✅ Gotowe! {n_p} {p_word} w {n_g} {g_word}.")
+            st.success(f"Gotowe! {n_p} {p_word} w {n_g} {g_word}.")
     else:
-        st.success("✅ Pusty formularz gotowy!")
+        st.success("Pusty formularz gotowy!")
 
     # multi_phase_doc ma własne renderowanie pobierania (lista plików) powyżej.
     if gen['kind'] == 'multi_phase_doc':

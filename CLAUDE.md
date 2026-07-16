@@ -116,6 +116,19 @@ Ręcznie: `PYTHONPATH=. python3 tests/regression.py`
   `parse_drabinka_rows` przechodzi też przez ten symulator** — odpalana
   automatycznie w regresji, ale nie ignoruj jeśli przy testach realnych danych
   xlsx wynik jest „za dobry" w porównaniu do skarg usera.
+  **REGUŁA (po wpadce IMP 2026): bug live którego NIE odtwarzasz z xlsx →
+  INSTRUMENTUJ, nie zgaduj.** Sandbox nie dosięga docs.google.com, więc jedyny
+  sposób zobaczyć prawdziwą strukturę gviz to diagnostyka w UI wyciągająca surowe
+  dane przez usera (`detect_drabinka_phases` zwraca `_group_debug`/`_group_sample`/
+  `_gid_map_tabs`, app.py pokazuje je w expanderze „Diagnostyka" gdy 0 grup).
+  Dodaj taki probe OD RAZU przy pierwszym zgłoszeniu, zamiast strzelać z xlsx —
+  zgadywanie z xlsx kosztowało 2 nietrafione iteracje (drop-Tor, gid_map) zanim
+  diagnostyka pokazała prawdziwą przyczynę: gviz KASUJE cały nagłówek grupy poza
+  „Grupa X" (parser ma fallback pozycyjny `_parse_group_rows_positional`).
+- **Liczebniki PL — ZAWSZE `generate_docx.pluralize(n, l1, l2_4, l5)`, NIGDY hardcode.**
+  Powtarzalny błąd (np. „2 protokołów" zamiast „2 protokoły"). Reguła: 1→l1,
+  2-4→l2_4, 5+→l5 (z wyjątkami 12-14→l5). Każdy komunikat z liczbą rzeczowników
+  (protokoły, mecze, grupy, wiersze, zawodnicy, drużyny…) MUSI iść przez `pluralize`.
 - **Czcionka:** docelowo Calibri → renderowane przez Carlito; bez `fonts-crosextra-carlito`
   szeryfy/metryki się psują. Nazwiska celowo bywają serif — sprawdzaj świadomie.
 - **Paginacja Bo5/IND** bywała problematyczna (treść str.2 wchodziła na str.1) —
@@ -197,7 +210,130 @@ w wierszu tabeli (PIL).
 - [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 
+### Redesign UI (ZMERGOWANE NA PROD 2026-07-16 — user zaakceptował)
+> Cel usera: mniej „AI-feel", nowocześnie/schludnie, branding PFM. Całość
+> (fazy A-G + tryb ręczny + fixy parsera) poszła na `main` 2026-07-16 na
+> wyraźne polecenie usera („przenieś deva na prod"). `development` dalej
+> służy do kolejnych eksperymentów przed prod.
+- **Faza A (zrobione):** theme PFM red `#D81F26` (wyciągnięty z logo), favicon =
+  logo PFM zamiast 🎯, font systemowy (CSS), wycięte 43 ozdobne emoji z
+  buttonów/nagłówków/komunikatów (semantyczne 🟢🔵🟣 legendy drabinek + 🟡🔴
+  statusy + ⬇ download ZOSTAJĄ). Helper: globalny `<style>` na górze app.py.
+- **Faza B (zrobione):** helper `_section(num, title, subtitle)` — designerski
+  nagłówek z czerwonym numerkiem PFM zamiast `st.header("1. Turniej")` (styl
+  Worda). 6 sekcji podmienione (UWAGA: sekcja 4 ma 2 gałęzie puchar/grupa —
+  obie podmienione). Sekcja 4 przemianowana „Domyślne elementy"→„Wygląd protokołu".
+- **Faza C (zrobione):** (1) brandowy header u góry — czerwona linia akcentu PFM
+  + atrybucja federacji zamiast szarego dividera. (2) Config „Wygląd protokołu"
+  (sekcja 4: logo/QR/grafiki) PRZENIESIONY do `st.sidebar` — główny flow czysty:
+  1 Turniej → 2 Arkusz → 3 Faza → 4 Generuj (było 5). Sekcja 4 to rewrap
+  `col_form`→`st.sidebar` (body bez zmian logicznych; `with` nie tworzy scope'u
+  w Pythonie → fallbacki `dir()` i dostępność zmiennych dla `col_preview`/generacji
+  IDENTYCZNE). 2-kol layouty (checkboxy/uploadery) spłaszczone do 1 kol. pod wąski
+  sidebar. OBIE gałęzie puchar/grupa zachowane. (3) `ℹ️` wycięte z `st.info`.
+  Weryfikacja: regresja 14/14 + AppTest 0 wyjątków.
+- **Faza D (zrobione — restrukturyzacja po feedbacku usera na dev):** trzy uwagi
+  usera, jedna przyczyna (layout 2-kolumnowy z podglądem). (1) **WIELKA PRZERWA:**
+  `st.columns([3,2])` — lewa kolumna (formularz) krótsza niż prawy podgląd →
+  następna sekcja czekała na wyższą kolumnę → pustka. Fix: `col_form=st.container()`
+  (pełna szerokość, single-column). (2) **Podgląd kradł miejsce** (większość userów
+  wrzuca grafiki i generuje, nie dostraja pozycji) → podgląd+suwaki w **zwijanym
+  expanderze** (collapsed default). WAŻNE: expander tworzony INLINE przy użyciu
+  (`with st.expander(...)` w miejscu dawnego `with col_preview:`), NIE na górze —
+  inaczej slot rezerwuje się za wcześnie i podgląd renderuje się przed sekcją 4.
+  (3) **Sidebar COFNIĘTY** (dylemat usera: otwarty zawala ekran / zamknięty
+  niewidoczny; a upload to częsta ścieżka): config wrócił z `st.sidebar` do
+  głównego flow jako sekcja 4 (`st.container()` zamiast `st.sidebar`, znów bez
+  re-indentu). Flow liniowy single-column: 1 Turniej → 2 Arkusz → 3 Faza →
+  4 Wygląd → 5 Generuj, podgląd opcjonalny między 4 a 5. Regresja 14/14 + AppTest 0.
+  **Trik bez re-indentu:** zmiana TYLKO wrappera (`st.columns`→`st.container`,
+  `st.sidebar`→`st.container`, `col_preview`→inline `st.expander`); body z 4-spacjowym
+  wcięciem działa identycznie pod każdym z nich.
+- **Faza F (5 fixów po feedbacku usera ze screenów dev — zrobione):** (1) ucinanie
+  górnych napisów: `padding-top` 2.2rem→4rem (2.2 wchodziło pod górny toolbar
+  Streamlit). (2) Mecze wypisane 2×: surowy `st.code` dump z `get_sheet_names_debug`
+  (po „Wczytaj zakładki") duplikował expander „Lista wszystkich faz" → zastąpiony
+  zwięzłym `st.success` (szczegóły w expanderze). (3) Podgląd ładniejszy: miększy
+  cień + border-radius karty (oba warianty html IND/TROJKA), neutralna podkładka
+  `#eceef1` pod kartką. (4) Selektywny wydruk: labele drużyny/zawodnicy dynamiczne
+  (`_sel_is_team = not is_individual`) — „Drużyny" + odmiana dla 2/3/4-os. (5) Sekcja
+  rozpisek/pustego formularza: nagłówek grupujący „Dodatkowe wydruki" nad expanderami
+  (były luźno doczepione). Regresja 14/14 + AppTest 0.
+- **Tabs/stepper/mobile (Faza „E", NIEzrobione):** po single-column linowym flow
+  prawdopodobnie zbędne. Tylko jeśli user wprost poprosi.
+- **Faza G (zrobione — „dajesz z wszystkim"):** (1) **PREVIEW — próba `st.html`
+  COFNIĘTA.** st.components.v1.html→st.html ZEPSUŁO layout (karta z `position:absolute`
+  uciekała w prawo i wystawała — inline render nie trzyma skalowanej karty; iframe
+  jest KONIECZNY do izolacji). Wróciło do `st.components.v1.html(html, height=...)`,
+  BEZ szarej podkładki (czysta wyśrodkowana karta `margin:0 auto` z cieniem/rogami).
+  Warning deprecacji ZAAKCEPTOWANY (działa do 1.58; realna migracja = przerobienie
+  podglądu na nie-absolute layout, osobne większe zadanie). LEKCJA: `st.html` NIE
+  nadaje się do absolute-positioned layoutów mimo braku `<style>`/klas. (2) **Mobile:** media
+  query `<=640px` zmniejsza brandbar (klasy `pfm-brandbar*`) + marginesy. (3)
+  **Expandery** jako subtelne karty (border+radius, `[data-testid="stExpander"]`).
+  (4) **Help „Rodzaj"** zaktualizowany (mówił o nieistniejących ikonach 🟡🔴).
+  Regresja 14/14 + AppTest 0. **NIE robiłem tabs** — zburzyłyby czysty single-column.
+- **Lekcja sandbox:** wizualna weryfikacja przez żywy serwer streamlit + Playwright
+  NIE działa (proces ubijany, exit 144). Playwright pip-upgrade rozjeżdża wersję
+  z preinstalowaną przeglądarką → `executable_path=/opt/pw-browsers/chromium-1194/
+  chrome-linux/chrome`. Weryfikacja wizualna = na dev przez usera.
+- **Keep-alive prod (zrobione):** `.github/workflows/keepalive.yml` (cron */30) +
+  `scripts/keepalive.py` (Playwright wake-up). MUSI być na `main` (schedule odpala
+  się tylko z domyślnego brancha) — wrzucone bezpośrednio na main (tylko te 2 pliki).
+  Repo PUBLICZNE → Actions darmowe. Cold boot prod ~3 min (libreoffice) → sensowny.
+- **LEKCJA:** kontener efemeryczny po restarcie wskakuje na branch
+  `claude/sleepy-fermi-s1fUI` (harness), NIE na `development`. Praca przeżywa TYLKO
+  przez push. Po restarcie: `git checkout development && git pull`. Pushować KAŻDĄ fazę.
+- **Znany follow-up:** `st.components.v1.html` (preview, linia ~1491) jest
+  deprecated (warning, działa). Podmiana wymaga ostrożności — iframe izoluje CSS
+  podglądu; `st.html` by go rozlał na apkę. Osobne zadanie, nie ruszać przy redesignie.
+- **Weryfikacja:** `python3 -c "from streamlit.testing.v1 import AppTest; \
+  at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
+
 ### Log zmian (najnowsze u góry)
+- 2026-07-16 — **MERGE development → main (redesign + tryb ręczny NA PRODUKCJI)**
+  na polecenie usera. Wcześniej tego dnia user zgłosił „0 grup" na prod dla
+  arkusza IMP — okazało się NIE-bugiem (losowanie grup było w toku, puste
+  komórki zawodników → parser poprawnie pomija niekompletne mecze; user: „aaa
+  ok sorki faktycznie"). Dodatkowo przed merge: (a) **Word (.docx) domyślnie
+  ODznaczony** w sekcji Generuj (PDF pierwszy, zaznaczony) — standardowy wydruk
+  to sam PDF; (b) **info o formatach w trybie multi-phase**: gdy godzina łączy
+  drabinkę główną i B a format ≠ Bo3, `st.info` wypisuje per-fazowo: drabinka B
+  (Miejsca X-Y, mecze o miejsca >3) → Best of 3 + osobne pliki (lub format
+  główny gdy checkbox odznaczony), mecze o podium (o 1./2./3. miejsce) →
+  ZAWSZE format główny jak finał. Blok po selectboxie Format (pełna szerokość,
+  poza cols_t2), guard `selected_phase_keys_multi and sets_format != "Best of 3"`.
+- 2026-07-01 — **Tryb „własna lista meczów" (bez arkusza PFM) — DEV.** Dla userów
+  bez wyrafinowanego arkusza. Selektor źródła w sekcji 2 (radio): „Arkusz Google
+  Sheets" (default, stara ścieżka BEZ ZMIAN) vs „Własna lista meczów (Excel/ręcznie)".
+  Tryb ręczny = **izolowany** `_render_manual_generator()` + `st.stop()` → reszta flow
+  (sekcje 2b-5, handler) się NIE renderuje → zero ryzyka dla ścieżki arkusza, zero
+  re-indentu. Oba wejścia (upload xlsx/xls/csv z fuzzy-mapowaniem kolumn + `st.data_editor`
+  ręczny) zbiegają się w jednej edytowalnej tabeli → `build_document` (rdzeń bez zmian,
+  bo już przyjmuje `[(label, matches)]`) → download docx/pdf. Format (2 sety/BoN) →
+  template_type przez `_manual_template_type`. `docx_to_pdf` PRZENIESIONE na górę
+  (tryb ręczny renderuje się w sekcji 2, przed dawną definicją → inaczej NameError).
+  `openpyxl` dodane do requirements. **Płaska lista meczów** (label=nazwa turnieju,
+  bez podziału na grupy/fazy — świadomie na start). Weryfikacja: Google mode 0 wyjątków,
+  build_document z płaską listą OK, pusta tabela → graceful error, regresja 14/14.
+  **Do przetestowania na realnych zawodach zanim pójdzie na prod** (user: prod zostaje
+  w odwodzie). Backlog: podział na grupy/fazy (kolumna „Grupa"), round-robin z samych
+  imion (Faza 2 z propozycji).
+- 2026-06-30 — **Ręczny wybór meczów drabinki do wydruku (puchar single-phase).**
+  Use case usera: część par już gotowa (np. wcześniej rozegrana 1/8 utworzyła parę
+  1/4) → wydrukuj tylko wybrane mecze bez czekania na resztę i bez dublowania przy
+  kolejnym wydruku. **Prosta wersja BEZ pamiętania** (user wybiera za każdym razem —
+  świadoma decyzja usera, tracking session_state odrzucony). Implementacja (app.py):
+  expander „Wybierz konkretne mecze do wydruku" (analog do grupowej selektywnej),
+  przycisk „Wczytaj mecze" → `fetch_drabinka_phase` → cache gotowych par w
+  `session_state['pm_cache_<sid>_<phase>']`, multiselect „Tor X · HH:MM · Z1 — Z2"
+  (puste = wszystkie, zero zmiany default). Filtr przy generowaniu po krotce
+  `(tor,godz,z1,z2)` przed `sheets_data`, TYLKO single-phase (`selected_phase_keys_multi
+  is None`; multi-phase po godzinie nietknięty). Helper `_match_is_ready` +
+  module-level `_INCOMPLETE_MARKERS` (spójnie z filtrem kompletności w generacji).
+  `sel_drabinka_matches=None` zdefiniowane bezwarunkowo (brak NameError na innych
+  ścieżkach). Część „wydrukuj wcześniejszą parę" działała już przez skip_placeholders;
+  nowość = ręczny wybór konkretnych meczów.
 - 2026-06-19 — **Format per drabinka w trybie multi-phase (drukuj godzinę).**
   Use case: o danej godzinie grają obie drabinki naraz; drabinka przegranych
   (Miejsca X-Y) ma niższą stawkę → Best of 3, gdy główna leci Bo5/Bo7. Decyzja
