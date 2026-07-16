@@ -1103,6 +1103,35 @@ with col_form:
                      "Best of 7 dostępny dla turnieju indywidualnego i 2-os. (finały)."
             )
 
+    # ── Info o formatach w trybie multi-phase (godzina z wieloma drabinkami) ──
+    # User widzi CZARNO NA BIAŁYM co się wydrukuje w jakim formacie, zamiast
+    # odkrywać to po fakcie w nazwach plików:
+    # • drabinka B (Miejsca X-Y, mecze o miejsca >3) → skrócony Bo3 (checkbox wyżej),
+    # • mecze podium (o 1./2./3. miejsce) → ZAWSZE format główny, jak finał.
+    if selected_phase_keys_multi and sets_format != "Best of 3":
+        _b_sel = [k for k in selected_phase_keys_multi if _is_b_phase(k)]
+        _podium_sel = [k for k in selected_phase_keys_multi
+                       if re.match(r'Mecz o [123]\. miejsce', k)]
+        _fmt_notes = []
+        if _b_sel:
+            _b_list = ", ".join(_b_sel)
+            if drabinka_b_bo3:
+                _fmt_notes.append(
+                    f"**Drabinka B** ({_b_list}) drukuje się w **Best of 3** "
+                    f"(skrót — checkbox wyżej), główna w **{sets_format}** → powstaną "
+                    f"**osobne pliki** per format.")
+            else:
+                _fmt_notes.append(
+                    f"**Drabinka B** ({_b_list}) drukuje się w **{sets_format}** "
+                    f"(skrót Bo3 odznaczony) — jeden wspólny format.")
+        if _podium_sel:
+            _p_list = ", ".join(_podium_sel)
+            _fmt_notes.append(
+                f"**{_p_list}** drukuje się w formacie głównym (**{sets_format}**) — "
+                f"jak finał, meczów o podium nie skracamy.")
+        if _fmt_notes:
+            st.info("Formaty w tym wydruku:\n\n" + "\n\n".join(f"• {n}" for n in _fmt_notes))
+
     # Walidacja - obecnie sprawdzone i zweryfikowane:
     # 1. Indywidualny + Grupowa + 2 sety  → 
     # 2. Drużynowy 3-os. + Grupowa + 2 sety  → 
@@ -1891,9 +1920,10 @@ _section(5, "Generuj protokoły")
 
 cols_fmt = st.columns([1, 1, 4])
 with cols_fmt[0]:
-    fmt_docx = st.checkbox("Word (.docx)", value=True)
-with cols_fmt[1]:
     fmt_pdf = st.checkbox("PDF (.pdf)", value=True)
+with cols_fmt[1]:
+    # Word domyślnie ODznaczony (user: standardowy wydruk to sam PDF).
+    fmt_docx = st.checkbox("Word (.docx)", value=False)
 
 # Sortowanie protokołów — tylko dla fazy grupowej, gdzie jest sens
 # (puchar / multi-phase generuje single phase z natury sekwencyjnie).
