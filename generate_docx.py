@@ -757,6 +757,119 @@ PHASE_NAMES = {
 }
 
 
+def _norm_tor_cell(v):
+    """Normalizuje komórkę toru: '1.0'→'1', 'TBA'/'?'→''. Zwraca '' gdy nie-tor."""
+    v = (v or '').strip()
+    if not v:
+        return ''
+    if re.match(r'^\d{1,2}\.0+$', v):
+        v = v.split('.')[0]
+    if 'TBA' in v.upper() or v == '?':
+        return ''
+    return v if re.match(r'^\d{1,2}$', v) else ''
+
+
+def _infer_tor_col(rows, header_row, col_player):
+    """Gdy gviz zgubił nagłówek 'Tor': typuje kolumnę torów na lewo od kolumny
+    gracza (offset 1..3) po danych — numery 1-99 wygrywają z seed ID (A1/B4)."""
+    for offset in (1, 2, 3):
+        ci = col_player - offset
+        if ci < 0:
+            break
+        n_ok = 0
+        n_bad = 0
+        for ri in range(header_row + 1, min(header_row + 10, len(rows))):
+            if ci >= len(rows[ri]):
+                continue
+            v = rows[ri][ci].strip()
+            if not v:
+                continue
+            if re.match(r'^\d{1,2}(\.0+)?$', v):
+                n_ok += 1
+            elif re.match(r'^[A-Z]+\d+$', v):
+                n_bad += 1
+        if n_ok > n_bad and n_ok > 0:
+            return ci
+    return None
+
+
+def _read_drabinka_block(rows, header_row, col_player, col_tor, stop_kws):
+    """Czyta mecze JEDNEGO bloku drabinki STRUKTURALNIE: mecz = 2 kolejne wiersze.
+
+    KRYTYCZNE (bug IMP 2026): pusta komórka zawodnika (para nierozstrzygnięta,
+    czekamy na wynik poprzedniej fazy) NIE może przesuwać parowania o 1 wiersz —
+    stary kod robił `i += 1` i sklejał zawodników z RÓŻNYCH meczów (Skoracki z
+    toru 15 + Sajkowski z toru 14). Kotwiczenie: wiersz STARTUJE mecz gdy ma
+    zawodnika LUB numer toru (scalona komórka toru wisi na pierwszym wierszu pary
+    i jest obecna także dla par nierozstrzygniętych). Wiersz bez obu = spacer.
+
+    Tor NIE jest wymyślany (stare `last_known_tor+1` przypisywało fejkowe tory
+    gdy komórka pusta) — brak toru w wierszach pary → tor=''.
+
+    Zwraca listę structural matches:
+      {'row_idx', 'tor', 'z1', 'z2'} — z1/z2 puste ('') gdy strona nieznana/
+      niepoprawna; caller decyduje (protokoły filtrują niekompletne z ostrzeżeniem).
+    """
+    def _get(r_i, c):
+        if c is None or r_i >= len(rows) or c >= len(rows[r_i]):
+            return ''
+        return rows[r_i][c].strip()
+
+    def _valid_name(v):
+        vl = v.lower()
+        return (len(v) >= 3 and any(ch.isupper() for ch in v)
+                and not any(kw in vl for kw in stop_kws))
+
+    out = []
+    i = header_row + 1
+    empty_streak = 0
+    while i < len(rows):
+        z1_raw = _get(i, col_player)
+        t1 = _norm_tor_cell(_get(i, col_tor)) if col_tor is not None else ''
+
+        # Spacer: ani zawodnika, ani toru → przeskocz 1 wiersz.
+        if not z1_raw and not t1:
+            empty_streak += 1
+            if empty_streak >= 5:
+                break  # 5+ pustych = koniec bloku
+            i += 1
+            continue
+        empty_streak = 0
+
+        # Nagłówek kolejnej sekcji w kolumnie gracza → koniec bloku.
+        if z1_raw and any(kw in z1_raw.lower() for kw in stop_kws):
+            break
+
+        z2_raw = _get(i + 1, col_player)
+        t2 = _norm_tor_cell(_get(i + 1, col_tor)) if col_tor is not None else ''
+
+        # Wiersz i+1 to nagłówek sekcji → nie konsumuj go jako z2.
+        if z2_raw and any(kw in z2_raw.lower() for kw in stop_kws):
+            z1 = z1_raw if _valid_name(z1_raw) else ''
+            if z1:
+                out.append({'row_idx': i, 'tor': t1, 'z1': z1, 'z2': ''})
+            break
+
+        # Wiersz i+1 ma WŁASNY, INNY numer toru → startuje NOWY mecz (nie jest
+        # drugą połową tego). Bieżący wiersz to osierocona połówka — emituj
+        # niekompletny i przesuń o 1. (Równe tory = tor powtórzony w obu
+        # wierszach pary — parujemy normalnie.)
+        if t2 and t1 != t2:
+            z1 = z1_raw if _valid_name(z1_raw) else ''
+            if z1 or t1:
+                out.append({'row_idx': i, 'tor': t1, 'z1': z1, 'z2': ''})
+            i += 1
+            continue
+
+        z1 = z1_raw if _valid_name(z1_raw) else ''
+        z2 = z2_raw if _valid_name(z2_raw) else ''
+        if z1 or z2:
+            out.append({'row_idx': i, 'tor': t1 or t2, 'z1': z1, 'z2': z2})
+        i += 2  # mecz = zawsze 2 wiersze
+
+    return out
+
+
 def parse_drabinka_rows(rows, target_phase=None):
     """
     Parsuje zakładkę Drabinka i zwraca mecze z konkretnej fazy.
@@ -942,103 +1055,39 @@ def parse_drabinka_rows(rows, target_phase=None):
         # Brak etykiety 'Tor' → gviz typuje kolumnę torów jako LICZBOWĄ i GUBI nagłówek.
         # Tor jest tuż na lewo od kolumny gracza, ALE bezpośrednio przed player może
         # być kolumna z seed ID (np. "A1"/"B4") — wtedy Tor jest col_player-2.
-        # Fix: scan leftward, użyj numeric-vs-seed heurystyki by odrzucić seed IDs.
         if col_tor is None:
-            header_idx_tmp = chosen['header_row']
-            for offset in (1, 2, 3):
-                ci = col_player - offset
-                if ci < 0:
-                    break
-                n_ok = 0
-                n_bad = 0
-                for ri in range(header_idx_tmp + 1, min(header_idx_tmp + 10, len(rows))):
-                    if ci >= len(rows[ri]):
-                        continue
-                    v = rows[ri][ci].strip()
-                    if not v:
-                        continue
-                    if re.match(r'^\d{1,2}(\.0+)?$', v):
-                        n_ok += 1
-                    elif re.match(r'^[A-Z]+\d+$', v):
-                        n_bad += 1
-                if n_ok > n_bad and n_ok > 0:
-                    col_tor = ci
-                    break
+            col_tor = _infer_tor_col(rows, chosen['header_row'], col_player)
             if col_tor is None:
                 col_tor = max(0, col_player - 1)
 
-        header_idx = chosen['header_row']
-        data_rows = rows[header_idx + 1:]
-
-        i = 0
-        empty_streak = 0
-        last_known_tor = ''  # cache dla scalonych komórek tora
-        while i < len(data_rows):
-            row1 = data_rows[i]
-            # Patrzymy TYLKO na kolumnę zawodnika i tora — inne fazy w tym samym
-            # wierszu nie mają znaczenia (są w innych kolumnach).
-            z1_raw = g(row1, col_player)
-            z1_lower = z1_raw.lower()
-
-            # Pusta komórka zawodnika? Sprawdź następny wiersz lub stop.
-            if not z1_raw:
-                empty_streak += 1
-                if empty_streak >= 5:
-                    break  # 5+ pustych = koniec bloku
-                i += 1
-                continue
-            empty_streak = 0
-
-            # Czy ta komórka to nagłówek nowej sekcji (np. drugi "MIEJSCA 5-8"
-            # albo "MIEJSCA 17-24" pod 1/8)? To koniec bieżącego bloku — kolejny
-            # blok tej samej fazy zostanie obsłużony w następnej iteracji pętli.
-            if any(kw in z1_lower for kw in stop_keywords):
-                break
-
-            # Drugi zawodnik w następnym wierszu
-            row2 = data_rows[i+1] if i+1 < len(data_rows) else []
-            z2_raw = g(row2, col_player)
-            z2_lower = z2_raw.lower()
-
-            # Tor: hierarchia źródeł
-            tor_raw = g(row1, col_tor) or g(row2, col_tor)
-            if tor_raw:
-                tor = tor_raw.strip()
-                if re.match(r'^\d+\.0+$', tor):
-                    tor = tor.split('.')[0]
-                if 'TBA' in tor.upper() or tor == '?':
-                    tor = ''
-                elif tor.isdigit():
-                    last_known_tor = tor
-            elif last_known_tor and last_known_tor.isdigit():
-                tor = str(int(last_known_tor) + 1)
-                last_known_tor = tor
-            else:
-                tor = ''
-
-            # Grupa: czytamy z col_grupa jeśli istnieje
+        # Czytanie STRUKTURALNE (mecz = 2 wiersze, kotwiczenie torem) — patrz
+        # _read_drabinka_block. Niekompletne pary (nierozstrzygnięty poprzedni
+        # etap) trafiają do wyniku z pustą stroną — ścieżki generowania filtrują
+        # je z ostrzeżeniem, a picker pokazuje tylko gotowe.
+        for sm in _read_drabinka_block(rows, chosen['header_row'], col_player,
+                                       col_tor, stop_keywords):
+            z1, z2 = sm['z1'], sm['z2']
+            if z1 and z2:
+                # Dedup TYLKO kompletnych par (niekompletne to placeholdery —
+                # dwie różne nierozstrzygnięte pary nie mogą się sklejać).
+                pair_key = frozenset((z1.lower(), z2.lower()))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
             grupa_v = ''
             if col_grupa is not None:
-                grupa_v = (g(row1, col_grupa) or g(row2, col_grupa)).strip()
-            # Walidacja: oba nazwiska niepuste, sensowna długość, brak stop-keywords
-            if z1_raw and z2_raw and len(z1_raw) >= 3 and len(z2_raw) >= 3:
-                has_stop = any(kw in z1_lower or kw in z2_lower for kw in stop_keywords)
-                pair_key = frozenset((z1_raw.strip().lower(), z2_raw.strip().lower()))
-                is_dup = pair_key in seen_pairs
-                if not has_stop and not is_dup \
-                   and any(c.isupper() for c in z1_raw) and any(c.isupper() for c in z2_raw):
-                    seen_pairs.add(pair_key)
-                    matches.append({
-                        'tor': tor,
-                        'godz': phase_time or '',
-                        'grupa': grupa_v,
-                        'mecz': str(match_num),
-                        'z1': z1_raw,
-                        'z2': z2_raw,
-                    })
-                    match_num += 1
-
-            i += 2  # przeskakujemy 2 wiersze (mecz)
+                r_i = sm['row_idx']
+                grupa_v = (g(rows[r_i], col_grupa)
+                           or (g(rows[r_i + 1], col_grupa) if r_i + 1 < len(rows) else '')).strip()
+            matches.append({
+                'tor': sm['tor'],
+                'godz': phase_time or '',
+                'grupa': grupa_v,
+                'mecz': str(match_num),
+                'z1': z1,
+                'z2': z2,
+            })
+            match_num += 1
 
     # Do hard-capu używamy phase_key pierwszego bloku.
     chosen = chosen_blocks[0]
@@ -1241,35 +1290,24 @@ def detect_drabinka_phases(sheet_id, progress_cb=None):
         for marker in phase_block_markers:
             key = marker['key']
             col = marker['col']
-            i = marker['header_row'] + 1
+            # Wspólny czytnik strukturalny (mecz = 2 wiersze, kotwiczenie torem) —
+            # ten sam co w parse_drabinka_rows, żeby liczby w UI = temu co realnie
+            # sparsujemy. Naprawia shift przy nierozstrzygniętych parach (IMP 2026).
+            col_tor = marker.get('col_tor')
+            if col_tor is None:
+                col_tor = _infer_tor_col(drabinka_rows, marker['header_row'], col)
             n_matches = 0
-            empty_streak = 0
             seen_pairs = pairs_by_key.setdefault(key, set())
-            while i < len(drabinka_rows):
-                row1 = drabinka_rows[i]
-                z1 = row1[col].strip() if col < len(row1) else ''
-                if not z1:
-                    empty_streak += 1
-                    if empty_streak >= 5: break
-                    i += 1
-                    continue
-                empty_streak = 0
-                # Stop na pod-nagłówek nowej sekcji
-                z1_lower = z1.lower()
-                if any(kw in z1_lower for kw in STOP_KWS):
-                    break
-                # Para zawodników
-                row2 = drabinka_rows[i+1] if i+1 < len(drabinka_rows) else []
-                z2 = row2[col].strip() if col < len(row2) else ''
-                if z1 and z2 and len(z1) >= 3 and len(z2) >= 3 \
-                   and any(c.isupper() for c in z1) and any(c.isupper() for c in z2):
-                    # Dedup po nieuporządkowanej parze — spójnie z parse_drabinka_rows,
-                    # żeby liczba w UI = liczba realnie wygenerowanych protokołów.
+            for sm in _read_drabinka_block(drabinka_rows, marker['header_row'],
+                                           col, col_tor, STOP_KWS):
+                z1, z2 = sm['z1'], sm['z2']
+                # Liczymy tylko KOMPLETNE pary (drukowalne protokoły), z dedupem
+                # nieuporządkowanej pary — spójnie z parse_drabinka_rows.
+                if z1 and z2:
                     pair_key = frozenset((z1.lower(), z2.lower()))
                     if pair_key not in seen_pairs:
                         seen_pairs.add(pair_key)
                         n_matches += 1
-                i += 2
 
             if n_matches > 0:
                 if key in agg_entries:
