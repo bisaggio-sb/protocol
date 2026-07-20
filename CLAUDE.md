@@ -291,6 +291,25 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-07-16 (fix2) — **KRYTYCZNY: nierozstrzygnięte pary drabinki przesuwały
+  parowanie (IMP 1/16).** Pusta komórka zawodnika (czekamy na wynik poprzedniej
+  fazy) → stary kod `i+=1` sklejał zawodników z RÓŻNYCH meczów (Skoracki tor15 +
+  Sajkowski tor14, kaskadowo dalej) — wyglądało na kompletne pary, zero warningu.
+  Plus fejkowe tory (`last_known+1`) przy pustych komórkach toru. FIX:
+  `_read_drabinka_block` — wspólny czytnik strukturalny (mecz = ZAWSZE 2 kolejne
+  wiersze, kotwiczenie torem — scalona komórka toru jest na 1. wierszu pary także
+  gdy para nierozstrzygnięta; wiersz bez zawodnika I bez toru = spacer; tor pusty
+  → '' bez zmyślania; nagłówek sekcji nie jest konsumowany jako z2; reguła
+  osieroconej połówki: wiersz poniżej z WŁASNYM innym torem = nowy mecz).
+  Niekompletne pary ZWRACANE z pustą stroną — wszystkie ścieżki generowania
+  filtrują je z ostrzeżeniem („N z M niekompletne — pominięte"), picker pokazuje
+  tylko gotowe. `detect_drabinka_phases` PASS 2 przepięty na ten sam czytnik
+  (miał identyczny shift-bug w liczeniu). Weryfikacja: diff stary-vs-nowy na
+  7 ukończonych layoutach = 100% zgodne; 11 rodzin brzegowych × xlsx+gviz = OK;
+  regresja 14/14 + 2 nowe testy (IMP unresolved, no-tor). ŚWIADOMY trade-off:
+  układ „tor tylko przy drugim zawodniku pary" (niespotykany — scalone komórki
+  dają tor na górnym wierszu) degraduje do niekompletnych z warningiem; głośne
+  pominięcie > ciche skrzyżowane protokoły. NA PROD (merge tego samego dnia).
 - 2026-07-16 — **MERGE development → main (redesign + tryb ręczny NA PRODUKCJI)**
   na polecenie usera. Wcześniej tego dnia user zgłosił „0 grup" na prod dla
   arkusza IMP — okazało się NIE-bugiem (losowanie grup było w toku, puste
