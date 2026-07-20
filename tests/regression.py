@@ -124,6 +124,69 @@ except Exception as e:
     failures.append(f'gviz drabinka symulacja: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# ── Nierozstrzygnięte pary NIE przesuwają parowania (bug IMP 2026 1/16) ──
+# Struktura z produkcji: mecz = 2 kolejne wiersze, tor SCALONY na pierwszym
+# wierszu pary. Tory 15 i 8 mają pustą komórkę pierwszego zawodnika (czekamy na
+# wynik poprzedniej fazy). Stary parser robił `i += 1` przy pustym z1 → sklejał
+# zawodników z RÓŻNYCH meczów (Skoracki+Sajkowski) i wymyślał tory (+1).
+_imp_rows = [
+    ['Tor', '1/16 FINAŁU (14:15)', 'Set 1', 'Set 2', 'Set 3', 'Set 4', 'Set 5', 'SETY'],
+    ['16',  'Łukasz Szulc',        '50', '50', '50', '', '', '3'],
+    ['',    'Karina Wittmann',     '',   '',   '',   '', '', '0'],
+    ['15',  '',                    '50', '50', '50', '', '', '3'],
+    ['',    'Tomasz Skoracki',     '',   '',   '',   '', '', '0'],
+    ['14',  'Kamil Sajkowski',     '50', '50', '50', '', '', '3'],
+    ['',    'Rafał Ściepuro',      '',   '',   '',   '', '', '0'],
+    ['13',  'Bartosz Kordecki',    '50', '50', '50', '', '', '3'],
+    ['',    'Mariusz Goeck',       '',   '',   '',   '', '', '0'],
+    ['8',   '',                    '50', '50', '50', '', '', '3'],
+    ['',    'Robert Baścik',       '',   '',   '',   '', '', '0'],
+    ['1',   'Jakub Karwowski',     '50', '50', '50', '', '', '3'],
+    ['',    'Damian Szostak',      '',   '',   '',   '', '', '0'],
+]
+try:
+    for _label, _rows_v in (('openpyxl', _imp_rows),
+                            ('gviz-drop', _simulate_gviz_drop_tor_header(_imp_rows))):
+        _, _, m_imp = g.parse_drabinka_rows(_rows_v, target_phase='Pucharowa 1/16 finału')
+        _complete = [(m['z1'], m['z2'], m['tor']) for m in m_imp if m['z1'] and m['z2']]
+        _incomplete = [(m['z1'], m['z2'], m['tor']) for m in m_imp
+                       if not (m['z1'] and m['z2'])]
+        _want = [('Łukasz Szulc', 'Karina Wittmann', '16'),
+                 ('Kamil Sajkowski', 'Rafał Ściepuro', '14'),
+                 ('Bartosz Kordecki', 'Mariusz Goeck', '13'),
+                 ('Jakub Karwowski', 'Damian Szostak', '1')]
+        if _complete != _want:
+            failures.append(f'IMP unresolved ({_label}): kompletne={_complete}, oczek. {_want} '
+                            '(shift-bug: sklejanie zawodników z różnych meczów)')
+        _want_inc = [('', 'Tomasz Skoracki', '15'), ('', 'Robert Baścik', '8')]
+        if _incomplete != _want_inc:
+            failures.append(f'IMP unresolved ({_label}): niekompletne={_incomplete}, '
+                            f'oczek. {_want_inc}')
+except Exception as e:
+    failures.append(f'IMP unresolved: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
+# ── Puste komórki torów: tor='' (NIE wymyślamy last_known+1) ──
+_notor_rows = [
+    ['Tor', '1/4 FINAŁU (16:15)', 'Set 1', 'Set 2', 'Set 3', 'SETY'],
+    ['7',   'Anna Pierwsza',      '', '', '', ''],
+    ['',    'Beata Druga',        '', '', '', ''],
+    ['',    'Cezary Trzeci',      '', '', '', ''],
+    ['',    'Dorota Czwarta',     '', '', '', ''],
+]
+try:
+    _, _, m_nt = g.parse_drabinka_rows(_notor_rows, target_phase='Pucharowa 1/4 finału')
+    _tors_nt = [m['tor'] for m in m_nt]
+    _pairs_nt = [(m['z1'], m['z2']) for m in m_nt]
+    if _pairs_nt != [('Anna Pierwsza', 'Beata Druga'), ('Cezary Trzeci', 'Dorota Czwarta')]:
+        failures.append(f'no-tor pary: {_pairs_nt}')
+    if _tors_nt != ['7', '']:
+        failures.append(f"no-tor: Tor={_tors_nt}, oczek. ['7', ''] — pusty tor ma "
+                        "ZOSTAĆ pusty (nie wymyślamy '8')")
+except Exception as e:
+    failures.append(f'no-tor drabinka: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
 # ── Faza rozbita na KILKA bloków nagłówkowych (split phase) ──
 # Bug produkcyjny FMC 2026: "MIEJSCA 5-8" (drabinka o miejsca, 4 zawodników,
 # 2 półfinały) była zapisana jako DWA osobne bloki "MIEJSCA 5-8 (16:45)" w tej
