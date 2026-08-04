@@ -182,6 +182,11 @@ podajemy ręcznie). Render→PDF: `soffice --headless -env:UserInstallation=file
 w wierszu tabeli (PIL).
 
 ### Co teraz (current focus)
+- **Iteracja 2026-08-04 (4 tematy usera) — ZROBIONE, czeka na test na realnych
+  zawodach.** Wydruk per tor + pigułki, zapamiętywanie grafik, oraz KRYTYCZNY
+  fix konwersji PDF (izolacja profilu LibreOffice). Szczegóły w logu niżej.
+  **UWAGA: `requirements.txt` podbite do `streamlit>=1.40` — `st.pills` nie
+  istnieje w 1.35.** Przy zmianie pinu w dół wybór torów przestanie działać.
 - DWÓJKA Grupa: DZIAŁA (zatwierdzone — status bez ikony). Własny szablon
   `DWÓJKA_Grupa.docx` (DRUŻYNY pion, 4 SUMA/SET). Fix grafik w DOCX zrobiony
   (patrz log 2026-06-01 col0).
@@ -209,6 +214,15 @@ w wierszu tabeli (PIL).
 - [x] DWÓJKA Bo7 — szablon pucharowy (landscape, fill+paginacja+routing) DZIAŁA
 - [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
   (kod nie daje rady, patrz log fix5). Nice-to-have.
+- [x] Wydruk per tor + pigułki + zapamiętywanie grafik + fix konwersji PDF (2026-08-04)
+- [ ] Filtr per tor w trybie multi-phase (drukuj godzinę) — jedyna ścieżka bez
+  loadera meczów; wymaga własnego przycisku „Wczytaj tory" pętlącego
+  `fetch_drabinka_phase`. Świadomie pominięte w iteracji 2026-08-04.
+- [ ] `copy.deepcopy` szablonu (`generate_docx.py:4139`) = 61% czasu buildu
+  i ~2.4 MB RAM/mecz. Przy 480 meczach to ~1.1 GB w Pythonie. Optymalizacja
+  (np. deepcopy raz + tańsze klonowanie) obniżyłaby ryzyko OOM przy dużych
+  turniejach. Nie ruszane — wymaga ostrożności, bo dotyka rdzenia składania docx.
+- [ ] Migracja podglądu `st.components.v1.html` → `st.iframe` (deprecation).
 
 ### Redesign UI (ZMERGOWANE NA PROD 2026-07-16 — user zaakceptował)
 > Cel usera: mniej „AI-feel", nowocześnie/schludnie, branding PFM. Całość
@@ -291,6 +305,74 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-08-04 — **4 tematy usera: crash przy 480 meczach, wydruk per tor,
+  pigułki, zapamiętywanie grafik.**
+  (A) **KRYTYCZNY — „mnie działało 480 meczów, koledze się wykrzaczało (Mac)".**
+  Mac był czerwonym śledziem: build i LibreOffice liczą się na WSPÓLNYM serwerze
+  Streamlit Cloud. Prawdziwa przyczyna: `app.py` odpalało LibreOffice **bez
+  `-env:UserInstallation`**, więc wszystkie konwersje na serwerze dzieliły jeden
+  profil w `$HOME`. Reprodukcja (3 próby × 2 równoczesne konwersje): **za każdym
+  razem DOKŁADNIE JEDNA padała z rc=1** i nie produkowała PDF-a; po izolacji
+  profilu 6/6 OK. To dosłownie „u mnie działa, u kolegi nie". Fixy: własny profil
+  LO per konwersja; `_kill_proc_tree` + `start_new_session=True` (stary
+  `proc.kill()` ubijał tylko wrapper oosplash, zostawiając `soffice.bin` jako
+  sierotę ~0.7 GB) w bloku `finally`, bo przerwanie sesji przez Streamlit leci
+  jako **BaseException** (`StopException`) i żaden `except Exception` go nie
+  widział; timeout skalowany z rozmiarem (`max(300 s, 1.2 s/stronę)`, sufit
+  30 min) zamiast sztywnych 300 s; estymata paska naprawiona (było 0.6 s/stronę
+  vs **zmierzone 0.104** → przy 480 stronach pasek dochodził do 16% i wyglądał
+  na zawieszony, co samo prowokowało usera do odświeżenia i przerwania własnego
+  generowania); `est_pages` liczyło MECZE, nie strony (Bo5/Bo7 = 2 str./mecz →
+  `_pages_per_match`). **Drugi zweryfikowany mechanizm: zerwany websocket.**
+  Sesja Streamlita ma TTL 2 min — uśpiony laptop / karta w tle przerywa
+  generowanie po stronie serwera BEZ komunikatu, a po >2 min wraca pusta sesja.
+  Stąd `st.info` przy wsadzie ≥200 protokołów („nie usypiaj komputera").
+  **POMIARY (sandbox, 4 rdzenie):** 480 meczów = 480 stron, build 3.0 s,
+  konwersja 47.6 s (0.104 s/stronę, LO **jednowątkowe** — więcej rdzeni nie
+  pomaga), docx 3.1 MB, PDF 1.05 MB, szczyt RAM ~1.8 GB (Python 1.13 GB
+  + soffice 0.73 GB). Pamięć rośnie LINIOWO ~2.4 MB/mecz i Python jej **nie
+  oddaje** do OS. Limit Streamlit Cloud ~2.7 GB → dwa równoczesne duże buildy
+  to realne ryzyko OOM (drugorzędne, bo wywaliłoby też sesję właściciela).
+  61% czasu buildu to `copy.deepcopy` szablonu (`generate_docx.py:4139`) —
+  potencjalna optymalizacja, NIE ruszana w tej iteracji.
+  (B) **Wydruk per tor (nowa funkcja).** Dzielenie po grupach rozjeżdżało się
+  z harmonogramem, bo protokoły trafiają do sędziów przy TORACH. Filtr działa
+  dla fazy grupowej i pucharowej (single-phase) — obie ścieżki zbiegają się na
+  `sheets_data`, więc filtr jest w JEDNYM miejscu tuż przed policzeniem `total`
+  (po sortowaniu, żeby kolejność została). Tory brane z ISTNIEJĄCYCH cache'ów
+  (`sel_cache_<sid>`, `pm_cache_…`) → zero dodatkowych zapytań do arkusza.
+  **Kubełek „bez toru"** — w drabince `tor` bywa pusty; bez niego takie mecze
+  znikałyby po cichu (dokładnie błąd z logu 2026-07-16). Tory sortowane
+  liczbowo (1,2,10,11), nazwa pliku dostaje `_tory_1-8` / `_bez_toru`.
+  `sel_tors` definiowane BEZWARUNKOWO (pułapka NameError z gałęziami sekcji).
+  (C) **UI wyboru torów: `st.pills(selection_mode='multi')`** zamiast
+  multiselecta + rząd skrótów **Wszystkie / Wyczyść / 1. połowa / 2. połowa /
+  Parzyste / Nieparzyste**. Skróty ustawiają wartość widgetu w `on_click`
+  (czyli PRZED jego narysowaniem) → „połowa torów" to JEDEN klik i JEDEN rerun
+  zamiast odklikiwania kilkunastu pozycji. Odrzucone: siatka `st.checkbox`
+  (N widgetów, `st.columns` nie zawija → 30 torów rozjeżdża się na telefonie),
+  `st.segmented_control` (nie zawija), `st.data_editor` (przerost formy).
+  (D) **Grafiki zapamiętują się między sesjami.** `session_state` ginie z CAŁĄ
+  sesją (patrz TTL 2 min wyżej) — sam uploader działał poprawnie. Bajty lądują
+  na dysku serwera w katalogu nazwanym losowym tokenem trzymanym w ADRESIE
+  strony (`?z=…`), bo adres przeżywa reconnect/odświeżenie/restart. Token jest
+  prywatny per przeglądarka — **zweryfikowane, że obcy token i brak tokenu nie
+  widzą cudzych grafik** (inaczej logo jednego klubu trafiłoby do drugiego).
+  Kluczowy szczegół: znacznik `logo_had_widget_<i>` odróżnia „user kliknął ✕"
+  od „widget pusty, bo nowa sesja" — oba wyglądają identycznie (uploader zwraca
+  None). Bez tego albo ✕ przestaje działać, albo odtworzona grafika kasuje się
+  sama przy pierwszym kliknięciu. Limit 5 MB, GC po 14 dniach, `.logo_store/`
+  w `.gitignore`, operacje dyskowe best-effort.
+  (E) **`tests/regression.py` ma PIERWSZE testy helperów z `app.py`** —
+  wyciągane po AST (importu `app.py` nie da się zrobić bez uruchomienia
+  Streamlita). Sprawdzone, że realnie łapią regresję: zepsucie sortowania torów
+  i usunięcie kubełka „bez toru" kończy się FAIL. To obala dotychczasową
+  notatkę „nie ma realistycznego testu na app.py" — dla CZYSTYCH funkcji jest.
+  (F) **`st.components.v1.html` NADAL DZIAŁA** w 1.59.2 (notatka „działa do
+  1.58" się nie sprawdziła). Deprecation mówi teraz: zamiennik to **`st.iframe`**,
+  usunięcie „po 2026-06-01" — data minęła, API żyje. Podgląd bezpieczny, ale
+  migracja na `st.iframe` to sensowny follow-up (iframe nadal izoluje CSS,
+  więc może być prostsza niż porzucona próba z `st.html`).
 - 2026-07-16 (fix2) — **KRYTYCZNY: nierozstrzygnięte pary drabinki przesuwały
   parowanie (IMP 1/16).** Pusta komórka zawodnika (czekamy na wynik poprzedniej
   fazy) → stary kod `i+=1` sklejał zawodników z RÓŻNYCH meczów (Skoracki tor15 +

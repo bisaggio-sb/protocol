@@ -2924,6 +2924,18 @@ if gen_clicked:
         if total == 0:
             st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
 
+        # Duży wsad = kilka minut pracy serwera. Generowanie żyje tak długo, jak
+        # połączenie z kartą przeglądarki: uśpiony laptop albo karta w tle na
+        # dłużej potrafią je przerwać w pół drogi (i to bez żadnego komunikatu).
+        # Lepiej uprzedzić, niż kazać zaczynać od nowa.
+        if total >= 200:
+            st.info(f"Duży wydruk ({total} "
+                    f"{generate_docx.pluralize(total, 'protokół', 'protokoły', 'protokołów')}) "
+                    f"— to potrwa kilka minut. Zostaw tę kartę otwartą i nie usypiaj "
+                    f"komputera, bo przerwane połączenie zatrzymuje generowanie. "
+                    f"Możesz też podzielić wydruk po torach (sekcja „Wybierz konkretne "
+                    f"protokoły do wydruku”).")
+
         # Progress bar zamiast spinnera — przy 50+ meczach generowanie trwa
         # parę sekund per mecz (kopiowanie XML, anchor images). User chce widzieć ruch.
         _pb_word = generate_docx.pluralize(total, 'protokół', 'protokoły', 'protokołów')
