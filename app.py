@@ -3,7 +3,7 @@ Generator protokołów meczowych Mölkky
 Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
 """
 import streamlit as st
-import io, re, base64, os, subprocess, tempfile, zipfile
+import io, re, base64, os, signal, subprocess, tempfile, zipfile
 from datetime import date, timedelta
 from PIL import Image
 import generate_docx
@@ -74,16 +74,65 @@ def _section(num, title, subtitle=None):
 
 # ─── Helper: konwersja docx → pdf (przeniesione na górę — używa go też tryb
 # ręczny, który renderuje się w sekcji 2 przed dawną definicją) ──────────
+# ── Parametry konwersji PDF ──────────────────────────────────────────────
+# Zmierzone empirycznie (2026-08-04, 480 protokołów grupowych IND):
+# LibreOffice konwertuje ~0.104 s/stronę i jest JEDNOWĄTKOWE — więcej rdzeni
+# nie przyspiesza. Na Streamlit Cloud CPU jest współdzielone między aplikacje,
+# więc realnie bywa kilkukrotnie wolniej. Stąd DWIE różne stałe:
+#  • _EST — do paska postępu (uczciwa średnia; zawyżona estymata sprawia, że
+#    pasek stoi w miejscu i user myśli że apka zamarła → odświeża i sam
+#    przerywa własne generowanie),
+#  • _LIMIT — do timeoutu (pesymistycznie, na wypadek dławienia CPU).
+# Stary kod miał 0.6 s/stronę w estymacie (5.8× za dużo → pasek dochodził do
+# 16% przy 480 stronach) i sztywny timeout 300 s (przy 480 stronach pękał już
+# przy ~16% dostępnego rdzenia — czyli dokładnie wtedy, gdy serwer był zajęty).
+PDF_S_PER_PAGE_EST = 0.35
+PDF_S_PER_PAGE_LIMIT = 1.2
+PDF_TIMEOUT_MIN_S = 300.0
+PDF_TIMEOUT_MAX_S = 1800.0
+
+
+def _kill_proc_tree(proc):
+    """Ubija CAŁĄ grupę procesów LibreOffice.
+
+    `proc.kill()` nie wystarcza: `libreoffice` to skrypt startowy (oosplash),
+    który odpala właściwy `soffice.bin` jako osobny proces. Zabicie wrappera
+    zostawia sierotę żrącą rdzeń i ~0.7 GB RAM aż do końca życia kontenera.
+    Dlatego proces startuje z `start_new_session=True` (własna grupa), a tutaj
+    ubijamy grupę w całości.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        try: proc.kill()
+        except Exception: pass
+
+
 def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
     """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
     co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
-    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
+
+    `est_pages` to liczba STRON wynikowego PDF-a (nie meczów!) — dla szablonów
+    Bo5/Bo7 jeden mecz to dwie strony. Patrz `_pages_per_match`.
+
+    FIX 2026-08-04 (przyczyna „u mnie działa, u kolegi nie"):
+    każda konwersja dostaje WŁASNY profil LibreOffice (`-env:UserInstallation`).
+    Bez tego wszystkie konwersje na serwerze dzielą jeden profil w $HOME i dwie
+    uruchomione naraz albo się serializują (2× dłużej), albo jedna pada z rc=1
+    („failed to launch javaldx"). Serwer jest wspólny dla wszystkich userów
+    aplikacji, więc trafiało to losowo — kto akurat kliknął jako drugi.
+    """
     import time
+    proc = None
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             docx_path = os.path.join(tmpdir, f"{name}.docx")
             with open(docx_path, 'wb') as f:
                 f.write(docx_bytes)
+            # Profil LO wewnątrz tmpdir → unikalny per konwersja i sprzątany razem z nim.
+            lo_profile = os.path.join(tmpdir, 'loprofile')
             pdf_filter = ('pdf:writer_pdf_Export:'
                           '{"SelectPdfVersion":{"type":"long","value":"0"},'
                           '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
@@ -91,18 +140,25 @@ def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
                           '"MaxImageResolution":{"type":"long","value":"150"},'
                           '"UseLosslessCompression":{"type":"boolean","value":"false"},'
                           '"Quality":{"type":"long","value":"90"}}')
-            est_total = max(6.0, 5.0 + 0.6 * est_pages)
+            est_pages = max(1, int(est_pages or 1))
+            est_total = max(6.0, 4.0 + PDF_S_PER_PAGE_EST * est_pages)
+            timeout_s = min(PDF_TIMEOUT_MAX_S,
+                            max(PDF_TIMEOUT_MIN_S, PDF_S_PER_PAGE_LIMIT * est_pages))
             proc = subprocess.Popen(
-                ['libreoffice', '--headless', '--convert-to', pdf_filter,
+                ['libreoffice', f'-env:UserInstallation=file://{lo_profile}',
+                 '--headless', '--convert-to', pdf_filter,
                  '--outdir', tmpdir, docx_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True,
             )
             start = time.time()
             while proc.poll() is None:
                 elapsed = time.time() - start
-                if elapsed > 300:
-                    proc.kill()
-                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
+                if elapsed > timeout_s:
+                    _kill_proc_tree(proc)
+                    return None, (f"Konwersja PDF trwała zbyt długo "
+                                  f"(>{int(timeout_s / 60)} min). Spróbuj podzielić "
+                                  f"wydruk na mniejsze części (np. po torach).")
                 if progress_cb:
                     try: progress_cb(elapsed, est_total)
                     except Exception: pass
@@ -118,6 +174,23 @@ def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
         return None, "LibreOffice nie jest zainstalowany na serwerze."
     except Exception as e:
         return None, str(e)
+    finally:
+        # KRYTYCZNE: gdy Streamlit ubija skrypt (user zamknął kartę, uśpił laptopa,
+        # zerwał się websocket), leci StopException/RerunException — to BaseException,
+        # więc NIE łapie go żaden `except Exception` wyżej. Bez tego LibreOffice
+        # zostawał sierotą i spowalniał każdą kolejną konwersję na serwerze.
+        _kill_proc_tree(proc)
+
+
+def _pages_per_match(template_type):
+    """Ile stron PDF zajmuje jeden protokół danego szablonu.
+
+    Bo5/Bo7 mają nagłówek + tabelę wyników na dwóch stronach (sety 4+ lądują
+    na str. 2), reszta mieści się na jednej. Używane tylko do estymaty czasu
+    konwersji i timeoutu — pomyłka nie psuje dokumentu, tylko pasek postępu.
+    """
+    tt = str(template_type or '')
+    return 2 if (tt.endswith('Bo5') or tt.endswith('Bo7')) else 1
 
 
 # ─── Tryb „własna lista meczów" (bez arkusza PFM) ───────────────────────
@@ -2347,16 +2420,18 @@ if gen_clicked:
 
             _pdf, _pdf_err = (None, None)
             if fmt_pdf:
-                _stron = generate_docx.pluralize(_g_count, 'stronę', 'strony', 'stron')
-                _pdf_pb = st.progress(0.0, text=f"Konwertuję {_g_count} {_stron} do PDF…")
-                def _on_pdf(elapsed, est, _pb=_pdf_pb, _n=_g_count, _s=_stron):
+                # Bo5/Bo7 = 2 strony na protokół — liczymy STRONY, nie mecze.
+                _g_pages = _g_count * _pages_per_match(_tt)
+                _stron = generate_docx.pluralize(_g_pages, 'stronę', 'strony', 'stron')
+                _pdf_pb = st.progress(0.0, text=f"Konwertuję {_g_pages} {_stron} do PDF…")
+                def _on_pdf(elapsed, est, _pb=_pdf_pb, _n=_g_pages, _s=_stron):
                     try:
                         _pb.progress(min(0.97, elapsed / max(1, est)),
                             text=f"Konwertuję {_n} {_s} do PDF… {int(elapsed)}s")
                     except Exception: pass
                 try:
                     _pdf, _pdf_err = docx_to_pdf(_docx, _safe,
-                                                 progress_cb=_on_pdf, est_pages=_g_count)
+                                                 progress_cb=_on_pdf, est_pages=_g_pages)
                 finally:
                     try: _pdf_pb.empty()
                     except Exception: pass
@@ -2646,16 +2721,18 @@ if gen_clicked:
     
         pdf_bytes, pdf_err = (None, None)
         if fmt_pdf:
-            _stron = generate_docx.pluralize(total, 'stronę', 'strony', 'stron')
-            _pdf_pb = st.progress(0.0, text=f"Konwertuję {total} {_stron} do PDF…")
+            # Bo5/Bo7 = 2 strony na protokół — liczymy STRONY, nie mecze.
+            _n_pages = total * _pages_per_match(template_type)
+            _stron = generate_docx.pluralize(_n_pages, 'stronę', 'strony', 'stron')
+            _pdf_pb = st.progress(0.0, text=f"Konwertuję {_n_pages} {_stron} do PDF…")
             def _on_pdf(elapsed, est):
                 try:
                     _pdf_pb.progress(min(0.97, elapsed / max(1, est)),
-                        text=f"Konwertuję {total} {_stron} do PDF… {int(elapsed)}s")
+                        text=f"Konwertuję {_n_pages} {_stron} do PDF… {int(elapsed)}s")
                 except Exception: pass
             try:
                 pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name,
-                                                  progress_cb=_on_pdf, est_pages=total)
+                                                  progress_cb=_on_pdf, est_pages=_n_pages)
             finally:
                 try: _pdf_pb.empty()
                 except Exception: pass
