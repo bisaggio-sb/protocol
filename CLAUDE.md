@@ -215,13 +215,11 @@ w wierszu tabeli (PIL).
 - [ ] IND Bo7 — nagłówek str.1 do prawej krawędzi w PDF: wymaga EDYCJI SZABLONU
   (kod nie daje rady, patrz log fix5). Nice-to-have.
 - [x] Wydruk per tor + pigułki + zapamiętywanie grafik + fix konwersji PDF (2026-08-04)
-- [ ] Filtr per tor w trybie multi-phase (drukuj godzinę) — jedyna ścieżka bez
-  loadera meczów; wymaga własnego przycisku „Wczytaj tory" pętlącego
-  `fetch_drabinka_phase`. Świadomie pominięte w iteracji 2026-08-04.
-- [ ] `copy.deepcopy` szablonu (`generate_docx.py:4139`) = 61% czasu buildu
-  i ~2.4 MB RAM/mecz. Przy 480 meczach to ~1.1 GB w Pythonie. Optymalizacja
-  (np. deepcopy raz + tańsze klonowanie) obniżyłaby ryzyko OOM przy dużych
-  turniejach. Nie ruszane — wymaga ostrożności, bo dotyka rdzenia składania docx.
+- [x] Składanie strumieniowe docx (RAM 1180→253 MB, build 10→3 s) — 2026-08-04
+- ~~Filtr per tor w trybie multi-phase (drukuj godzinę)~~ — **decyzja usera
+  2026-08-04: NIE robimy.** Ten tryb obsługuje fazy pucharowe o danej godzinie,
+  czyli kilka–kilkanaście meczów; dzielenie na połowy ma sens przy 480
+  protokołach, nie przy ośmiu.
 - [ ] Migracja podglądu `st.components.v1.html` → `st.iframe` (deprecation).
 
 ### Redesign UI (ZMERGOWANE NA PROD 2026-07-16 — user zaakceptował)
@@ -305,6 +303,28 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-08-04 (fix2) — **Składanie strumieniowe docx: RAM 1180→253 MB, build 10→3 s.**
+  Backlogowa teza „`copy.deepcopy` = 61% czasu, podmienić na tańsze klonowanie"
+  okazała się ŚLEPĄ ULICZKĄ — zmierzone: deepcopy lxml jest w C i jest
+  NAJSZYBSZY z dostępnych metod (`fromstring` z gotowych bajtów 0.75×,
+  `__deepcopy__` 0.99×). Prawdziwy problem to nie metoda klonowania, tylko
+  TRZYMANIE drzewa lxml wszystkich protokołów naraz: 480 meczów = 71.7 MB
+  realnego XML, ale ~1.18 GB w pamięci (**~16× narzutu na węzeł lxml**).
+  FIX: każdy gotowy protokół serializujemy od razu (`etree.tostring`) i porzucamy
+  jego drzewo; w `body` zostaje komentarz-znacznik `<!--PFM_PROTOKOLY-->`,
+  podmieniany na zebrane bajty po `etree.tostring(doc_root)`. Wykonalne, bo CAŁE
+  przetwarzanie jest per-protokół WEWNĄTRZ pętli — po niej jest tylko `sectPr`
+  i zapis (zweryfikowane: jedyne odwołania do `body` to linie page-break,
+  append protokołu i sectPr). Guard: znacznik musi wystąpić dokładnie raz,
+  inaczej `RuntimeError` — wolimy głośny błąd niż cichy pusty dokument.
+  **Efekt uboczny: 3× SZYBCIEJ** (10.0→3.0 s przy 480). Przyczyna: znika presja
+  na alokator, która dawała wcześniej super-liniowy czas O(N^1.3).
+  **WERYFIKACJA (mocna):** kanoniczny XML `document.xml` IDENTYCZNY dla
+  wszystkich 14 szablonów (z QR i logo PFM); PDF z 480 protokołów — tekst
+  wszystkich stron identyczny, różnica binarna = 93 bajty (`CreationDate`).
+  Koszt: docx +2.8% (3.19→3.28 MB) — powtórzone deklaracje `xmlns` w każdym
+  zserializowanym kawałku. Nieszkodliwe (redundantne deklaracje są legalne),
+  świadomie NIE wycinane stringologią.
 - 2026-08-04 — **4 tematy usera: crash przy 480 meczach, wydruk per tor,
   pigułki, zapamiętywanie grafik.**
   (A) **KRYTYCZNY — „mnie działało 480 meczów, koledze się wykrzaczało (Mac)".**
