@@ -182,6 +182,121 @@ def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
         _kill_proc_tree(proc)
 
 
+# ── Wybór torów do wydruku (sekcja selektywnego wydruku) ─────────────────
+# Kubełek na mecze bez numeru toru. W drabince `tor` bywa pusty (pary jeszcze
+# nierozstrzygnięte / arkusz bez kolumny Tor). Bez osobnego kubełka takie mecze
+# znikałyby po cichu przy włączonym filtrze — a cicha utrata protokołu to
+# dokładnie ten rodzaj błędu, który w tym projekcie już raz boleśnie wyszedł
+# (log 2026-07-16: „głośne pominięcie > ciche skrzyżowane protokoły").
+TOR_NONE = "bez toru"
+
+
+def _tor_sort_key(t):
+    """Tory sortujemy liczbowo (1,2,…,10,11), nie alfabetycznie (1,10,11,2)."""
+    s = str(t).strip()
+    if s.isdigit():
+        return (0, int(s), "")
+    return (1, 0, s.lower())
+
+
+def _tor_label(m):
+    """Numer toru meczu jako etykieta — pusty tor trafia do kubełka TOR_NONE."""
+    return (m.get('tor') or '').strip() or TOR_NONE
+
+
+def _collect_tors(matches):
+    """Posortowana lista unikalnych torów występujących w meczach."""
+    return sorted({_tor_label(m) for m in matches}, key=_tor_sort_key)
+
+
+def _tor_picker(all_tors, key_prefix):
+    """Wybór torów do wydruku: klikalne pigułki + rząd skrótów.
+
+    Zwraca listę wybranych torów; PUSTA = bez filtra (wszystkie tory).
+
+    Dlaczego pigułki, a nie multiselect/checkboxy: tor wybiera się jednym
+    kliknięciem (bez rozwijania listy), a pigułki zawijają się do kolejnych
+    wierszy, więc 16 czy 30 torów wygląda tak samo dobrze — również na telefonie.
+    Siatka checkboxów wymagałaby N osobnych widgetów i N przeładowań aplikacji.
+
+    Skróty ustawiają wartość widgetu w `on_click`, czyli PRZED narysowaniem
+    pigułek w kolejnym przebiegu — dzięki temu „1. połowa" to jedno kliknięcie
+    i jedno przeładowanie zamiast odklikiwania kilkunastu pozycji.
+    """
+    if not all_tors:
+        return []
+    key = f'tors_{key_prefix}'
+    # Skróty parzyste/połowa mają sens tylko dla torów numerycznych.
+    numeric = [t for t in all_tors if str(t).strip().isdigit()]
+
+    def _set(vals):
+        st.session_state[key] = list(vals)
+
+    if numeric:
+        _bc = st.columns(6)
+        _btns = [
+            ("Wszystkie",   all_tors),
+            ("Wyczyść",     []),
+            ("1. połowa",   numeric[:(len(numeric) + 1) // 2]),
+            ("2. połowa",   numeric[(len(numeric) + 1) // 2:]),
+            ("Parzyste",    [t for t in numeric if int(t) % 2 == 0]),
+            ("Nieparzyste", [t for t in numeric if int(t) % 2 == 1]),
+        ]
+    else:
+        _bc = st.columns(2)
+        _btns = [("Wszystkie", all_tors), ("Wyczyść", [])]
+    for _col, (_lbl, _vals) in zip(_bc, _btns):
+        with _col:
+            st.button(_lbl, key=f'{key}_btn_{_lbl}', use_container_width=True,
+                      on_click=_set, args=(_vals,))
+
+    return st.pills(
+        "Tory do wydruku",
+        all_tors,
+        selection_mode="multi",
+        key=key,
+        help="Puste = wszystkie tory. Przydatne gdy dzielisz duży wydruk: "
+             "protokoły trafiają do sędziów przy konkretnych torach, więc "
+             "dzielenie po torach nie rozjeżdża się z harmonogramem.",
+    ) or []
+
+
+def _apply_tor_filter(sheets_data, sel_tors):
+    """Zawęża `sheets_data` [(label, [mecz,…]),…] do wybranych torów.
+
+    Puste `sel_tors` = bez filtra. Zwraca (nowe_sheets_data, ile_zostalo).
+    """
+    if not sel_tors:
+        return sheets_data, sum(len(m) for _, m in sheets_data)
+    _want = set(sel_tors)
+    _out, _kept = [], 0
+    for _label, _matches in sheets_data:
+        _sel = [m for m in _matches if _tor_label(m) in _want]
+        if _sel:
+            _out.append((_label, _sel))
+            _kept += len(_sel)
+    return _out, _kept
+
+
+def _tor_name_suffix(sel_tors):
+    """Fragment nazwy pliku z wybranymi torami — żeby nie pomylić plików.
+
+    Krótkie wybory wypisujemy wprost (`_tory_1-2-3`), przy dłuższych podajemy
+    zakres (`_tory_1-8`), żeby nazwa pliku nie urosła do absurdu.
+    """
+    if not sel_tors:
+        return ""
+    nums = sorted((t for t in sel_tors if str(t).strip().isdigit()), key=_tor_sort_key)
+    has_none = TOR_NONE in sel_tors
+    if not nums:
+        return "_bez_toru" if has_none else ""
+    if len(nums) <= 4:
+        body = "-".join(nums)
+    else:
+        body = f"{nums[0]}-{nums[-1]}"
+    return f"_tory_{body}" + ("_i_bez_toru" if has_none else "")
+
+
 def _pages_per_match(template_type):
     """Ile stron PDF zajmuje jeden protokół danego szablonu.
 
@@ -2028,6 +2143,9 @@ if tournament_phase == "Grupowa":
 # Tylko dla fazy grupowej (puchar generuje pojedynczą fazę, nie ma sensu filtrować).
 sel_groups = []
 sel_players = []
+# sel_tors definiujemy BEZWARUNKOWO — używa go wspólny filtr przy generowaniu,
+# a sekcja niżej ma gałęzie (grupowa / puchar), które nie wykonują się zawsze.
+sel_tors = []
 if tournament_phase == "Grupowa":
     # Etykiety zależne od typu turnieju: drużynowy (2/3/4-os.) operuje DRUŻYNAMI,
     # indywidualny ZAWODNIKAMI (user: w turniejach drużynowych ma być „drużyny").
@@ -2066,17 +2184,21 @@ if tournament_phase == "Grupowa":
                     _sd = generate_docx.fetch_all_group_sheets(_sel_sid)
                     _groups = []
                     _players_set = set()
+                    _all_matches = []
                     for gname, gmatches in _sd:
                         _letter = gname.replace('Gr.', '').replace('Grupa', '').strip()
                         _groups.append(_letter)
+                        _all_matches.extend(gmatches)
                         for m in gmatches:
                             for w in (m.get('z1', ''), m.get('z2', '')):
                                 w = (w or '').strip()
                                 # Sentinele pomijamy; „Gracz N" zostaje (user może chcieć go wybrać).
                                 if w and w.lower() != 'bye' and w.upper() != 'X':
                                     _players_set.add(w)
+                    # Tory bierzemy z tego samego pobrania — zero dodatkowych zapytań.
                     _cache = {'groups': _groups,
-                              'players': sorted(_players_set, key=lambda s: s.lower())}
+                              'players': sorted(_players_set, key=lambda s: s.lower()),
+                              'tors': _collect_tors(_all_matches)}
                     st.session_state[_cache_key] = _cache
                     st.rerun()
                 except Exception as e:
@@ -2098,10 +2220,12 @@ if tournament_phase == "Grupowa":
                 help="Puste = wszyscy. Wybór = tylko mecze, w których uczestniczy któryś z zaznaczonych "
                      "(po którejkolwiek stronie). Działa razem z filtrem grup (AND).",
             )
-            if sel_groups or sel_players:
+            sel_tors = _tor_picker(_cache.get('tors') or [], f'g_{_sel_sid}')
+            if sel_groups or sel_players or sel_tors:
                 _parts = []
                 if sel_groups: _parts.append(f"{len(sel_groups)} {generate_docx.pluralize(len(sel_groups), 'grupa','grupy','grup')}")
                 if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), *_sel_ent_gen)}")
+                if sel_tors: _parts.append(f"{len(sel_tors)} {generate_docx.pluralize(len(sel_tors), 'tor','tory','torów')}")
                 st.info(f"Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
 
 # ── Selektywny wydruk meczów drabinki (puchar, pojedyncza faza) ─────────
@@ -2162,8 +2286,16 @@ if is_pucharowa and selected_phase_keys_multi is None:
             if _pm_picked:
                 _pm_idx = sorted({int(l.split('.', 1)[0]) - 1 for l in _pm_picked})
                 sel_drabinka_matches = [_pm_cache[i] for i in _pm_idx]
-                st.info(f"Filtr aktywny: {len(sel_drabinka_matches)} z {len(_pm_cache)} "
-                        f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}. Generuj poniżej.")
+            sel_tors = _tor_picker(_collect_tors(_pm_cache),
+                                   f'p_{_pm_sid}_{tournament_phase}')
+            _pm_parts = []
+            if sel_drabinka_matches is not None:
+                _pm_parts.append(f"{len(sel_drabinka_matches)} z {len(_pm_cache)} "
+                                 f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}")
+            if sel_tors:
+                _pm_parts.append(f"{len(sel_tors)} {generate_docx.pluralize(len(sel_tors),'tor','tory','torów')}")
+            if _pm_parts:
+                st.info(f"Filtr aktywny: {' + '.join(_pm_parts)}. Generuj poniżej.")
         elif _pm_cache is not None:
             st.caption("Brak gotowych (kompletnych) par w tej fazie — wszystkie czekają na zawodników.")
 
@@ -2631,6 +2763,21 @@ if gen_clicked:
             else:
                 _orig_groups_count = len(sheets_data)
 
+        # ── Filtr per tor ────────────────────────────────────────────────
+        # Wspólny dla fazy grupowej i pucharowej (single-phase) — obie ścieżki
+        # zbiegają się tutaj z gotowym `sheets_data`. Stosujemy PO sortowaniu,
+        # żeby kolejność protokołów w wybranych torach została zachowana.
+        if sel_tors:
+            _before = sum(len(m) for _, m in sheets_data)
+            sheets_data, _after = _apply_tor_filter(sheets_data, sel_tors)
+            if not sheets_data:
+                st.error(f"Żaden mecz nie jest na wybranych torach "
+                         f"({', '.join(sel_tors)}). Zmień wybór torów.")
+                st.stop()
+            st.caption(f"Filtr torów: {_after} z {_before} "
+                       f"{generate_docx.pluralize(_before, 'meczu', 'meczów', 'meczów')} "
+                       f"(tory: {', '.join(sel_tors)}).")
+
         total = sum(len(m) for _,m in sheets_data)
         if total == 0:
             st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
@@ -2718,7 +2865,10 @@ if gen_clicked:
             elif sets_format == 'Best of 7':
                 format_suffix = '_Bo7'
             safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
-    
+        # Wybrane tory w nazwie pliku — przy dzieleniu wydruku na części
+        # („tory 1-8" i „tory 9-16") plik od razu mówi, co zawiera.
+        safe_name = f"{safe_name}{_tor_name_suffix(sel_tors)}"
+
         pdf_bytes, pdf_err = (None, None)
         if fmt_pdf:
             # Bo5/Bo7 = 2 strony na protokół — liczymy STRONY, nie mecze.
