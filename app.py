@@ -3,7 +3,7 @@ Generator protokołów meczowych Mölkky
 Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
 """
 import streamlit as st
-import io, re, base64, os, signal, subprocess, tempfile, zipfile
+import io, re, base64, os, secrets, signal, subprocess, tempfile, zipfile
 from datetime import date, timedelta
 from PIL import Image
 import generate_docx
@@ -471,6 +471,110 @@ def img_to_data_url(file_or_bytes):
     else:
         img_bytes = file_or_bytes
     return _bytes_to_data_url(img_bytes)
+
+
+# ── Zapamiętywanie wgranych grafik między sesjami ────────────────────────
+# Problem: `st.session_state` żyje tylko w obrębie JEDNEJ sesji Streamlita,
+# a nowa sesja powstaje nie tylko po odświeżeniu karty — także gdy websocket
+# zamilknie na ~2 minuty (uśpiony laptop, karta w tle, słabsza sieć) albo gdy
+# aplikacja się zrestartuje/obudzi po uśpieniu. Wtedy wgrane logo znika i
+# trzeba je wybierać od nowa.
+#
+# Rozwiązanie: bajty grafik lądują na dysku serwera, w katalogu nazwanym
+# losowym tokenem, który trzymamy w ADRESIE STRONY (?z=…). Adres przeżywa
+# reconnect, odświeżenie i restart aplikacji, więc grafiki wracają same.
+# Token jest prywatny dla danej przeglądarki — bez tego wszyscy użytkownicy
+# aplikacji dzieliliby jeden magazyn i logo jednego klubu trafiłoby do drugiego.
+LOGO_STORE_DIR = os.path.join(APP_DIR, '.logo_store')
+LOGO_STORE_TTL_S = 14 * 24 * 3600     # po 2 tygodniach zestaw sprzątamy
+LOGO_STORE_MAX_BYTES = 5 * 1024 * 1024  # tyle samo, ile server.maxUploadSize
+
+
+def _logo_token():
+    """Losowy identyfikator zestawu grafik, trzymany w adresie strony."""
+    try:
+        tok = st.query_params.get('z')
+    except Exception:
+        return None
+    if not tok or not re.fullmatch(r'[a-f0-9]{16}', str(tok)):
+        tok = secrets.token_hex(8)
+        try:
+            st.query_params['z'] = tok
+        except Exception:
+            return None
+    return tok
+
+
+def _logo_paths(token, i):
+    d = os.path.join(LOGO_STORE_DIR, token)
+    return d, os.path.join(d, f'{i}.img'), os.path.join(d, f'{i}.name')
+
+
+def _logo_save(token, i, name, raw):
+    """Zapisuje grafikę na dysk. Cicho odpuszcza, gdy dysk niedostępny."""
+    if not token or not raw or len(raw) > LOGO_STORE_MAX_BYTES:
+        return
+    try:
+        d, p_img, p_name = _logo_paths(token, i)
+        os.makedirs(d, exist_ok=True)
+        with open(p_img, 'wb') as fp:
+            fp.write(raw)
+        with open(p_name, 'w', encoding='utf-8') as fp:
+            fp.write(name or f'grafika_{i+1}.png')
+    except Exception:
+        pass
+
+
+def _logo_load(token, i):
+    """Zwraca (nazwa, bajty) zapisanej grafiki albo None."""
+    if not token:
+        return None
+    try:
+        _d, p_img, p_name = _logo_paths(token, i)
+        if not os.path.exists(p_img):
+            return None
+        with open(p_img, 'rb') as fp:
+            raw = fp.read()
+        try:
+            with open(p_name, encoding='utf-8') as fp:
+                name = fp.read().strip()
+        except Exception:
+            name = f'grafika_{i+1}.png'
+        return (name or f'grafika_{i+1}.png', raw) if raw else None
+    except Exception:
+        return None
+
+
+def _logo_delete(token, i):
+    if not token:
+        return
+    try:
+        _d, p_img, p_name = _logo_paths(token, i)
+        for p in (p_img, p_name):
+            if os.path.exists(p):
+                os.remove(p)
+    except Exception:
+        pass
+
+
+def _logo_store_gc():
+    """Kasuje zestawy starsze niż TTL, żeby magazyn nie rósł w nieskończoność."""
+    try:
+        if not os.path.isdir(LOGO_STORE_DIR):
+            return
+        import time as _t
+        now = _t.time()
+        for entry in os.listdir(LOGO_STORE_DIR):
+            d = os.path.join(LOGO_STORE_DIR, entry)
+            try:
+                if os.path.isdir(d) and now - os.path.getmtime(d) > LOGO_STORE_TTL_S:
+                    for fn in os.listdir(d):
+                        os.remove(os.path.join(d, fn))
+                    os.rmdir(d)
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 class _CachedUpload:
@@ -1444,18 +1548,26 @@ with st.container():
         # Ile grafik dodanych — czytamy WARTOŚĆ WIDGETU (źródło prawdy). Klucz to
         # 'logo_{i}_{nonce}' (nie 'logo_{i}'). Dzięki temu i upload, i usunięcie
         # krzyżykiem są widoczne w liczniku od razu (bez stale-cache lag).
+        _logo_tok = _logo_token()
+        _logo_store_gc()
+        # Licznik czyta stan EFEKTYWNY (widget albo zapamiętane bajty), bo grafika
+        # odtworzona z magazynu jest używana, mimo że sam uploader jest pusty.
         n_uploaded = 0
         for i in range(NUM_LOGOS):
             _ln_i = st.session_state.get(f'logo_nonce_{i}', 0)
-            if st.session_state.get(f'logo_{i}_{_ln_i}') is not None:
+            if (st.session_state.get(f'logo_{i}_{_ln_i}') is not None
+                    or st.session_state.get(f'logo_bytes_{i}') is not None
+                    or _logo_load(_logo_tok, i) is not None):
                 n_uploaded += 1
-        
+
         grafiki_label = "Grafiki"
         if n_uploaded > 0:
             grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
-        
+
         with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
-            st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
+            st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu). "
+                       "Grafiki zapamiętują się w tej przeglądarce, więc po odświeżeniu "
+                       "strony nie trzeba wgrywać ich od nowa.")
             # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
             # Korzystamy z prostego wrappera _CachedUpload. W sidebarze układamy
             # uploadery w jednej kolumnie (wąsko — 2 kolumny by się ścisnęły).
@@ -1464,20 +1576,50 @@ with st.container():
                 _ln = st.session_state.get(f'logo_nonce_{i}', 0)
                 f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
                                      key=f"logo_{i}_{_ln}", label_visibility="visible")
+                # Czy uploader MIAŁ plik w tej sesji — to odróżnia „user kliknął ✕"
+                # od „widget jest pusty, bo sesja zaczęła się od nowa". Bez tego
+                # rozróżnienia albo krzyżyk przestaje działać, albo odtworzona
+                # grafika kasuje się sama przy pierwszym kliknięciu w cokolwiek.
+                _had = st.session_state.get(f'logo_had_widget_{i}', False)
                 if f is not None:
-                    # Świeży upload — cache bajtów do session_state
+                    # Świeży upload — cache bajtów do session_state + na dysk
                     f.seek(0)
                     raw_bytes = f.read()
                     f.seek(0)
                     st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                    st.session_state[f'logo_had_widget_{i}'] = True
+                    _logo_save(_logo_tok, i, f.name, raw_bytes)
                     logo_files.append(_CachedUpload(f.name, raw_bytes))
-                else:
-                    # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
-                    # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
-                    # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
-                    # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
+                elif _had:
+                    # Widget MIAŁ plik, a teraz jest pusty → user kliknął ✕.
+                    # Kasujemy również zapamiętaną kopię, żeby nie wróciła.
+                    st.session_state[f'logo_had_widget_{i}'] = False
                     st.session_state.pop(f'logo_bytes_{i}', None)
+                    _logo_delete(_logo_tok, i)
                     logo_files.append(None)
+                else:
+                    # Uploader pusty i nic w nim nie było: bierzemy grafikę z pamięci
+                    # sesji, a gdy sesja jest nowa — z magazynu na dysku.
+                    _cached = st.session_state.get(f'logo_bytes_{i}')
+                    if _cached is None:
+                        _cached = _logo_load(_logo_tok, i)
+                        if _cached is not None:
+                            st.session_state[f'logo_bytes_{i}'] = _cached
+                    if _cached is None:
+                        logo_files.append(None)
+                    else:
+                        _cname, _craw = _cached
+                        _rc1, _rc2 = st.columns([3, 1])
+                        with _rc1:
+                            st.caption(f"Zapamiętana: **{_cname}**")
+                        with _rc2:
+                            if st.button("Usuń", key=f'logo_del_{i}',
+                                         use_container_width=True,
+                                         help="Usuwa zapamiętaną grafikę."):
+                                st.session_state.pop(f'logo_bytes_{i}', None)
+                                _logo_delete(_logo_tok, i)
+                                st.rerun()
+                        logo_files.append(_CachedUpload(_cname, _craw))
             
             # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
             logos_aspect = {}
