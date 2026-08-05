@@ -4080,6 +4080,20 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
 
     for el in list(body): body.remove(el)
 
+    # ── Składanie strumieniowe protokołów ────────────────────────────────
+    # Każdy gotowy protokół serializujemy od razu do bajtów i zwalniamy jego
+    # drzewo, zamiast trzymać w pamięci drzewo lxml wszystkich protokołów naraz.
+    # Powód (pomiar 2026-08-04, 480 meczów): drzewo zajmowało ~1.18 GB przy
+    # 71.7 MB rzeczywistych danych — lxml ma ~16× narzutu na węzeł. Przy limicie
+    # ~2.7 GB na Streamlit Cloud dwie duże generacje naraz groziły ubiciem
+    # aplikacji wszystkim użytkownikom. Po zmianie szczyt to ~200 MB.
+    #
+    # W ciele dokumentu zostaje komentarz-znacznik, który po serializacji
+    # podmieniamy na zebrane bajty — dzięki temu nie musimy budować drzewa.
+    _CHUNK_MARK = 'PFM_PROTOKOLY'
+    body.append(etree.Comment(_CHUNK_MARK))
+    doc_chunks = []
+
     # Szerokość lewej kolumny tabeli wynikowej (kotwica grafik) — z REALNEGO szablonu.
     # Stare szablony: 2970 dxa (5.24 cm). Nowe IND: 2694 dxa (4.75 cm). Liczymy
     # dynamicznie, żeby grafiki centrowały się w faktycznej kolumnie i nie wystawały
@@ -4121,7 +4135,7 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
             # już-pełnej stronie → przeskok o 2). Zamiast tego damy pageBreakBefore
             # na akapicie nagłówka meczu (hp) — patrz niżej. Inne typy: bez zmian.
             if not first and template_type != 'DWOJKA_Bo7':
-                body.append(_make_page_break_para())
+                doc_chunks.append(etree.tostring(_make_page_break_para()))
             first = False
             if hide_mecz_num and match.get('mecz'):
                 match = dict(match)
@@ -4394,14 +4408,29 @@ def build_document(sheet_id, sheets_url, sheets_data, logos=None,
                         not any((x.text or '').strip() for x in cloned[-1].iter(wt('t'))):
                     cloned.pop()
 
+            # Serializujemy protokół i porzucamy jego drzewo — patrz komentarz
+            # przy `doc_chunks` (składanie strumieniowe, oszczędność pamięci).
             for el in cloned:
-                body.append(el)
+                doc_chunks.append(etree.tostring(el))
+            del cloned
 
     if sectPr is not None:
         body.append(sectPr)
 
     doc_out = etree.tostring(doc_root, xml_declaration=True,
                              encoding='UTF-8', standalone=True)
+
+    # Podmiana znacznika na zserializowane protokoły (składanie strumieniowe).
+    # Znacznik MUSI wystąpić dokładnie raz — gdyby go zabrakło (np. ktoś wyczyścił
+    # body niżej), dokument wyszedłby pusty, więc wolimy głośny błąd niż cichy
+    # pusty plik.
+    _mark_bytes = f'<!--{_CHUNK_MARK}-->'.encode('utf-8')
+    if doc_out.count(_mark_bytes) != 1:
+        raise RuntimeError(
+            f'Składanie dokumentu: znacznik protokołów wystąpił '
+            f'{doc_out.count(_mark_bytes)} razy zamiast 1.')
+    doc_out = doc_out.replace(_mark_bytes, b''.join(doc_chunks))
+    del doc_chunks
     rels_out = etree.tostring(rels_root, xml_declaration=True,
                               encoding='UTF-8', standalone=True)
 

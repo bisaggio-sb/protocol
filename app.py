@@ -3,7 +3,7 @@ Generator protokołów meczowych Mölkky
 Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
 """
 import streamlit as st
-import io, re, base64, os, subprocess, tempfile, zipfile
+import io, re, base64, os, secrets, signal, subprocess, tempfile, zipfile
 from datetime import date, timedelta
 from PIL import Image
 import generate_docx
@@ -74,16 +74,65 @@ def _section(num, title, subtitle=None):
 
 # ─── Helper: konwersja docx → pdf (przeniesione na górę — używa go też tryb
 # ręczny, który renderuje się w sekcji 2 przed dawną definicją) ──────────
+# ── Parametry konwersji PDF ──────────────────────────────────────────────
+# Zmierzone empirycznie (2026-08-04, 480 protokołów grupowych IND):
+# LibreOffice konwertuje ~0.104 s/stronę i jest JEDNOWĄTKOWE — więcej rdzeni
+# nie przyspiesza. Na Streamlit Cloud CPU jest współdzielone między aplikacje,
+# więc realnie bywa kilkukrotnie wolniej. Stąd DWIE różne stałe:
+#  • _EST — do paska postępu (uczciwa średnia; zawyżona estymata sprawia, że
+#    pasek stoi w miejscu i user myśli że apka zamarła → odświeża i sam
+#    przerywa własne generowanie),
+#  • _LIMIT — do timeoutu (pesymistycznie, na wypadek dławienia CPU).
+# Stary kod miał 0.6 s/stronę w estymacie (5.8× za dużo → pasek dochodził do
+# 16% przy 480 stronach) i sztywny timeout 300 s (przy 480 stronach pękał już
+# przy ~16% dostępnego rdzenia — czyli dokładnie wtedy, gdy serwer był zajęty).
+PDF_S_PER_PAGE_EST = 0.35
+PDF_S_PER_PAGE_LIMIT = 1.2
+PDF_TIMEOUT_MIN_S = 300.0
+PDF_TIMEOUT_MAX_S = 1800.0
+
+
+def _kill_proc_tree(proc):
+    """Ubija CAŁĄ grupę procesów LibreOffice.
+
+    `proc.kill()` nie wystarcza: `libreoffice` to skrypt startowy (oosplash),
+    który odpala właściwy `soffice.bin` jako osobny proces. Zabicie wrappera
+    zostawia sierotę żrącą rdzeń i ~0.7 GB RAM aż do końca życia kontenera.
+    Dlatego proces startuje z `start_new_session=True` (własna grupa), a tutaj
+    ubijamy grupę w całości.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        try: proc.kill()
+        except Exception: pass
+
+
 def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
     """Konwertuje docx → pdf przez libreoffice. progress_cb(elapsed_s, est_total_s) wywoływany
     co ~0.4s by user widział że coś się dzieje (libreoffice nie daje realnego progress signal).
-    Estymacja: ~0.3s per strona + 2s overhead startu LO."""
+
+    `est_pages` to liczba STRON wynikowego PDF-a (nie meczów!) — dla szablonów
+    Bo5/Bo7 jeden mecz to dwie strony. Patrz `_pages_per_match`.
+
+    FIX 2026-08-04 (przyczyna „u mnie działa, u kolegi nie"):
+    każda konwersja dostaje WŁASNY profil LibreOffice (`-env:UserInstallation`).
+    Bez tego wszystkie konwersje na serwerze dzielą jeden profil w $HOME i dwie
+    uruchomione naraz albo się serializują (2× dłużej), albo jedna pada z rc=1
+    („failed to launch javaldx"). Serwer jest wspólny dla wszystkich userów
+    aplikacji, więc trafiało to losowo — kto akurat kliknął jako drugi.
+    """
     import time
+    proc = None
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             docx_path = os.path.join(tmpdir, f"{name}.docx")
             with open(docx_path, 'wb') as f:
                 f.write(docx_bytes)
+            # Profil LO wewnątrz tmpdir → unikalny per konwersja i sprzątany razem z nim.
+            lo_profile = os.path.join(tmpdir, 'loprofile')
             pdf_filter = ('pdf:writer_pdf_Export:'
                           '{"SelectPdfVersion":{"type":"long","value":"0"},'
                           '"EmbedStandardFonts":{"type":"boolean","value":"false"},'
@@ -91,18 +140,25 @@ def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
                           '"MaxImageResolution":{"type":"long","value":"150"},'
                           '"UseLosslessCompression":{"type":"boolean","value":"false"},'
                           '"Quality":{"type":"long","value":"90"}}')
-            est_total = max(6.0, 5.0 + 0.6 * est_pages)
+            est_pages = max(1, int(est_pages or 1))
+            est_total = max(6.0, 4.0 + PDF_S_PER_PAGE_EST * est_pages)
+            timeout_s = min(PDF_TIMEOUT_MAX_S,
+                            max(PDF_TIMEOUT_MIN_S, PDF_S_PER_PAGE_LIMIT * est_pages))
             proc = subprocess.Popen(
-                ['libreoffice', '--headless', '--convert-to', pdf_filter,
+                ['libreoffice', f'-env:UserInstallation=file://{lo_profile}',
+                 '--headless', '--convert-to', pdf_filter,
                  '--outdir', tmpdir, docx_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True,
             )
             start = time.time()
             while proc.poll() is None:
                 elapsed = time.time() - start
-                if elapsed > 300:
-                    proc.kill()
-                    return None, "Konwersja PDF trwała zbyt długo (>5 min)."
+                if elapsed > timeout_s:
+                    _kill_proc_tree(proc)
+                    return None, (f"Konwersja PDF trwała zbyt długo "
+                                  f"(>{int(timeout_s / 60)} min). Spróbuj podzielić "
+                                  f"wydruk na mniejsze części (np. po torach).")
                 if progress_cb:
                     try: progress_cb(elapsed, est_total)
                     except Exception: pass
@@ -118,6 +174,138 @@ def docx_to_pdf(docx_bytes, name, progress_cb=None, est_pages=1):
         return None, "LibreOffice nie jest zainstalowany na serwerze."
     except Exception as e:
         return None, str(e)
+    finally:
+        # KRYTYCZNE: gdy Streamlit ubija skrypt (user zamknął kartę, uśpił laptopa,
+        # zerwał się websocket), leci StopException/RerunException — to BaseException,
+        # więc NIE łapie go żaden `except Exception` wyżej. Bez tego LibreOffice
+        # zostawał sierotą i spowalniał każdą kolejną konwersję na serwerze.
+        _kill_proc_tree(proc)
+
+
+# ── Wybór torów do wydruku (sekcja selektywnego wydruku) ─────────────────
+# Kubełek na mecze bez numeru toru. W drabince `tor` bywa pusty (pary jeszcze
+# nierozstrzygnięte / arkusz bez kolumny Tor). Bez osobnego kubełka takie mecze
+# znikałyby po cichu przy włączonym filtrze — a cicha utrata protokołu to
+# dokładnie ten rodzaj błędu, który w tym projekcie już raz boleśnie wyszedł
+# (log 2026-07-16: „głośne pominięcie > ciche skrzyżowane protokoły").
+TOR_NONE = "bez toru"
+
+
+def _tor_sort_key(t):
+    """Tory sortujemy liczbowo (1,2,…,10,11), nie alfabetycznie (1,10,11,2)."""
+    s = str(t).strip()
+    if s.isdigit():
+        return (0, int(s), "")
+    return (1, 0, s.lower())
+
+
+def _tor_label(m):
+    """Numer toru meczu jako etykieta — pusty tor trafia do kubełka TOR_NONE."""
+    return (m.get('tor') or '').strip() or TOR_NONE
+
+
+def _collect_tors(matches):
+    """Posortowana lista unikalnych torów występujących w meczach."""
+    return sorted({_tor_label(m) for m in matches}, key=_tor_sort_key)
+
+
+def _tor_picker(all_tors, key_prefix):
+    """Wybór torów do wydruku: klikalne pigułki + rząd skrótów.
+
+    Zwraca listę wybranych torów; PUSTA = bez filtra (wszystkie tory).
+
+    Dlaczego pigułki, a nie multiselect/checkboxy: tor wybiera się jednym
+    kliknięciem (bez rozwijania listy), a pigułki zawijają się do kolejnych
+    wierszy, więc 16 czy 30 torów wygląda tak samo dobrze — również na telefonie.
+    Siatka checkboxów wymagałaby N osobnych widgetów i N przeładowań aplikacji.
+
+    Skróty ustawiają wartość widgetu w `on_click`, czyli PRZED narysowaniem
+    pigułek w kolejnym przebiegu — dzięki temu „1. połowa" to jedno kliknięcie
+    i jedno przeładowanie zamiast odklikiwania kilkunastu pozycji.
+    """
+    if not all_tors:
+        return []
+    key = f'tors_{key_prefix}'
+    # Skróty parzyste/połowa mają sens tylko dla torów numerycznych.
+    numeric = [t for t in all_tors if str(t).strip().isdigit()]
+
+    def _set(vals):
+        st.session_state[key] = list(vals)
+
+    if numeric:
+        _bc = st.columns(6)
+        _btns = [
+            ("Wszystkie",   all_tors),
+            ("Wyczyść",     []),
+            ("1. połowa",   numeric[:(len(numeric) + 1) // 2]),
+            ("2. połowa",   numeric[(len(numeric) + 1) // 2:]),
+            ("Parzyste",    [t for t in numeric if int(t) % 2 == 0]),
+            ("Nieparzyste", [t for t in numeric if int(t) % 2 == 1]),
+        ]
+    else:
+        _bc = st.columns(2)
+        _btns = [("Wszystkie", all_tors), ("Wyczyść", [])]
+    for _col, (_lbl, _vals) in zip(_bc, _btns):
+        with _col:
+            st.button(_lbl, key=f'{key}_btn_{_lbl}', use_container_width=True,
+                      on_click=_set, args=(_vals,))
+
+    return st.pills(
+        "Tory do wydruku",
+        all_tors,
+        selection_mode="multi",
+        key=key,
+        help="Puste = wszystkie tory. Przydatne gdy dzielisz duży wydruk: "
+             "protokoły trafiają do sędziów przy konkretnych torach, więc "
+             "dzielenie po torach nie rozjeżdża się z harmonogramem.",
+    ) or []
+
+
+def _apply_tor_filter(sheets_data, sel_tors):
+    """Zawęża `sheets_data` [(label, [mecz,…]),…] do wybranych torów.
+
+    Puste `sel_tors` = bez filtra. Zwraca (nowe_sheets_data, ile_zostalo).
+    """
+    if not sel_tors:
+        return sheets_data, sum(len(m) for _, m in sheets_data)
+    _want = set(sel_tors)
+    _out, _kept = [], 0
+    for _label, _matches in sheets_data:
+        _sel = [m for m in _matches if _tor_label(m) in _want]
+        if _sel:
+            _out.append((_label, _sel))
+            _kept += len(_sel)
+    return _out, _kept
+
+
+def _tor_name_suffix(sel_tors):
+    """Fragment nazwy pliku z wybranymi torami — żeby nie pomylić plików.
+
+    Krótkie wybory wypisujemy wprost (`_tory_1-2-3`), przy dłuższych podajemy
+    zakres (`_tory_1-8`), żeby nazwa pliku nie urosła do absurdu.
+    """
+    if not sel_tors:
+        return ""
+    nums = sorted((t for t in sel_tors if str(t).strip().isdigit()), key=_tor_sort_key)
+    has_none = TOR_NONE in sel_tors
+    if not nums:
+        return "_bez_toru" if has_none else ""
+    if len(nums) <= 4:
+        body = "-".join(nums)
+    else:
+        body = f"{nums[0]}-{nums[-1]}"
+    return f"_tory_{body}" + ("_i_bez_toru" if has_none else "")
+
+
+def _pages_per_match(template_type):
+    """Ile stron PDF zajmuje jeden protokół danego szablonu.
+
+    Bo5/Bo7 mają nagłówek + tabelę wyników na dwóch stronach (sety 4+ lądują
+    na str. 2), reszta mieści się na jednej. Używane tylko do estymaty czasu
+    konwersji i timeoutu — pomyłka nie psuje dokumentu, tylko pasek postępu.
+    """
+    tt = str(template_type or '')
+    return 2 if (tt.endswith('Bo5') or tt.endswith('Bo7')) else 1
 
 
 # ─── Tryb „własna lista meczów" (bez arkusza PFM) ───────────────────────
@@ -283,6 +471,110 @@ def img_to_data_url(file_or_bytes):
     else:
         img_bytes = file_or_bytes
     return _bytes_to_data_url(img_bytes)
+
+
+# ── Zapamiętywanie wgranych grafik między sesjami ────────────────────────
+# Problem: `st.session_state` żyje tylko w obrębie JEDNEJ sesji Streamlita,
+# a nowa sesja powstaje nie tylko po odświeżeniu karty — także gdy websocket
+# zamilknie na ~2 minuty (uśpiony laptop, karta w tle, słabsza sieć) albo gdy
+# aplikacja się zrestartuje/obudzi po uśpieniu. Wtedy wgrane logo znika i
+# trzeba je wybierać od nowa.
+#
+# Rozwiązanie: bajty grafik lądują na dysku serwera, w katalogu nazwanym
+# losowym tokenem, który trzymamy w ADRESIE STRONY (?z=…). Adres przeżywa
+# reconnect, odświeżenie i restart aplikacji, więc grafiki wracają same.
+# Token jest prywatny dla danej przeglądarki — bez tego wszyscy użytkownicy
+# aplikacji dzieliliby jeden magazyn i logo jednego klubu trafiłoby do drugiego.
+LOGO_STORE_DIR = os.path.join(APP_DIR, '.logo_store')
+LOGO_STORE_TTL_S = 14 * 24 * 3600     # po 2 tygodniach zestaw sprzątamy
+LOGO_STORE_MAX_BYTES = 5 * 1024 * 1024  # tyle samo, ile server.maxUploadSize
+
+
+def _logo_token():
+    """Losowy identyfikator zestawu grafik, trzymany w adresie strony."""
+    try:
+        tok = st.query_params.get('z')
+    except Exception:
+        return None
+    if not tok or not re.fullmatch(r'[a-f0-9]{16}', str(tok)):
+        tok = secrets.token_hex(8)
+        try:
+            st.query_params['z'] = tok
+        except Exception:
+            return None
+    return tok
+
+
+def _logo_paths(token, i):
+    d = os.path.join(LOGO_STORE_DIR, token)
+    return d, os.path.join(d, f'{i}.img'), os.path.join(d, f'{i}.name')
+
+
+def _logo_save(token, i, name, raw):
+    """Zapisuje grafikę na dysk. Cicho odpuszcza, gdy dysk niedostępny."""
+    if not token or not raw or len(raw) > LOGO_STORE_MAX_BYTES:
+        return
+    try:
+        d, p_img, p_name = _logo_paths(token, i)
+        os.makedirs(d, exist_ok=True)
+        with open(p_img, 'wb') as fp:
+            fp.write(raw)
+        with open(p_name, 'w', encoding='utf-8') as fp:
+            fp.write(name or f'grafika_{i+1}.png')
+    except Exception:
+        pass
+
+
+def _logo_load(token, i):
+    """Zwraca (nazwa, bajty) zapisanej grafiki albo None."""
+    if not token:
+        return None
+    try:
+        _d, p_img, p_name = _logo_paths(token, i)
+        if not os.path.exists(p_img):
+            return None
+        with open(p_img, 'rb') as fp:
+            raw = fp.read()
+        try:
+            with open(p_name, encoding='utf-8') as fp:
+                name = fp.read().strip()
+        except Exception:
+            name = f'grafika_{i+1}.png'
+        return (name or f'grafika_{i+1}.png', raw) if raw else None
+    except Exception:
+        return None
+
+
+def _logo_delete(token, i):
+    if not token:
+        return
+    try:
+        _d, p_img, p_name = _logo_paths(token, i)
+        for p in (p_img, p_name):
+            if os.path.exists(p):
+                os.remove(p)
+    except Exception:
+        pass
+
+
+def _logo_store_gc():
+    """Kasuje zestawy starsze niż TTL, żeby magazyn nie rósł w nieskończoność."""
+    try:
+        if not os.path.isdir(LOGO_STORE_DIR):
+            return
+        import time as _t
+        now = _t.time()
+        for entry in os.listdir(LOGO_STORE_DIR):
+            d = os.path.join(LOGO_STORE_DIR, entry)
+            try:
+                if os.path.isdir(d) and now - os.path.getmtime(d) > LOGO_STORE_TTL_S:
+                    for fn in os.listdir(d):
+                        os.remove(os.path.join(d, fn))
+                    os.rmdir(d)
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 class _CachedUpload:
@@ -1256,18 +1548,26 @@ with st.container():
         # Ile grafik dodanych — czytamy WARTOŚĆ WIDGETU (źródło prawdy). Klucz to
         # 'logo_{i}_{nonce}' (nie 'logo_{i}'). Dzięki temu i upload, i usunięcie
         # krzyżykiem są widoczne w liczniku od razu (bez stale-cache lag).
+        _logo_tok = _logo_token()
+        _logo_store_gc()
+        # Licznik czyta stan EFEKTYWNY (widget albo zapamiętane bajty), bo grafika
+        # odtworzona z magazynu jest używana, mimo że sam uploader jest pusty.
         n_uploaded = 0
         for i in range(NUM_LOGOS):
             _ln_i = st.session_state.get(f'logo_nonce_{i}', 0)
-            if st.session_state.get(f'logo_{i}_{_ln_i}') is not None:
+            if (st.session_state.get(f'logo_{i}_{_ln_i}') is not None
+                    or st.session_state.get(f'logo_bytes_{i}') is not None
+                    or _logo_load(_logo_tok, i) is not None):
                 n_uploaded += 1
-        
+
         grafiki_label = "Grafiki"
         if n_uploaded > 0:
             grafiki_label += f" – dodano {n_uploaded}/{NUM_LOGOS}"
-        
+
         with st.expander(grafiki_label, expanded=(n_uploaded > 0)):
-            st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu).")
+            st.caption("Dodaj do 4 dodatkowych grafik (np. logo sponsora, miasta, klubu). "
+                       "Grafiki zapamiętują się w tej przeglądarce, więc po odświeżeniu "
+                       "strony nie trzeba wgrywać ich od nowa.")
             # logo_files: lista (filename, bytes) lub None — taka żeby logika niżej działała.
             # Korzystamy z prostego wrappera _CachedUpload. W sidebarze układamy
             # uploadery w jednej kolumnie (wąsko — 2 kolumny by się ścisnęły).
@@ -1276,20 +1576,50 @@ with st.container():
                 _ln = st.session_state.get(f'logo_nonce_{i}', 0)
                 f = st.file_uploader(f"Grafika {i+1}", type=["png","jpg","jpeg"],
                                      key=f"logo_{i}_{_ln}", label_visibility="visible")
+                # Czy uploader MIAŁ plik w tej sesji — to odróżnia „user kliknął ✕"
+                # od „widget jest pusty, bo sesja zaczęła się od nowa". Bez tego
+                # rozróżnienia albo krzyżyk przestaje działać, albo odtworzona
+                # grafika kasuje się sama przy pierwszym kliknięciu w cokolwiek.
+                _had = st.session_state.get(f'logo_had_widget_{i}', False)
                 if f is not None:
-                    # Świeży upload — cache bajtów do session_state
+                    # Świeży upload — cache bajtów do session_state + na dysk
                     f.seek(0)
                     raw_bytes = f.read()
                     f.seek(0)
                     st.session_state[f'logo_bytes_{i}'] = (f.name, raw_bytes)
+                    st.session_state[f'logo_had_widget_{i}'] = True
+                    _logo_save(_logo_tok, i, f.name, raw_bytes)
                     logo_files.append(_CachedUpload(f.name, raw_bytes))
-                else:
-                    # Widget pusty = brak grafiki. Czyścimy cache, żeby KRZYŻYK
-                    # na file_uploaderze faktycznie usuwał grafikę (bez osobnego
-                    # przycisku "Usuń"). Streamlit ≥1.35 zachowuje wartość uploadera
-                    # po rerunie (np. po download_button), więc None tu = user kliknął ✕.
+                elif _had:
+                    # Widget MIAŁ plik, a teraz jest pusty → user kliknął ✕.
+                    # Kasujemy również zapamiętaną kopię, żeby nie wróciła.
+                    st.session_state[f'logo_had_widget_{i}'] = False
                     st.session_state.pop(f'logo_bytes_{i}', None)
+                    _logo_delete(_logo_tok, i)
                     logo_files.append(None)
+                else:
+                    # Uploader pusty i nic w nim nie było: bierzemy grafikę z pamięci
+                    # sesji, a gdy sesja jest nowa — z magazynu na dysku.
+                    _cached = st.session_state.get(f'logo_bytes_{i}')
+                    if _cached is None:
+                        _cached = _logo_load(_logo_tok, i)
+                        if _cached is not None:
+                            st.session_state[f'logo_bytes_{i}'] = _cached
+                    if _cached is None:
+                        logo_files.append(None)
+                    else:
+                        _cname, _craw = _cached
+                        _rc1, _rc2 = st.columns([3, 1])
+                        with _rc1:
+                            st.caption(f"Zapamiętana: **{_cname}**")
+                        with _rc2:
+                            if st.button("Usuń", key=f'logo_del_{i}',
+                                         use_container_width=True,
+                                         help="Usuwa zapamiętaną grafikę."):
+                                st.session_state.pop(f'logo_bytes_{i}', None)
+                                _logo_delete(_logo_tok, i)
+                                st.rerun()
+                        logo_files.append(_CachedUpload(_cname, _craw))
             
             # Aspect ratios uploadowanych grafik (potrzebne wcześniej do compute_default_positions)
             logos_aspect = {}
@@ -1955,6 +2285,9 @@ if tournament_phase == "Grupowa":
 # Tylko dla fazy grupowej (puchar generuje pojedynczą fazę, nie ma sensu filtrować).
 sel_groups = []
 sel_players = []
+# sel_tors definiujemy BEZWARUNKOWO — używa go wspólny filtr przy generowaniu,
+# a sekcja niżej ma gałęzie (grupowa / puchar), które nie wykonują się zawsze.
+sel_tors = []
 if tournament_phase == "Grupowa":
     # Etykiety zależne od typu turnieju: drużynowy (2/3/4-os.) operuje DRUŻYNAMI,
     # indywidualny ZAWODNIKAMI (user: w turniejach drużynowych ma być „drużyny").
@@ -1993,17 +2326,21 @@ if tournament_phase == "Grupowa":
                     _sd = generate_docx.fetch_all_group_sheets(_sel_sid)
                     _groups = []
                     _players_set = set()
+                    _all_matches = []
                     for gname, gmatches in _sd:
                         _letter = gname.replace('Gr.', '').replace('Grupa', '').strip()
                         _groups.append(_letter)
+                        _all_matches.extend(gmatches)
                         for m in gmatches:
                             for w in (m.get('z1', ''), m.get('z2', '')):
                                 w = (w or '').strip()
                                 # Sentinele pomijamy; „Gracz N" zostaje (user może chcieć go wybrać).
                                 if w and w.lower() != 'bye' and w.upper() != 'X':
                                     _players_set.add(w)
+                    # Tory bierzemy z tego samego pobrania — zero dodatkowych zapytań.
                     _cache = {'groups': _groups,
-                              'players': sorted(_players_set, key=lambda s: s.lower())}
+                              'players': sorted(_players_set, key=lambda s: s.lower()),
+                              'tors': _collect_tors(_all_matches)}
                     st.session_state[_cache_key] = _cache
                     st.rerun()
                 except Exception as e:
@@ -2025,10 +2362,12 @@ if tournament_phase == "Grupowa":
                 help="Puste = wszyscy. Wybór = tylko mecze, w których uczestniczy któryś z zaznaczonych "
                      "(po którejkolwiek stronie). Działa razem z filtrem grup (AND).",
             )
-            if sel_groups or sel_players:
+            sel_tors = _tor_picker(_cache.get('tors') or [], f'g_{_sel_sid}')
+            if sel_groups or sel_players or sel_tors:
                 _parts = []
                 if sel_groups: _parts.append(f"{len(sel_groups)} {generate_docx.pluralize(len(sel_groups), 'grupa','grupy','grup')}")
                 if sel_players: _parts.append(f"{len(sel_players)} {generate_docx.pluralize(len(sel_players), *_sel_ent_gen)}")
+                if sel_tors: _parts.append(f"{len(sel_tors)} {generate_docx.pluralize(len(sel_tors), 'tor','tory','torów')}")
                 st.info(f"Filtr aktywny: {' + '.join(_parts)}. Generuj poniżej.")
 
 # ── Selektywny wydruk meczów drabinki (puchar, pojedyncza faza) ─────────
@@ -2089,8 +2428,16 @@ if is_pucharowa and selected_phase_keys_multi is None:
             if _pm_picked:
                 _pm_idx = sorted({int(l.split('.', 1)[0]) - 1 for l in _pm_picked})
                 sel_drabinka_matches = [_pm_cache[i] for i in _pm_idx]
-                st.info(f"Filtr aktywny: {len(sel_drabinka_matches)} z {len(_pm_cache)} "
-                        f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}. Generuj poniżej.")
+            sel_tors = _tor_picker(_collect_tors(_pm_cache),
+                                   f'p_{_pm_sid}_{tournament_phase}')
+            _pm_parts = []
+            if sel_drabinka_matches is not None:
+                _pm_parts.append(f"{len(sel_drabinka_matches)} z {len(_pm_cache)} "
+                                 f"{generate_docx.pluralize(len(_pm_cache),'meczu','meczów','meczów')}")
+            if sel_tors:
+                _pm_parts.append(f"{len(sel_tors)} {generate_docx.pluralize(len(sel_tors),'tor','tory','torów')}")
+            if _pm_parts:
+                st.info(f"Filtr aktywny: {' + '.join(_pm_parts)}. Generuj poniżej.")
         elif _pm_cache is not None:
             st.caption("Brak gotowych (kompletnych) par w tej fazie — wszystkie czekają na zawodników.")
 
@@ -2347,16 +2694,18 @@ if gen_clicked:
 
             _pdf, _pdf_err = (None, None)
             if fmt_pdf:
-                _stron = generate_docx.pluralize(_g_count, 'stronę', 'strony', 'stron')
-                _pdf_pb = st.progress(0.0, text=f"Konwertuję {_g_count} {_stron} do PDF…")
-                def _on_pdf(elapsed, est, _pb=_pdf_pb, _n=_g_count, _s=_stron):
+                # Bo5/Bo7 = 2 strony na protokół — liczymy STRONY, nie mecze.
+                _g_pages = _g_count * _pages_per_match(_tt)
+                _stron = generate_docx.pluralize(_g_pages, 'stronę', 'strony', 'stron')
+                _pdf_pb = st.progress(0.0, text=f"Konwertuję {_g_pages} {_stron} do PDF…")
+                def _on_pdf(elapsed, est, _pb=_pdf_pb, _n=_g_pages, _s=_stron):
                     try:
                         _pb.progress(min(0.97, elapsed / max(1, est)),
                             text=f"Konwertuję {_n} {_s} do PDF… {int(elapsed)}s")
                     except Exception: pass
                 try:
                     _pdf, _pdf_err = docx_to_pdf(_docx, _safe,
-                                                 progress_cb=_on_pdf, est_pages=_g_count)
+                                                 progress_cb=_on_pdf, est_pages=_g_pages)
                 finally:
                     try: _pdf_pb.empty()
                     except Exception: pass
@@ -2556,9 +2905,36 @@ if gen_clicked:
             else:
                 _orig_groups_count = len(sheets_data)
 
+        # ── Filtr per tor ────────────────────────────────────────────────
+        # Wspólny dla fazy grupowej i pucharowej (single-phase) — obie ścieżki
+        # zbiegają się tutaj z gotowym `sheets_data`. Stosujemy PO sortowaniu,
+        # żeby kolejność protokołów w wybranych torach została zachowana.
+        if sel_tors:
+            _before = sum(len(m) for _, m in sheets_data)
+            sheets_data, _after = _apply_tor_filter(sheets_data, sel_tors)
+            if not sheets_data:
+                st.error(f"Żaden mecz nie jest na wybranych torach "
+                         f"({', '.join(sel_tors)}). Zmień wybór torów.")
+                st.stop()
+            st.caption(f"Filtr torów: {_after} z {_before} "
+                       f"{generate_docx.pluralize(_before, 'meczu', 'meczów', 'meczów')} "
+                       f"(tory: {', '.join(sel_tors)}).")
+
         total = sum(len(m) for _,m in sheets_data)
         if total == 0:
             st.error("0 meczów. Użyj 'Sprawdź zakładki' żeby sprawdzić."); st.stop()
+
+        # Duży wsad = kilka minut pracy serwera. Generowanie żyje tak długo, jak
+        # połączenie z kartą przeglądarki: uśpiony laptop albo karta w tle na
+        # dłużej potrafią je przerwać w pół drogi (i to bez żadnego komunikatu).
+        # Lepiej uprzedzić, niż kazać zaczynać od nowa.
+        if total >= 200:
+            st.info(f"Duży wydruk ({total} "
+                    f"{generate_docx.pluralize(total, 'protokół', 'protokoły', 'protokołów')}) "
+                    f"— to potrwa kilka minut. Zostaw tę kartę otwartą i nie usypiaj "
+                    f"komputera, bo przerwane połączenie zatrzymuje generowanie. "
+                    f"Możesz też podzielić wydruk po torach (sekcja „Wybierz konkretne "
+                    f"protokoły do wydruku”).")
 
         # Progress bar zamiast spinnera — przy 50+ meczach generowanie trwa
         # parę sekund per mecz (kopiowanie XML, anchor images). User chce widzieć ruch.
@@ -2643,19 +3019,24 @@ if gen_clicked:
             elif sets_format == 'Best of 7':
                 format_suffix = '_Bo7'
             safe_name = f"{safe_name}_{phase_suffix}{format_suffix}"
-    
+        # Wybrane tory w nazwie pliku — przy dzieleniu wydruku na części
+        # („tory 1-8" i „tory 9-16") plik od razu mówi, co zawiera.
+        safe_name = f"{safe_name}{_tor_name_suffix(sel_tors)}"
+
         pdf_bytes, pdf_err = (None, None)
         if fmt_pdf:
-            _stron = generate_docx.pluralize(total, 'stronę', 'strony', 'stron')
-            _pdf_pb = st.progress(0.0, text=f"Konwertuję {total} {_stron} do PDF…")
+            # Bo5/Bo7 = 2 strony na protokół — liczymy STRONY, nie mecze.
+            _n_pages = total * _pages_per_match(template_type)
+            _stron = generate_docx.pluralize(_n_pages, 'stronę', 'strony', 'stron')
+            _pdf_pb = st.progress(0.0, text=f"Konwertuję {_n_pages} {_stron} do PDF…")
             def _on_pdf(elapsed, est):
                 try:
                     _pdf_pb.progress(min(0.97, elapsed / max(1, est)),
-                        text=f"Konwertuję {total} {_stron} do PDF… {int(elapsed)}s")
+                        text=f"Konwertuję {_n_pages} {_stron} do PDF… {int(elapsed)}s")
                 except Exception: pass
             try:
                 pdf_bytes, pdf_err = docx_to_pdf(docx_bytes, safe_name,
-                                                  progress_cb=_on_pdf, est_pages=total)
+                                                  progress_cb=_on_pdf, est_pages=_n_pages)
             finally:
                 try: _pdf_pb.empty()
                 except Exception: pass
