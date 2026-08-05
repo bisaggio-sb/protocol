@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Magazyn zapamiętanych grafik (per przeglądarka) — nie trafia do repo.
+.logo_store/

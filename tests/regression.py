@@ -312,11 +312,78 @@ except Exception as e:
     failures.append(f'parse_group_rows gviz-drop: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# ── Helpery filtra torów z app.py ────────────────────────────────────────
+# app.py w całości zaimportować się nie da (uruchomiłby aplikację Streamlit),
+# ale czyste funkcje pomocnicze da się wyciąć po AST i przetestować osobno.
+# Dzięki temu logika dzielenia wydruku po torach ma realną osłonę regresyjną.
+try:
+    import ast as _ast
+    import os as _os
+    _app_path = _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'app.py')
+    _app_src = open(_app_path, encoding='utf-8').read()
+    _want = {'_tor_sort_key', '_tor_label', '_collect_tors', '_apply_tor_filter',
+             '_tor_name_suffix', '_pages_per_match'}
+    _tree = _ast.parse(_app_src)
+    _picked = [n for n in _tree.body
+               if (isinstance(n, _ast.FunctionDef) and n.name in _want)
+               or (isinstance(n, _ast.Assign)
+                   and getattr(n.targets[0], 'id', '') == 'TOR_NONE')]
+    _missing = _want - {n.name for n in _picked if isinstance(n, _ast.FunctionDef)}
+    if _missing:
+        failures.append(f'app.py: brak helperów filtra torów: {sorted(_missing)}')
+    else:
+        _ns = {}
+        exec(compile(_ast.Module(body=_picked, type_ignores=[]), 'app.py', 'exec'), _ns)
+        _NONE = _ns['TOR_NONE']
+
+        def _m(t):
+            return {'tor': t, 'z1': 'A Kowalski', 'z2': 'B Nowak'}
+
+        # Tory sortujemy liczbowo — alfabetycznie dałoby 1,10,11,2.
+        if _ns['_collect_tors']([_m('10'), _m('2'), _m('1'), _m('11')]) != ['1', '2', '10', '11']:
+            failures.append('_collect_tors: złe sortowanie torów (ma być liczbowe)')
+        # Mecz bez toru MUSI mieć własny kubełek, inaczej zniknąłby po cichu.
+        if _ns['_collect_tors']([_m('3'), _m(''), _m(None)]) != ['3', _NONE]:
+            failures.append('_collect_tors: brak kubełka na mecze bez toru')
+
+        _sd = [('Gr. A', [_m('1'), _m('2'), _m('3')]), ('Gr. B', [_m('2'), _m('')])]
+        _cases = [
+            (['2'], 2, 'filtr po torze 2'),
+            ([], 5, 'pusty filtr = bez filtrowania'),
+            ([_NONE], 1, 'filtr na mecze bez toru'),
+            (['99'], 0, 'nieistniejący tor'),
+        ]
+        for _sel, _exp, _desc in _cases:
+            _got = _ns['_apply_tor_filter'](_sd, _sel)[1]
+            if _got != _exp:
+                failures.append(f'_apply_tor_filter ({_desc}): {_got} meczów, oczek. {_exp}')
+        # Grupa bez trafień nie może zostać jako pusty wpis.
+        if [l for l, _ in _ns['_apply_tor_filter'](_sd, ['3'])[0]] != ['Gr. A']:
+            failures.append('_apply_tor_filter: pusta grupa nie została odfiltrowana')
+
+        for _sel, _exp in [(['1', '2', '3'], '_tory_1-2-3'),
+                           (['1', '2', '3', '4', '5'], '_tory_1-5'),
+                           ([], ''),
+                           ([_NONE], '_bez_toru')]:
+            _got = _ns['_tor_name_suffix'](_sel)
+            if _got != _exp:
+                failures.append(f'_tor_name_suffix({_sel}): {_got!r}, oczek. {_exp!r}')
+
+        # Bo5/Bo7 = 2 strony na protokół (estymata czasu + timeout konwersji PDF).
+        for _tt, _exp in [('IND', 1), ('IND_Bo3', 1), ('IND_Bo5', 2),
+                          ('DWOJKA_Bo7', 2), ('CZWORKA_Bo5', 2), (None, 1)]:
+            if _ns['_pages_per_match'](_tt) != _exp:
+                failures.append(f'_pages_per_match({_tt}): oczek. {_exp}')
+except Exception as e:
+    failures.append(f'helpery filtra torów: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
 if failures:
     print('REGRESJA FAIL:', file=sys.stderr)
     for f in failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów')
 sys.exit(0)
