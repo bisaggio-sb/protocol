@@ -1,6 +1,6 @@
 """
 Generator protokołów meczowych Mölkky
-Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol
+Polska Federacja Mölkky · github.com/bisaggio-sb/protocol
 """
 import streamlit as st
 import io, re, base64, os, secrets, signal, subprocess, tempfile, zipfile
@@ -3333,4 +3333,4 @@ if 'last_gen' in st.session_state:
             st.error(f"Konwersja PDF nie powiodła się: {gen['pdf_err']}")
 
 st.divider()
-st.caption("Polska Federacja Mölkky · github.com/polska-federacja-molkky/protocol")
+st.caption("Polska Federacja Mölkky")
