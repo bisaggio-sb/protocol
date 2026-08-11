@@ -58,7 +58,7 @@ Legenda: bez ikony = działa · 🟡 w testach · 🔴 niedostępne
 ## Uruchomienie lokalne
 
 ```bash
-git clone https://github.com/polska-federacja-molkky/protocol.git
+git clone https://github.com/bisaggio-sb/protocol.git
 cd protocol
 pip install -r requirements.txt
 streamlit run app.py
