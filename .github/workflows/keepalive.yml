@@ -1,14 +1,22 @@
 name: keep-alive
 
-# Budzi/utrzymuje prod (protocol.streamlit.app) co 30 min, żeby uniknąć ~3-min
-# cold bootu przy wejściu. Repo publiczne → minuty Actions darmowe.
+# Budzi/utrzymuje prod (protocol.streamlit.app), żeby uniknąć ~3-min cold bootu
+# przy wejściu.
+#
+# CZĘSTOTLIWOŚĆ — dlaczego co 2 h, a nie co 30 min (zmiana przy przejściu repo
+# na prywatne): repozytoria publiczne mają minuty Actions za darmo bez limitu,
+# prywatne dostają 2000 minut miesięcznie, a GitHub zaokrągla KAŻDE zadanie
+# w górę do pełnej minuty. Co 30 min = 1440 przebiegów/mies. = co najmniej
+# 1440 minut, czyli ocieranie się o limit. Co 2 h = ~360 przebiegów (~360-720
+# min), z wygodnym zapasem. Aplikacja i tak nie zdąży zasnąć między pingami.
+# Gdyby repo wróciło na publiczne, można spokojnie zejść z powrotem do */30.
 #
 # UWAGA: zdarzenie `schedule` odpala się TYLKO z domyślnego brancha (main).
 # Ten plik musi być na `main`, inaczej cron nie wystartuje.
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # co 30 minut (UTC)
+    - cron: "0 */2 * * *"    # co 2 godziny (UTC)
   workflow_dispatch:           # ręczne odpalenie z zakładki Actions
 
 permissions:
