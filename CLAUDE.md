@@ -303,6 +303,26 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-08-11 — **Porządki po przeniesieniu repo na konto prywatne.**
+  (a) **keepalive `*/30` → `0 */2`** (co 2 h). Publiczne repo ma minuty Actions
+  za darmo bez limitu, prywatne dostaje 2000/mies., a GitHub zaokrągla KAŻDE
+  zadanie w górę do pełnej minuty → dotychczasowe 1440 przebiegów/mies. to co
+  najmniej 1440 minut, czyli ocieranie się o limit. Teraz ~360 przebiegów.
+  Aplikacja nie zdąży zasnąć między pingami. Powrót do `*/30` bezpieczny,
+  gdyby repo wróciło na publiczne.
+  (b) **Stopka aplikacji** pokazywała `github.com/polska-federacja-molkky/protocol`
+  — ścieżka po przeprowadzce nie istnieje, klikający trafiał donikąd. Adres
+  USUNIĘTY (nie podmieniony), bo repo ma być prywatne i publiczny link byłby
+  dla odwiedzających bezużyteczny. Została sama atrybucja federacji.
+  (c) **README**: `git clone` wskazywał na starą ścieżkę (komenda z README
+  kończyła się błędem) + dodana sekcja „Licencja" — plik LICENSE istniał, ale
+  README go nie wspominał, więc przeglądający mógł uznać kod za open source.
+  (d) Weryfikacja: AppTest 0 wyjątków, regresja 14/14.
+  **UWAGA na przyszłość:** Streamlit może nadal mieć w konfiguracji starą
+  ścieżkę i działać dzięki przekierowaniu GitHuba. Przekierowanie + prywatność
+  to typowe miejsce, gdzie wdrożenie pada — po przełączeniu na prywatne
+  sprawdzić aplikację i w razie czego ponowić autoryzację GitHuba w Streamlicie
+  (Settings → Linked accounts, z dostępem do repozytoriów prywatnych).
 - 2026-08-04 (fix2) — **Składanie strumieniowe docx: RAM 1180→253 MB, build 10→3 s.**
   Backlogowa teza „`copy.deepcopy` = 61% czasu, podmienić na tańsze klonowanie"
   okazała się ŚLEPĄ ULICZKĄ — zmierzone: deepcopy lxml jest w C i jest
