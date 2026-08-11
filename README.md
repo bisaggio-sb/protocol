@@ -125,4 +125,14 @@ protocol/
 
 ---
 
+## Licencja
+
+Copyright © 2026 Sebastian Bisaga. Wszelkie prawa zastrzeżone.
+
+Kod jest udostępniony publicznie do wglądu, ale **nie jest oprogramowaniem open source**. Bezpłatne korzystanie obejmuje turnieje Polskiej Federacji Mölkky oraz lokalne ligi i turnieje Mölkky w Polsce. Modyfikowanie, rozpowszechnianie i uruchamianie własnych wdrożeń wymaga pisemnej zgody autora, a zastosowania komercyjne — odrębnej umowy.
+
+Pełne warunki: [LICENSE](LICENSE).
+
+---
+
 *Polska Federacja Mölkky · 2026*
