@@ -28,9 +28,40 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Playwright + Chromium
+
+      - name: Install Playwright (pip)
         run: |
           pip install playwright
-          python -m playwright install --with-deps chromium
+          echo "PW_VERSION=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_ENV"
+
+      # Cache przeglądarki. Bez tego KAŻDY przebieg (48 dziennie) ściągał
+      # Chromium od nowa z cdn.playwright.dev — a ten CDN bywa niedostępny
+      # z regionów, w których lądują runnery GitHuba (HTTP 403 "this service
+      # is not available in your location"). To był powód czerwonych maili
+      # z 6 i 8 sierpnia. Z cache'em w typowym przebiegu nie ma pobierania.
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ env.PW_VERSION }}
+
+      - name: Install Chromium
+        id: install
+        # Nie wywalamy całego przebiegu, gdy CDN akurat nie odpowiada:
+        # pominięty ping jest nieszkodliwy (najwyżej następny użytkownik
+        # poczeka na zimny start), a czerwone CI to tylko zbędny mail.
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            if python -m playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::Pobieranie Chromium nie powiodło się (próba $i/3)."
+            sleep $((i * 20))
+          done
+          echo "::warning::CDN Playwrighta niedostępny — pomijam ten ping."
+          exit 1
+
       - name: Ping / wake prod
+        if: steps.install.outcome == 'success'
         run: python scripts/keepalive.py
