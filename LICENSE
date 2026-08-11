@@ -1,0 +1,90 @@
+# Licencja
+
+Copyright © 2026 Sebastian Bisaga. Wszelkie prawa zastrzeżone.
+
+Niniejsze oprogramowanie („Oprogramowanie") jest udostępnione publicznie do
+wglądu, ale **nie jest oprogramowaniem open source**. Autorskie prawa
+majątkowe pozostają w całości przy autorze. Korzystanie z Oprogramowania jest
+dozwolone wyłącznie w zakresie opisanym poniżej.
+
+## 1. Bezpłatna zgoda na korzystanie
+
+Autor udziela bezpłatnej, niewyłącznej i nieprzenoszalnej zgody na
+uruchamianie i używanie Oprogramowania na potrzeby organizacji i obsługi:
+
+- a) turniejów Polskiej Federacji Mölkky,
+- b) lokalnych lig i turniejów Mölkky rozgrywanych na terenie Polski.
+
+Zgoda obejmuje korzystanie z Oprogramowania w postaci udostępnionej przez
+autora, w tym z prowadzonych przez niego wdrożeń publicznych.
+
+## 2. Ograniczenia
+
+Bez uprzedniej pisemnej zgody autora nie wolno:
+
+- a) modyfikować ani adaptować Oprogramowania, ani tworzyć jego opracowań,
+- b) rozpowszechniać Oprogramowania ani jego części, w tym uruchamiać
+  i publikować własnych wdrożeń lub kopii,
+- c) udzielać dalszych licencji, odsprzedawać ani wynajmować Oprogramowania,
+- d) usuwać ani zmieniać oznaczeń autorstwa.
+
+Zlecenie którejkolwiek z powyższych czynności osobie trzeciej jest
+równoznaczne z jej samodzielnym wykonaniem.
+
+## 3. Zastosowania komercyjne
+
+Każde wykorzystanie wykraczające poza punkt 1 — w szczególności odpłatne
+świadczenie usług z użyciem Oprogramowania, wdrożenia poza terytorium Polski
+oraz wdrożenia na rzecz podmiotów komercyjnych — wymaga odrębnej pisemnej
+umowy z autorem.
+
+## 4. Materiały osób trzecich
+
+Repozytorium może zawierać znaki towarowe i materiały graficzne osób trzecich,
+w tym logo Polskiej Federacji Mölkky oraz logotypy klubów. Nie są one
+przedmiotem niniejszej licencji, pozostają własnością odpowiednich podmiotów
+i niniejsza licencja nie udziela do nich żadnych praw.
+
+## 5. Okres obowiązywania
+
+Zgoda opisana w punkcie 1 obowiązuje do czasu jej wypowiedzenia przez autora.
+Wypowiedzenie wymaga formy pisemnej i zachowania sześciomiesięcznego okresu,
+tak aby nie przerywać trwającego sezonu rozgrywek. Naruszenie punktu 2
+powoduje wygaśnięcie zgody ze skutkiem natychmiastowym.
+
+## 6. Wyłączenie odpowiedzialności
+
+Oprogramowanie udostępniane jest „tak jak jest", bez jakichkolwiek gwarancji
+wyraźnych lub dorozumianych. Autor nie ponosi odpowiedzialności za szkody
+wynikłe z korzystania z Oprogramowania w najszerszym zakresie dopuszczalnym
+przez prawo.
+
+## 7. Prawo właściwe
+
+W sprawach nieuregulowanych stosuje się prawo polskie.
+
+## Kontakt
+
+W sprawie licencji komercyjnej, zgody na modyfikacje lub innych ustaleń:
+kontakt przez profil GitHub — https://github.com/bisaggio-sb
+
+---
+
+## English summary (non-binding)
+
+This software is **source-available, not open source**. Copyright is retained
+in full by the author, Sebastian Bisaga.
+
+Permission is granted, free of charge, to **run and use** the software for
+tournaments of the Polish Mölkky Federation and for local Mölkky leagues and
+tournaments held in Poland. Modification, redistribution, sublicensing and
+self-hosting are **not permitted** without prior written consent. Any other
+use, including commercial use and deployments outside Poland, requires a
+separate written agreement with the author.
+
+Third-party trademarks and artwork contained in this repository (including
+federation and club logos) are excluded from this licence.
+
+The permission in the paragraph above remains in force until revoked by the
+author in writing, subject to six months' notice. The software is provided
+"as is", without warranty of any kind. Polish law applies.
