@@ -318,6 +318,16 @@ w wierszu tabeli (PIL).
   kończyła się błędem) + dodana sekcja „Licencja" — plik LICENSE istniał, ale
   README go nie wspominał, więc przeglądający mógł uznać kod za open source.
   (d) Weryfikacja: AppTest 0 wyjątków, regresja 14/14.
+  (e) **Stopka README z nazwą federacji i rokiem USUNIĘTA** — stała bezpośrednio
+  pod notą Copyright 2026 Sebastian Bisaga i czytała się jak druga, konkurencyjna
+  nota copyrightowa wskazująca federację jako właściciela praw. REGUŁA na
+  przyszłość: wzmianki OPISOWE o PFM (do czego służy aplikacja, logo w spisie
+  plików, nazwanie PFM w licencji jako beneficjenta bezpłatnej zgody) ZOSTAJĄ —
+  są prawdziwe i wzmacniają pozycję autora. Usuwamy wyłącznie konstrukcje
+  wyglądające na OŚWIADCZENIE O PRAWACH, czyli sama nazwa organizacji plus rok.
+  Stopka w samej aplikacji (app.py, st.caption) ZOSTAJE — to branding dla
+  użytkownika, nie roszczenie, i jest kandydatem do sparametryzowania przy
+  wersji komercyjnej.
   **UWAGA na przyszłość:** Streamlit może nadal mieć w konfiguracji starą
   ścieżkę i działać dzięki przekierowaniu GitHuba. Przekierowanie + prywatność
   to typowe miejsce, gdzie wdrożenie pada — po przełączeniu na prywatne
