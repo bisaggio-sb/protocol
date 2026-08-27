@@ -385,16 +385,37 @@ try:
     # i artefakt '1234.0' z Excela nie mogą zepsuć PIN-u.
     _rows = [['Imię i nazwisko', 'PIN'], ['Jan Kowalski', '0042'],
              ['Anna Nowak', '1234.0'], ['', ''], ['Piotr Zych', '7777']]
-    _pairs = g.pin_rows_to_pairs(_rows)
+    _pairs, _info = g.pin_rows_to_pairs(_rows)
     if [p[0] for p in _pairs] != ['Jan Kowalski', 'Anna Nowak', 'Piotr Zych']:
         failures.append(f'pin_rows_to_pairs: zle nazwy {[p[0] for p in _pairs]}')
+    if dict(_pairs).get('Anna Nowak') != '1234':
+        failures.append('pin_rows_to_pairs: artefakt .0 nie usuniety przy parsowaniu')
     if g.clean_pin('1234.0') != '1234':
         failures.append('clean_pin: artefakt .0 z Excela nie usuniety')
     if g.clean_pin('0042') != '0042':
         failures.append('clean_pin: zero wiodace zgubione')
-    # Bez nagłówka pierwszy wiersz musi zostać danymi.
-    if len(g.pin_rows_to_pairs([['Jan Kowalski', '1111']])) != 1:
+    # Bez nagłówka pierwszy wiersz musi zostać danymi (tryb awaryjny).
+    if len(g.pin_rows_to_pairs([['Jan Kowalski', '1111']])[0]) != 1:
         failures.append('pin_rows_to_pairs: wiersz danych potraktowany jak naglowek')
+
+    # Realny układ eksportu z Mölkkify: kolumny nazwy i PIN-u NIE sasiaduja
+    # ('Country' miedzy nimi) i nie sa pierwsze. Wiersze z PIN-em bez nazwy
+    # nie maja do kogo trafic - musza byc policzone, nie polkniete po cichu.
+    _mk = [['Team Name', 'Country', 'PIN', 'Email', 'Members'],
+           ['Ala Makocka', 'PL', '0013', 'a@b.pl', ''],
+           ['', '', '2137', '', ''],
+           ['', '', '1303', '', ''],
+           ['Druga Druzyna', 'PL', '0500', '', '']]
+    _mp, _mi = g.pin_rows_to_pairs(_mk)
+    if _mp != [('Ala Makocka', '0013'), ('Druga Druzyna', '0500')]:
+        failures.append(f'pin_rows_to_pairs (uklad Molkkify): {_mp}')
+    if _mi['skipped_no_name'] != 2:
+        failures.append(f"pin_rows_to_pairs: skipped_no_name={_mi['skipped_no_name']}, oczek. 2")
+    if (_mi['name_col'], _mi['pin_col']) != ('Team Name', 'PIN'):
+        failures.append(f'pin_rows_to_pairs: zle rozpoznane naglowki {_mi}')
+    # Zero wiodace z kolumny tekstowej musi przetrwac caly przeplyw.
+    if dict(_mp).get('Ala Makocka') != '0013':
+        failures.append('pin_rows_to_pairs: zero wiodace zgubione w ukladzie Molkkify')
 
     # Dopasowanie odporne na ogonki, wielkosc liter, spacje i kolejnosc czlonow.
     if g.name_match_key('Kowalski Jan') != g.name_match_key('jan  KOWALSKI'):

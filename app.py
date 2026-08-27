@@ -2554,16 +2554,32 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
                     _pin_raw = (pd.read_csv(_pin_up, dtype=str, header=None)
                                 if _pin_up.name.lower().endswith('.csv')
                                 else pd.read_excel(_pin_up, dtype=str, header=None)).fillna('')
-                    rozp_pin_pairs = generate_docx.pin_rows_to_pairs(_pin_raw.values.tolist())
+                    rozp_pin_pairs, _pin_info = generate_docx.pin_rows_to_pairs(
+                        _pin_raw.values.tolist())
                     if rozp_pin_pairs:
                         _n = len(rozp_pin_pairs)
+                        _cols_msg = (f" Kolumny: „{_pin_info['name_col']}” i „{_pin_info['pin_col']}”."
+                                     if _pin_info['name_col'] else
+                                     " Nie znaleziono nagłówków — wzięto dwie pierwsze kolumny.")
                         st.success(
                             f"Wczytano {_n} "
-                            f"{generate_docx.pluralize(_n, 'PIN', 'PIN-y', 'PIN-ów')}. "
-                            "Zgodność z listą z arkusza sprawdzimy przy generowaniu."
+                            f"{generate_docx.pluralize(_n, 'PIN', 'PIN-y', 'PIN-ów')}."
+                            + _cols_msg +
+                            " Zgodność z listą z arkusza sprawdzimy przy generowaniu."
                         )
+                        if _pin_info['skipped_no_name']:
+                            _sk = _pin_info['skipped_no_name']
+                            st.warning(
+                                f"Pominięto {_sk} "
+                                f"{generate_docx.pluralize(_sk, 'wiersz', 'wiersze', 'wierszy')} "
+                                f"z PIN-em, ale bez nazwy w kolumnie "
+                                f"„{_pin_info['name_col'] or 'nazwy'}” — nie ma ich do kogo przypisać."
+                            )
                     else:
-                        st.warning("Plik nie zawiera żadnych par nazwa + PIN.")
+                        st.warning(
+                            "Plik nie zawiera żadnych par nazwa + PIN. Sprawdź, czy "
+                            "jest kolumna z nazwą (np. `Team Name`) i kolumna `PIN`."
+                        )
                 except Exception as e:
                     st.error(f"Nie udało się wczytać pliku z PIN-ami: {e}")
             else:

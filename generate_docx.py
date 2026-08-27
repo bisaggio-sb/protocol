@@ -403,26 +403,68 @@ def clean_pin(value):
     return s
 
 
+# Nagłówki rozpoznawane w pliku z PIN-ami. Eksport z Mölkkify ma układ
+# „Team Name | Country | PIN | Email | Members”, czyli kolumny NIE sąsiadują
+# i nie są pierwsze — dlatego szukamy ich po nazwie, nie po pozycji.
+PIN_NAME_HEADERS = ('team name', 'team', 'name', 'player', 'nazwa',
+                    'nazwa druzyny', 'druzyna', 'zawodnik', 'zawodniczka',
+                    'imie i nazwisko', 'imie', 'nazwisko', 'osoba')
+PIN_CODE_HEADERS = ('pin', 'pin code', 'kod', 'code')
+
+
+def _pin_header_index(cells, wanted):
+    """Indeks pierwszej komórki, której treść pasuje do zestawu nagłówków."""
+    for i, c in enumerate(cells):
+        if _strip_diacritics(str(c or '').strip()).casefold() in wanted:
+            return i
+    return None
+
+
 def pin_rows_to_pairs(rows):
     """Z surowych wierszy pliku (lista list) robi pary (nazwa, PIN).
 
-    Bierze dwie pierwsze kolumny. Pierwszy wiersz pomija, gdy wygląda na
-    nagłówek — heurystyka: w komórce PIN-u nie ma ani jednej cyfry
-    („PIN”, „kod” → nagłówek; „1234” → już dane)."""
+    Zwraca (pary, info), gdzie info ma klucze:
+      name_col / pin_col – rozpoznane nagłówki (None przy trybie awaryjnym),
+      skipped_no_name    – ile wierszy miało PIN, ale puste pole nazwy.
+
+    Kolumny szukamy PO NAGŁÓWKU, bo eksport z Mölkkify ma między nimi inne
+    („Country”). Gdy nagłówka nie ma, wracamy do trybu awaryjnego: dwie
+    pierwsze kolumny, z pominięciem wiersza nagłówkowego rozpoznanego po
+    braku cyfry w polu PIN-u."""
+    rows = [r for r in (rows or []) if r is not None]
+    ci_name = ci_pin = None
+    start = 0
+    info = {'name_col': None, 'pin_col': None, 'skipped_no_name': 0}
+
+    for ri in range(min(5, len(rows))):
+        cells = [('' if c is None else str(c)).strip() for c in list(rows[ri])]
+        i_pin = _pin_header_index(cells, PIN_CODE_HEADERS)
+        i_name = _pin_header_index(cells, PIN_NAME_HEADERS)
+        if i_pin is not None and i_name is not None:
+            ci_name, ci_pin, start = i_name, i_pin, ri + 1
+            info['name_col'], info['pin_col'] = cells[i_name], cells[i_pin]
+            break
+
+    if ci_pin is None:                      # tryb awaryjny — dwie pierwsze kolumny
+        ci_name, ci_pin = 0, 1
+        first = [('' if c is None else str(c)).strip() for c in list(rows[0])[:2]] if rows else []
+        if len(first) > 1 and not re.search(r'\d', first[1]):
+            start = 1
+
     out = []
-    for i, r in enumerate(rows or []):
-        if r is None:
-            continue
-        cells = [('' if c is None else str(c)).strip() for c in list(r)[:2]]
-        while len(cells) < 2:
-            cells.append('')
-        name, pin = cells[0], cells[1]
-        if i == 0 and not re.search(r'\d', pin):
-            continue
+    for r in rows[start:]:
+        cells = [('' if c is None else str(c)).strip() for c in list(r)]
+        name = cells[ci_name] if ci_name < len(cells) else ''
+        pin = clean_pin(cells[ci_pin]) if ci_pin < len(cells) else ''
         if not name and not pin:
             continue
+        if not name:
+            # PIN bez nazwy — nie ma do kogo go przypisać. Liczymy, żeby UI
+            # mogło o tym powiedzieć zamiast po cichu połknąć wiersz.
+            info['skipped_no_name'] += 1
+            continue
         out.append((name, pin))
-    return out
+    return out, info
 
 
 def match_pins_to_schedules(schedules, pin_pairs):
