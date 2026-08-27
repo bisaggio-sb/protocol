@@ -504,24 +504,50 @@ try:
         _imgs = [n for n in _z.namelist() if n.startswith('word/media/')]
         return _x, _imgs
 
-    _x_short, _img_short = _parts(_card('Jan Kowalski', 'https://molkkify.com/t/GP5'))
-    if 'molkkify.com/t/GP5' not in _x_short:
-        failures.append('link: krotki link nie trafil na karte')
-    if 'https://' in _x_short:
-        failures.append('link: schemat https:// powinien byc obciety przy druku')
+    # Adres na wydruku ZAWSZE ze schematem (user: 'ma byc z https'). Gdy brakuje
+    # miejsca, karta schodzi z ROZMIAREM CZCIONKI, a nie obcina adresu.
+    _LNK = 'https://5-runda-grand-prix-26.molkkify.app'
+
+    def _link_sizes(_x):
+        """Rozmiary (w pol-punktach) runow zawierajacych tekst linku."""
+        return re.findall(r'<w:sz w:val="(\d+)"/>[^<]*(?:<[^>]+>)*?[^<]*molkkify', _x)
+
+    _x_short, _img_short = _parts(_card('Jan Kowalski', _LNK))
+    if 'https://' not in _x_short or 'molkkify.app' not in _x_short:
+        failures.append('link: krotkie nazwisko powinno dostac PELNY adres ze schematem')
     if not _img_short:
         failures.append('link: brak obrazu QR w dokumencie')
-    # Dlugie nazwisko + link = brak miejsca w linii -> zostaje sam QR.
+    # Dluzsze nazwisko: adres zostaje w calosci ZE SCHEMATEM, tylko mniejszy.
+    _x_mid, _ = _parts(_card('Aleksandra Nowakowska', _LNK))
+    if 'https://' not in _x_mid or 'molkkify.app' not in _x_mid:
+        failures.append('link: przy dluzszym nazwisku adres ma zostac w calosci, '
+                        'tylko mniejsza czcionka')
+    # Naprawde dlugie nazwisko: nawet 4pt sie nie miesci -> zostaje sam QR.
     _x_long, _img_long = _parts(
-        _card('Ewa Nowakowska-Wiśniewska', 'https://molkkify.com/t/GP5-TCZEW'))
-    if 'molkkify' in _x_long:
-        failures.append('link: przy dlugim nazwisku link powinien zniknac (zostaje QR)')
+        _card('Ewa Nowakowska-Wiśniewska Trzecia', _LNK))
     if not _img_long:
         failures.append('link: QR musi zostac nawet gdy link sie nie miesci')
     # Bez linku nie moze byc ani tekstu, ani obrazu.
     _x_none, _img_none = _parts(_card('Jan Kowalski', None))
     if _img_none:
         failures.append('link: QR generuje sie mimo braku linku')
+
+    # QR MUSI kodowac adres ZE SCHEMATEM. Bez 'https://' czytnik traktuje
+    # zawartosc jak zwykly tekst i telefon otwiera wyszukiwarke zamiast strony
+    # (blad zgloszony z produkcji). Weryfikacja bez dekodera: QR wygenerowany
+    # dla oczekiwanego adresu musi byc bajt w bajt tym, co siedzi w dokumencie.
+    def _embedded_qr(_bytes):
+        _z = _zf.ZipFile(_io.BytesIO(_bytes))
+        _m = [n for n in _z.namelist() if n.startswith('word/media/')]
+        return _z.read(_m[0]) if _m else None
+
+    for _inp, _want in (
+            ('5-runda-grand-prix-26.molkkify.app',
+             'https://5-runda-grand-prix-26.molkkify.app'),   # schemat doklejony
+            ('https://molkkify.app/t/GP5', 'https://molkkify.app/t/GP5'),
+            ('http://molkkify.app/t/GP5', 'http://molkkify.app/t/GP5')):  # http zostaje
+        if _embedded_qr(_card('Jan Kowalski', _inp)) != g.make_qr_bytes(_want):
+            failures.append(f'QR dla {_inp!r} nie koduje {_want!r}')
 except Exception as e:
     failures.append(f'PIN-y Molkkify: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)

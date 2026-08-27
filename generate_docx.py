@@ -722,21 +722,24 @@ def build_player_schedules_doc(schedules, *, tournament_name=None,
 
     # QR generujemy RAZ na dokument i współdzielimy rel_id między kartami —
     # ten sam obraz w 200 kartach ważyłby inaczej 200×.
-    qr_rel_id, qr_dxa, link_text = None, 0, None
+    qr_rel_id, qr_dxa, link_url = None, 0, None
     if tournament_link and str(tournament_link).strip():
         _lnk = str(tournament_link).strip()
-        _png = make_qr_bytes(_lnk)
+        # W KODZIE QR MUSI BYĆ PEŁNY ADRES ZE SCHEMATEM. Bez „https://” czytnik
+        # traktuje zawartość jak zwykły tekst i telefon otwiera wyszukiwarkę
+        # zamiast strony. Użytkownik zwykle wkleja sam adres, więc schemat
+        # doklejamy sami.
+        _qr_url = (_lnk if re.match(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://', _lnk)
+                   else 'https://' + _lnk)
+        _png = make_qr_bytes(_qr_url)
         if _png:
             # python-docx zwraca (rId, image) — NIE odwrotnie.
             qr_rel_id, _ = doc.part.get_or_add_image(io.BytesIO(_png))
             qr_dxa = _dxa_cm(qr_cm)
-        # Do druku obcinamy schemat — 'https://' zjada 8 znaków, a nikt tego
-        # nie przepisuje ręcznie (od tego jest QR).
-        _disp = re.sub(r'^https?://', '', _lnk)
-        # Zbyt długi link złamałby linię nazwiska na dwie i podniósł kartę,
-        # więc wtedy zostaje sam QR. Gdy QR się nie udał (brak biblioteki),
-        # pokazujemy link mimo długości — lepszy niż nic.
-        link_text = _disp if (len(_disp) <= link_max_chars or not qr_rel_id) else None
+        # Na wydruku ZAWSZE pełny adres ze schematem — taki, jaki koduje QR.
+        # Gdy brakuje miejsca, karta zmniejsza czcionkę linku (patrz
+        # `_fill_player_card_tc`), zamiast obcinać adres.
+        link_url = _qr_url
 
     # Tabela cols × n_rows na karty. python-docx tworzy strukturę, my potem
     # ustawiamy szerokości i wstrzykujemy bogate komórki.
@@ -794,7 +797,7 @@ def build_player_schedules_doc(schedules, *, tournament_name=None,
                 _fill_player_card_tc(tc, schedules[idx], tournament_name,
                                      tournament_date, card_w_dxa,
                                      is_team=is_team, qr_rel_id=qr_rel_id,
-                                     qr_dxa=qr_dxa, link_text=link_text)
+                                     qr_dxa=qr_dxa, link_url=link_url)
             else:
                 # Pusta komórka — ramka kropkowana (linia cięcia placeholder)
                 _set_cell_borders(tc, all_val='dashed', sz='4', color='AAAAAA')
@@ -807,6 +810,35 @@ def _save_doc_to_bytes(doc):
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+_CARLITO = {
+    False: '/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf',
+    True: '/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf',
+}
+_font_cache = {}
+
+
+def _text_width_dxa(text, pt, bold=False):
+    """Szerokość tekstu w dxa (1 pt = 20 dxa).
+
+    Mierzymy realnymi metrykami Carlito — to ta czcionka renderuje docelowy
+    dokument (podstawiana za Calibri, z którą jest metrycznie zgodna), więc
+    pomiar jest wiarygodny także dla Worda. Szacowanie „średnia szerokość
+    znaku” myliło się o kilkanaście procent i niepotrzebnie ucinało linki.
+    Gdy czcionki nie ma, wracamy do przybliżenia."""
+    key = (bold, round(pt * 2))
+    if key not in _font_cache:
+        try:
+            from PIL import ImageFont
+            _font_cache[key] = ImageFont.truetype(_CARLITO[bool(bold)],
+                                                  max(1, int(round(pt * 64))))
+        except Exception:
+            _font_cache[key] = None
+    f = _font_cache[key]
+    if f is None:
+        return len(text) * (10.2 if bold else 8.6) * pt
+    return f.getlength(text) / 64.0 * 20.0
 
 
 def _card_header_with_qr(paras, qr_rel_id, qr_dxa, inner_w):
@@ -857,7 +889,7 @@ def _card_header_with_qr(paras, qr_rel_id, qr_dxa, inner_w):
 
 
 def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dxa, *,
-                         is_team=False, qr_rel_id=None, qr_dxa=0, link_text=None):
+                         is_team=False, qr_rel_id=None, qr_dxa=0, link_url=None):
     """Wypełnia istniejący <w:tc> zawartością karty zawodnika.
     Layout: header (imię) → subtitle (Grupa/turniej/data) → tabela 4 kolumny
     (godzina | tor | gracz 1 | gracz 2). Własne nazwisko w wierszach pogrubione
@@ -873,14 +905,29 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     # na drugą linię i podnosił kartę — wtedy zostaje sam QR, zgodnie z zasadą
     # „za długi link → tylko kod”. Stałe dobrane pomiarowo: ~138 dxa na znak
     # nazwiska (12pt bold) i ~64 dxa na znak linku (6pt).
-    _link_here = link_text
-    if _link_here:
-        _avail = (card_w_dxa - 280) - (qr_dxa if qr_rel_id else 0)
-        if len(player['name']) * 138 + len(_link_here) * 64 + 220 > _avail:
-            _link_here = None
+    # Ile miejsca zostaje w linii nazwiska na link (odstęp 3 spacji + zapas).
+    _avail = ((card_w_dxa - 280) - (qr_dxa if qr_rel_id else 0)
+              - _text_width_dxa(player['name'], 12, bold=True) - 200)
+    _link_here, _link_pt = None, 0
+    if link_url:
+        # Adres zostaje w CAŁOŚCI, ze schematem — zamiast go skracać, schodzimy
+        # z rozmiarem czcionki. Poniżej 4 pt druk przestaje być czytelny, więc
+        # dopiero wtedy zostaje sam QR.
+        for _pt in (6, 5.5, 5, 4.5, 4):
+            if _text_width_dxa(link_url, _pt) <= _avail:
+                _link_here, _link_pt = link_url, _pt
+                break
+
     _name_segs = [(player['name'], dict(bold=True, size_pt=12))]
     if _link_here:
-        _name_segs.append(('   ' + _link_here, dict(size_pt=6, color='505050')))
+        # Schemat drukujemy jaśniejszym szarym — jest potrzebny, ale to nie on
+        # niesie informację, więc nie powinien konkurować z adresem.
+        _m = re.match(r'^(https?://)(.*)$', _link_here)
+        if _m:
+            _name_segs.append(('   ' + _m.group(1), dict(size_pt=_link_pt, color='A0A0A0')))
+            _name_segs.append((_m.group(2), dict(size_pt=_link_pt, color='505050')))
+        else:
+            _name_segs.append(('   ' + _link_here, dict(size_pt=_link_pt, color='505050')))
     _head = [_new_para_runs(_name_segs, align='left', after_pt=1)]
     # Subtitle: Grupa · turniej · data
     sub_parts = [f"Grupa {player['group']}"]

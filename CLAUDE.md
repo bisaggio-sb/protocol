@@ -304,6 +304,20 @@ w wierszu tabeli (PIL).
 
 ### Log zmian (najnowsze u góry)
 - 2026-08-11 (fix3) — **Link do turnieju + QR na rozpiskach.**
+  **QR MUSI KODOWAĆ ADRES ZE SCHEMATEM** (bug zgłoszony z produkcji): bez
+  `https://` czytnik traktuje zawartość jak zwykły tekst i telefon otwiera
+  WYSZUKIWARKĘ zamiast strony. Użytkownik wkleja zwykle sam adres, więc
+  schemat doklejamy sami przed zakodowaniem.
+  **Na wydruku też pełny adres ze schematem** (decyzja usera), sam `https://`
+  jaśniejszym szarym. Gdy brakuje miejsca w linii, schodzimy z ROZMIAREM
+  CZCIONKI linku (6 → 5,5 → 5 → 4,5 → 4 pt), a NIE obcinamy adresu; dopiero
+  gdy 4 pt się nie mieści, zostaje sam QR.
+  **Szerokość mierzona realnymi metrykami Carlito** (`_text_width_dxa`, PIL
+  ImageFont, z awaryjnym przybliżeniem gdy brak pliku czcionki). Wcześniejsze
+  szacowanie „średnia szerokość znaku” myliło się o kilkanaście procent
+  (130 vs realne 108-121 dxa/znak dla 12pt bold) i ucinało linki tam, gdzie
+  miejsce było. Carlito jest metrycznie zgodne z Calibri, więc pomiar jest
+  wiarygodny także dla Worda.
   Układ zaproponowany przez usera (szkic na zrzucie): link MAŁYM drukiem
   w tej samej linii co nazwisko (miejsce po prawej i tak stało puste, a
   wysokość linii wyznacza nazwisko 12pt → link nie kosztuje wiersza), QR
