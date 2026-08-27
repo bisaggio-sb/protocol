@@ -398,6 +398,30 @@ try:
     if len(g.pin_rows_to_pairs([['Jan Kowalski', '1111']])[0]) != 1:
         failures.append('pin_rows_to_pairs: wiersz danych potraktowany jak naglowek')
 
+    # read_pin_file: xlsx (openpyxl) i csv. Regresja na buga produkcyjnego
+    # "name 'pd' is not defined" - pandas NIE jest w requirements.txt, wiec
+    # odczyt nie moze sie na nim opierac.
+    try:
+        import io as _io2
+        from openpyxl import Workbook as _WB
+        _wb = _WB(); _ws = _wb.active
+        _ws.append(['Team Name', 'Country', 'PIN', 'Email', 'Members'])
+        _ws.append(['Sebastian Bisaga', '', '0013', '', ''])   # tekst -> zero zostaje
+        _ws.append(['Szymon Szulc', '', 2137, '', ''])          # liczba -> bez zera
+        _buf = _io2.BytesIO(); _wb.save(_buf)
+        _xr = g.read_pin_file(_buf.getvalue(), 'plik.xlsx')
+        _xp, _xi = g.pin_rows_to_pairs(_xr)
+        if _xp != [('Sebastian Bisaga', '0013'), ('Szymon Szulc', '2137')]:
+            failures.append(f'read_pin_file (xlsx): {_xp}')
+        if (_xi['name_col'], _xi['pin_col']) != ('Team Name', 'PIN'):
+            failures.append(f'read_pin_file (xlsx): zle naglowki {_xi}')
+        _cp, _ = g.pin_rows_to_pairs(
+            g.read_pin_file(b'Team Name;PIN\nAla Makocka;0013\n', 'x.csv'))
+        if _cp != [('Ala Makocka', '0013')]:
+            failures.append(f'read_pin_file (csv, separator sredniki): {_cp}')
+    except Exception as e:
+        failures.append(f'read_pin_file: {type(e).__name__}: {e}')
+
     # Realny układ eksportu z Mölkkify: kolumny nazwy i PIN-u NIE sasiaduja
     # ('Country' miedzy nimi) i nie sa pierwsze. Wiersze z PIN-em bez nazwy
     # nie maja do kogo trafic - musza byc policzone, nie polkniete po cichu.

@@ -2511,8 +2511,30 @@ with st.expander("Pobierz pusty formularz"):
 rozp_clicked = False
 rozp_fmt = 'PDF'
 # Definiowane BEZWARUNKOWO — expander niżej renderuje się tylko dla wspieranych
-# typów turnieju, a handler generowania czyta tę zmienną zawsze.
+# typów turnieju, a handler generowania czyta te zmienne zawsze.
 rozp_pin_pairs = None
+rozp_pin_only = False
+
+
+def _render_pin_report(rep, total):
+    """Wspólny widok raportu zgodności PIN-ów (podgląd i generowanie)."""
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Dopasowane", f"{rep['matched']} / {total}")
+    c2.metric("Bez PIN-u", len(rep['without_pin']))
+    c3.metric("Spoza arkusza", len(rep['unused']))
+    if rep['without_pin']:
+        with st.expander(f"Z arkusza, ale bez PIN-u w pliku ({len(rep['without_pin'])})"):
+            st.write('\n'.join(f"- {n}" for n in rep['without_pin']))
+    if rep['unused']:
+        with st.expander(f"W pliku, ale nie ma ich w arkuszu ({len(rep['unused'])})"):
+            st.caption("Najczęściej literówka w nazwie albo osoba, która ostatecznie nie gra.")
+            st.write('\n'.join(f"- {n}" for n in rep['unused']))
+    if rep['conflicts']:
+        st.error(
+            f"Ta sama nazwa z różnymi PIN-ami ({len(rep['conflicts'])}): "
+            + ', '.join(rep['conflicts'])
+            + " — te wpisy pominięto, bo nie da się zgadnąć, który PIN jest właściwy."
+        )
 rozp_is_team = not is_individual
 rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
 rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'
@@ -2547,15 +2569,12 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
                 "jako *tekst*. Przy kolumnie liczbowej `0042` zapisuje się jako "
                 "`42` i tego nie da się już odzyskać przy odczycie."
             )
-            _pin_up = st.file_uploader("Plik z PIN-ami", type=['xlsx', 'xls', 'csv'],
+            _pin_up = st.file_uploader("Plik z PIN-ami", type=['xlsx', 'csv'],
                                        key='rozp_pin_file')
             if _pin_up is not None:
                 try:
-                    _pin_raw = (pd.read_csv(_pin_up, dtype=str, header=None)
-                                if _pin_up.name.lower().endswith('.csv')
-                                else pd.read_excel(_pin_up, dtype=str, header=None)).fillna('')
                     rozp_pin_pairs, _pin_info = generate_docx.pin_rows_to_pairs(
-                        _pin_raw.values.tolist())
+                        generate_docx.read_pin_file(_pin_up.getvalue(), _pin_up.name))
                     if rozp_pin_pairs:
                         _n = len(rozp_pin_pairs)
                         _cols_msg = (f" Kolumny: „{_pin_info['name_col']}” i „{_pin_info['pin_col']}”."
@@ -2564,8 +2583,7 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
                         st.success(
                             f"Wczytano {_n} "
                             f"{generate_docx.pluralize(_n, 'PIN', 'PIN-y', 'PIN-ów')}."
-                            + _cols_msg +
-                            " Zgodność z listą z arkusza sprawdzimy przy generowaniu."
+                            + _cols_msg
                         )
                         if _pin_info['skipped_no_name']:
                             _sk = _pin_info['skipped_no_name']
@@ -2575,6 +2593,41 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
                                 f"z PIN-em, ale bez nazwy w kolumnie "
                                 f"„{_pin_info['name_col'] or 'nazwy'}” — nie ma ich do kogo przypisać."
                             )
+
+                        # ── Podgląd zgodności PRZED generowaniem ──────────
+                        # Pobrane rozpiski trafiają do cache, więc „Generuj”
+                        # nie odpytuje arkusza po raz drugi.
+                        if st.button("Sprawdź zgodność z arkuszem",
+                                     key="rozp_pin_check", use_container_width=True):
+                            _sid_chk = extract_id(sheets_url.strip()) if sheets_url.strip() else None
+                            if not _sid_chk:
+                                st.error("Najpierw podaj link do arkusza w sekcji „Arkusz”.")
+                            else:
+                                try:
+                                    with st.spinner("Pobieram listę z arkusza…"):
+                                        _sch_chk = generate_docx.fetch_all_player_schedules(_sid_chk)
+                                    st.session_state['rozp_sched_cache'] = (_sid_chk, _sch_chk)
+                                except Exception as _e:
+                                    _sch_chk = None
+                                    st.error(f"Błąd pobierania arkusza: {_e}")
+                                if _sch_chk:
+                                    _, _rep_chk = generate_docx.match_pins_to_schedules(
+                                        _sch_chk, rozp_pin_pairs)
+                                    st.session_state['rozp_pin_report'] = _rep_chk
+                                elif _sch_chk is not None:
+                                    st.error("Arkusz nie zwrócił żadnych zawodników.")
+
+                        _rep_prev = st.session_state.get('rozp_pin_report')
+                        if _rep_prev:
+                            _tot_prev = (_rep_prev['matched'] + len(_rep_prev['without_pin']))
+                            _render_pin_report(_rep_prev, _tot_prev)
+
+                        rozp_pin_only = st.checkbox(
+                            "Generuj tylko dla dopasowanych",
+                            key="rozp_pin_only",
+                            help="Pomija karty osób, dla których w pliku nie ma PIN-u. "
+                                 "Przydatne, gdy chcesz dodrukować PIN-y tylko części "
+                                 "zawodników.")
                     else:
                         st.warning(
                             "Plik nie zawiera żadnych par nazwa + PIN. Sprawdź, czy "
@@ -3136,7 +3189,13 @@ if rozp_clicked:
         except Exception:
             pass
     try:
-        schedules = generate_docx.fetch_all_player_schedules(sid, progress_cb=_on_rozp)
+        # Jeśli „Sprawdź zgodność” już pobrało listę dla tego arkusza,
+        # nie odpytujemy go po raz drugi.
+        _cached = st.session_state.get('rozp_sched_cache')
+        if _cached and _cached[0] == sid and _cached[1]:
+            schedules = _cached[1]
+        else:
+            schedules = generate_docx.fetch_all_player_schedules(sid, progress_cb=_on_rozp)
     except Exception as e:
         prog_bar.empty(); progress_box.empty()
         st.error(f"Błąd pobierania arkusza: {e}"); st.stop()
@@ -3151,30 +3210,25 @@ if rozp_clicked:
     # ── PIN-y: dopasowanie do listy z arkusza + raport zgodności ─────────
     # Robione PO pobraniu rozpisek, bo dopiero tu znamy komplet nazw z arkusza.
     if rozp_pin_pairs:
+        _total_before = len(schedules)
         schedules, _pin_rep = generate_docx.match_pins_to_schedules(schedules, rozp_pin_pairs)
-        _miss, _unused, _confl = (_pin_rep['without_pin'], _pin_rep['unused'],
-                                  _pin_rep['conflicts'])
-        if _pin_rep['matched']:
-            progress_box.success(
-                f"Dopasowano {_pin_rep['matched']} z {len(schedules)} PIN-ów.")
-        if _miss or _unused or _confl:
-            _lines = []
-            if _miss:
-                _lines.append(f"**Bez PIN-u w pliku ({len(_miss)}):** " + ', '.join(_miss[:25])
-                              + (' …' if len(_miss) > 25 else ''))
-            if _unused:
-                _lines.append(f"**W pliku, ale nie ma ich w arkuszu ({len(_unused)}):** "
-                              + ', '.join(_unused[:25]) + (' …' if len(_unused) > 25 else ''))
-            if _confl:
-                _lines.append(f"**Ta sama nazwa z różnymi PIN-ami ({len(_confl)}):** "
-                              + ', '.join(_confl[:25]) + (' …' if len(_confl) > 25 else '')
-                              + " — te wpisy pominięto, bo nie da się zgadnąć który PIN jest właściwy.")
-            st.warning("Niedopasowane wpisy:\n\n" + '\n\n'.join(_lines)
-                       + "\n\nGenerowanie idzie dalej — karty bez dopasowanego PIN-u "
-                         "wydrukują się normalnie, tylko bez tej linii.")
-        elif not _pin_rep['matched']:
-            st.error("Żaden PIN nie pasuje do nazw z arkusza — sprawdź, czy plik "
-                     "ma nazwę w pierwszej kolumnie, a PIN w drugiej.")
+        st.session_state['rozp_pin_report'] = _pin_rep
+        _render_pin_report(_pin_rep, _total_before)
+
+        if not _pin_rep['matched']:
+            st.error("Żaden PIN nie pasuje do nazw z arkusza — sprawdź, czy kolumna "
+                     "z nazwą zawiera te same nazwiska co arkusz.")
+            st.stop()
+
+        if rozp_pin_only:
+            schedules = [s for s in schedules if s.get('pin')]
+            if not schedules:
+                st.error("Po odfiltrowaniu nie została ani jedna karta."); st.stop()
+            st.info(f"Filtr „tylko dopasowane”: drukujemy {len(schedules)} "
+                    f"z {_total_before} kart.")
+        elif _pin_rep['without_pin']:
+            st.caption("Karty bez dopasowanego PIN-u wydrukują się normalnie, "
+                       "tylko bez tej linii.")
 
     progress_box.info(f"Buduję rozpiski dla {len(schedules)} {plural}…")
     try:

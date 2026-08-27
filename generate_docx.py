@@ -403,6 +403,26 @@ def clean_pin(value):
     return s
 
 
+def read_pin_file(data, filename):
+    """Czyta plik z PIN-ami do surowych wierszy (lista list).
+
+    Świadomie NIE używa pandas — nie ma go w `requirements.txt` (działa tylko
+    dlatego, że ciągnie go Streamlit), a `openpyxl` jest realną zależnością
+    projektu. Wartości bierzemy tak, jak są w pliku: komórka sformatowana jako
+    tekst zwróci '0013' z zerem wiodącym."""
+    name = (filename or '').lower()
+    if name.endswith('.csv'):
+        text = data.decode('utf-8-sig', errors='replace') if isinstance(data, bytes) else str(data)
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t')
+        except Exception:
+            dialect = csv.excel
+        return [list(r) for r in csv.reader(io.StringIO(text), dialect)]
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    return [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+
+
 # Nagłówki rozpoznawane w pliku z PIN-ami. Eksport z Mölkkify ma układ
 # „Team Name | Country | PIN | Email | Members”, czyli kolumny NIE sąsiadują
 # i nie są pierwsze — dlatego szukamy ich po nazwie, nie po pozycji.
