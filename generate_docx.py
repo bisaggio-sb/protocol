@@ -690,7 +690,8 @@ def _set_cell_margins(tc, top=80, left=120, bottom=80, right=120):
 def build_player_schedules_doc(schedules, *, tournament_name=None,
                                 tournament_date=None,
                                 cols=2, rows_per_page=5,
-                                is_team=False):
+                                is_team=False, tournament_link=None,
+                                qr_cm=1.0, link_max_chars=44):
     """Buduje docx z gridem kart zawodników (do druku + wycinania).
     schedules: lista z parse_player_schedules / fetch_all_player_schedules.
     Returns: bytes (docx).
@@ -718,6 +719,24 @@ def build_player_schedules_doc(schedules, *, tournament_name=None,
     n_rows = (len(schedules) + cols - 1) // cols
     if n_rows == 0:
         return _save_doc_to_bytes(doc)
+
+    # QR generujemy RAZ na dokument i współdzielimy rel_id między kartami —
+    # ten sam obraz w 200 kartach ważyłby inaczej 200×.
+    qr_rel_id, qr_dxa, link_text = None, 0, None
+    if tournament_link and str(tournament_link).strip():
+        _lnk = str(tournament_link).strip()
+        _png = make_qr_bytes(_lnk)
+        if _png:
+            # python-docx zwraca (rId, image) — NIE odwrotnie.
+            qr_rel_id, _ = doc.part.get_or_add_image(io.BytesIO(_png))
+            qr_dxa = _dxa_cm(qr_cm)
+        # Do druku obcinamy schemat — 'https://' zjada 8 znaków, a nikt tego
+        # nie przepisuje ręcznie (od tego jest QR).
+        _disp = re.sub(r'^https?://', '', _lnk)
+        # Zbyt długi link złamałby linię nazwiska na dwie i podniósł kartę,
+        # więc wtedy zostaje sam QR. Gdy QR się nie udał (brak biblioteki),
+        # pokazujemy link mimo długości — lepszy niż nic.
+        link_text = _disp if (len(_disp) <= link_max_chars or not qr_rel_id) else None
 
     # Tabela cols × n_rows na karty. python-docx tworzy strukturę, my potem
     # ustawiamy szerokości i wstrzykujemy bogate komórki.
@@ -774,7 +793,8 @@ def build_player_schedules_doc(schedules, *, tournament_name=None,
             if idx < len(schedules):
                 _fill_player_card_tc(tc, schedules[idx], tournament_name,
                                      tournament_date, card_w_dxa,
-                                     is_team=is_team)
+                                     is_team=is_team, qr_rel_id=qr_rel_id,
+                                     qr_dxa=qr_dxa, link_text=link_text)
             else:
                 # Pusta komórka — ramka kropkowana (linia cięcia placeholder)
                 _set_cell_borders(tc, all_val='dashed', sz='4', color='AAAAAA')
@@ -789,7 +809,55 @@ def _save_doc_to_bytes(doc):
     return buf.getvalue()
 
 
-def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dxa, *, is_team=False):
+def _card_header_with_qr(paras, qr_rel_id, qr_dxa, inner_w):
+    """Nagłówek karty jako tabela 2×1: treść po lewej, QR po prawej.
+
+    Dzięki temu QR zajmuje miejsce w POZIOMIE (obok nagłówka), a nie dokłada
+    kolejnego wiersza pod spodem — karta rośnie tylko o tyle, o ile QR jest
+    wyższy od samego nagłówka."""
+    tbl = etree.Element(wt('tbl'))
+    pr = etree.SubElement(tbl, wt('tblPr'))
+    w = etree.SubElement(pr, wt('tblW'))
+    w.set(wt('w'), str(inner_w)); w.set(wt('type'), 'dxa')
+    lay = etree.SubElement(pr, wt('tblLayout')); lay.set(wt('type'), 'fixed')
+    bdr = etree.SubElement(pr, wt('tblBorders'))
+    for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        b = etree.SubElement(bdr, wt(side)); b.set(wt('val'), 'nil')
+    mar = etree.SubElement(pr, wt('tblCellMar'))
+    for side, v in (('top', 0), ('left', 0), ('bottom', 0), ('right', 0)):
+        m = etree.SubElement(mar, wt(side)); m.set(wt('w'), str(v)); m.set(wt('type'), 'dxa')
+
+    left_w = max(200, inner_w - qr_dxa)
+    grid = etree.SubElement(tbl, wt('tblGrid'))
+    for cw in (left_w, qr_dxa):
+        gc = etree.SubElement(grid, wt('gridCol')); gc.set(wt('w'), str(cw))
+
+    tr = etree.SubElement(tbl, wt('tr'))
+    for cw, content in ((left_w, paras), (qr_dxa, None)):
+        c = etree.SubElement(tr, wt('tc'))
+        cpr = etree.SubElement(c, wt('tcPr'))
+        cw_el = etree.SubElement(cpr, wt('tcW'))
+        cw_el.set(wt('w'), str(cw)); cw_el.set(wt('type'), 'dxa')
+        if content is None:
+            va = etree.SubElement(cpr, wt('vAlign')); va.set(wt('val'), 'top')
+            p = etree.Element(wt('p'))
+            ppr = etree.SubElement(p, wt('pPr'))
+            jc = etree.SubElement(ppr, wt('jc')); jc.set(wt('val'), 'right')
+            sp = etree.SubElement(ppr, wt('spacing'))
+            sp.set(wt('before'), '0'); sp.set(wt('after'), '0')
+            sp.set(wt('line'), '240'); sp.set(wt('lineRule'), 'auto')
+            r = etree.SubElement(p, wt('r'))
+            emu = int(qr_dxa / 20.0 * 12700)      # dxa → pt → EMU
+            r.append(_make_inline_image_drawing(qr_rel_id, emu, emu))
+            c.append(p)
+        else:
+            for el in content:
+                c.append(el)
+    return tbl
+
+
+def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dxa, *,
+                         is_team=False, qr_rel_id=None, qr_dxa=0, link_text=None):
     """Wypełnia istniejący <w:tc> zawartością karty zawodnika.
     Layout: header (imię) → subtitle (Grupa/turniej/data) → tabela 4 kolumny
     (godzina | tor | gracz 1 | gracz 2). Własne nazwisko w wierszach pogrubione
@@ -797,8 +865,23 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     _set_cell_borders(tc, all_val='single', sz='12', color='000000')
     _set_cell_margins(tc, top=80, left=140, bottom=80, right=140)
 
-    # Header: imię + nazwisko
-    tc.append(_new_para(player['name'], bold=True, size_pt=12, align='left', after_pt=1))
+    # Header: imię + nazwisko, a OBOK niego (w tej samej linii) link do turnieju.
+    # Miejsce po prawej stronie nazwiska i tak stoi puste, a wysokość linii
+    # wyznacza nazwisko (12pt) — mały link nie kosztuje więc ani jednego wiersza.
+    # Link pokazujemy tylko wtedy, gdy RAZEM z nazwiskiem mieści się w jednej
+    # linii. Przy długim nazwisku (np. „Ewa Nowakowska-Wiśniewska”) zawijał się
+    # na drugą linię i podnosił kartę — wtedy zostaje sam QR, zgodnie z zasadą
+    # „za długi link → tylko kod”. Stałe dobrane pomiarowo: ~138 dxa na znak
+    # nazwiska (12pt bold) i ~64 dxa na znak linku (6pt).
+    _link_here = link_text
+    if _link_here:
+        _avail = (card_w_dxa - 280) - (qr_dxa if qr_rel_id else 0)
+        if len(player['name']) * 138 + len(_link_here) * 64 + 220 > _avail:
+            _link_here = None
+    _name_segs = [(player['name'], dict(bold=True, size_pt=12))]
+    if _link_here:
+        _name_segs.append(('   ' + _link_here, dict(size_pt=6, color='505050')))
+    _head = [_new_para_runs(_name_segs, align='left', after_pt=1)]
     # Subtitle: Grupa · turniej · data
     sub_parts = [f"Grupa {player['group']}"]
     if tournament_name: sub_parts.append(tournament_name)
@@ -814,10 +897,16 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
         # pogrubiony i czarny — PIN trzeba przepisać do aplikacji.
         _segs.append((f"{PIN_LABEL}: {player['pin']}",
                       dict(size_pt=7, bold=True, color='000000')))
-    tc.append(_new_para_runs(_segs, align='left', after_pt=2))
+    _head.append(_new_para_runs(_segs, align='left', after_pt=2))
 
     # Inner table 4 col × (1 + N) rows
     inner_w = card_w_dxa - 280  # tcMar L+R
+
+    if qr_rel_id and qr_dxa:
+        tc.append(_card_header_with_qr(_head, qr_rel_id, qr_dxa, inner_w))
+    else:
+        for _el in _head:
+            tc.append(_el)
     # godz. | tor | gracz 1 | gracz 2 — gracze szerokie; "godz." mieści się w 1 linii
     cw = [int(inner_w * 0.12), int(inner_w * 0.07), 0, 0]
     cw[2] = (inner_w - cw[0] - cw[1]) // 2

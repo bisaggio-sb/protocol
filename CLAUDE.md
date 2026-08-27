@@ -303,6 +303,30 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-08-11 (fix3) — **Link do turnieju + QR na rozpiskach.**
+  Układ zaproponowany przez usera (szkic na zrzucie): link MAŁYM drukiem
+  w tej samej linii co nazwisko (miejsce po prawej i tak stało puste, a
+  wysokość linii wyznacza nazwisko 12pt → link nie kosztuje wiersza), QR
+  w prawym górnym rogu karty przez nagłówek zbudowany jako tabela 2×1
+  (`_card_header_with_qr`) — QR zajmuje miejsce w POZIOMIE, nie dokłada
+  wiersza pod spodem.
+  **ROZMIAR QR DOBRANY POMIAROWO, NIE NA OKO.** 1,15 cm psuło paginację
+  (7 meczów/os., 12 kart: 1→2 strony), bo QR był wyższy od dwuliniowego
+  nagłówka. Granica leży między 1,05 a 1,15 cm → ustawione **1,0 cm**
+  z zapasem. Przemiecione 48 układów (3-8 meczów × 8-24 kart): zero zmian
+  paginacji względem wersji bez linku i QR.
+  **Link znika przy długim nazwisku.** „Ewa Nowakowska-Wiśniewska" + link
+  zawijały linię na dwie i podnosiły kartę. Sprawdzenie szerokości jest
+  PER KARTA (~138 dxa/znak nazwiska 12pt bold, ~64 dxa/znak linku 6pt) —
+  część kart może mieć link, część nie, ale QR zostaje wszędzie i paginacja
+  jest stabilna. Realizuje regułę usera „za długi link → zostaje sam QR”.
+  `https://` obcinane przy druku (8 znaków zysku; nikt tego nie przepisuje
+  ręcznie, od tego jest QR). QR generowany RAZ na dokument i współdzielony
+  przez `rel_id` — inaczej 200 kart = 200 kopii obrazu.
+  **PUŁAPKA python-docx:** `get_or_add_image` zwraca `(rId, image)`, a NIE
+  `(image, rId)`; `get_or_add_image_part` nie istnieje na `DocumentPart`.
+  Testy: 6 asercji (krótki link widoczny, długi ukryty, QR w obu wypadkach,
+  brak QR bez linku, obcięty schemat).
 - 2026-08-11 (fix2) — **PIN-y Mölkkify na rozpiskach (nowa funkcja).**
   Checkbox w expanderze rozpisek + uploader xlsx/xls/csv (2 kolumny: nazwa, PIN).
   Domyślnie WYŁĄCZONE — bez pliku wydruk bez zmian.

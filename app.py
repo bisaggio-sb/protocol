@@ -2514,6 +2514,7 @@ rozp_fmt = 'PDF'
 # typów turnieju, a handler generowania czyta te zmienne zawsze.
 rozp_pin_pairs = None
 rozp_pin_only = False
+rozp_link = ''
 
 
 def _render_pin_report(rep, total):
@@ -2549,6 +2550,15 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
             f"z normalnych zakładek `Gr. *` (te same kolumny co przy generowaniu "
             f"protokołów)."
         )
+        rozp_link = st.text_input(
+            "Link do turnieju w Mölkkify (opcjonalnie)",
+            key="rozp_link",
+            placeholder="https://molkkify.com/t/...",
+            help="Pojawi się małym drukiem obok nazwiska oraz jako kod QR "
+                 "w rogu karty. Rozmiary dobrane tak, żeby nie ubyło rozpisek "
+                 "na stronie. Gdy link jest za długi, by zmieścić się w linii "
+                 "z nazwiskiem, zostaje sam QR.")
+
         # ── PIN-y do aplikacji Mölkkify ──────────────────────────────────
         # Karta rozpiski jest już spersonalizowana i wręczana konkretnej osobie,
         # więc to naturalny nośnik dla PIN-u. Domyślnie WYŁĄCZONE — bez wgranego
@@ -3237,6 +3247,7 @@ if rozp_clicked:
             tournament_name=tournament_name.strip() or None,
             tournament_date=tournament_date.strip() or None,
             is_team=rozp_is_team,
+            tournament_link=rozp_link.strip() or None,
         )
     except Exception as e:
         progress_box.error(f"Błąd budowania rozpisek: {e}"); st.stop()

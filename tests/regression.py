@@ -489,6 +489,39 @@ try:
         failures.append('build_player_schedules_doc: PIN nie trafil do dokumentu')
     if 'PIN' in _xml_no:
         failures.append('build_player_schedules_doc: PIN drukuje sie mimo braku danych')
+
+    # Link do turnieju + QR. Krotki link ma sie pojawic tekstem, dlugi NIE
+    # (zawijalby linie nazwiska i podnosil karte) - w obu wypadkach ma byc QR.
+    def _card(nm, link):
+        return g.build_player_schedules_doc(
+            [{'name': nm, 'group': 'A', 'matches':
+              [{'godzina': '10:00', 'tor': '1', 'z1': nm, 'z2': 'X'}]}],
+            tournament_link=link)
+
+    def _parts(_b):
+        _z = _zf.ZipFile(_io.BytesIO(_b))
+        _x = _z.read('word/document.xml').decode('utf-8')
+        _imgs = [n for n in _z.namelist() if n.startswith('word/media/')]
+        return _x, _imgs
+
+    _x_short, _img_short = _parts(_card('Jan Kowalski', 'https://molkkify.com/t/GP5'))
+    if 'molkkify.com/t/GP5' not in _x_short:
+        failures.append('link: krotki link nie trafil na karte')
+    if 'https://' in _x_short:
+        failures.append('link: schemat https:// powinien byc obciety przy druku')
+    if not _img_short:
+        failures.append('link: brak obrazu QR w dokumencie')
+    # Dlugie nazwisko + link = brak miejsca w linii -> zostaje sam QR.
+    _x_long, _img_long = _parts(
+        _card('Ewa Nowakowska-Wiśniewska', 'https://molkkify.com/t/GP5-TCZEW'))
+    if 'molkkify' in _x_long:
+        failures.append('link: przy dlugim nazwisku link powinien zniknac (zostaje QR)')
+    if not _img_long:
+        failures.append('link: QR musi zostac nawet gdy link sie nie miesci')
+    # Bez linku nie moze byc ani tekstu, ani obrazu.
+    _x_none, _img_none = _parts(_card('Jan Kowalski', None))
+    if _img_none:
+        failures.append('link: QR generuje sie mimo braku linku')
 except Exception as e:
     failures.append(f'PIN-y Molkkify: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
@@ -499,5 +532,5 @@ if failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów + PIN-y Mölkkify')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów + PIN-y Mölkkify + link i QR')
 sys.exit(0)
