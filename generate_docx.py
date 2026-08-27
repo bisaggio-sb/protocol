@@ -595,6 +595,31 @@ def fetch_all_player_schedules(sheet_id, progress_cb=None):
 def _emu_cm(cm): return int(cm * 360000)
 def _dxa_cm(cm): return int(cm * 567)  # 1cm = 567 dxa (twentieth of point)
 
+def _mk_run(text, *, bold=False, italic=False, size_pt=None,
+            font='Calibri', color=None):
+    """Pojedynczy <w:r> z formatowaniem. Wspólne dla `_new_para`
+    (jeden run) i `_new_para_runs` (kilka runów w jednej linii)."""
+    r = etree.Element(wt('r'))
+    rPr = etree.SubElement(r, wt('rPr'))
+    fonts = etree.SubElement(rPr, wt('rFonts'))
+    for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+        fonts.set(wt(a), font)
+    if bold:
+        etree.SubElement(rPr, wt('b'))
+    if italic:
+        etree.SubElement(rPr, wt('i')); etree.SubElement(rPr, wt('iCs'))
+    if color:
+        c = etree.SubElement(rPr, wt('color')); c.set(wt('val'), color)
+    if size_pt:
+        sz_val = str(int(round(size_pt * 2)))
+        sz = etree.SubElement(rPr, wt('sz')); sz.set(wt('val'), sz_val)
+        szCs = etree.SubElement(rPr, wt('szCs')); szCs.set(wt('val'), sz_val)
+    t = etree.SubElement(r, wt('t'))
+    t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+    t.text = text
+    return r
+
+
 def _new_para(text='', *, bold=False, italic=False, size_pt=None, align=None,
               after_pt=0, font='Calibri', color=None):
     """Tworzy <w:p> z jednym runem."""
@@ -606,22 +631,28 @@ def _new_para(text='', *, bold=False, italic=False, size_pt=None, align=None,
     sp.set(wt('before'), '0'); sp.set(wt('after'), str(after_pt * 20))
     sp.set(wt('line'), '240'); sp.set(wt('lineRule'), 'auto')
     if text:
-        r = etree.SubElement(p, wt('r'))
-        rPr = etree.SubElement(r, wt('rPr'))
-        fonts = etree.SubElement(rPr, wt('rFonts'))
-        for a in ('ascii', 'hAnsi', 'eastAsia', 'cs'): fonts.set(wt(a), font)
-        if bold: etree.SubElement(rPr, wt('b'))
-        if italic:
-            etree.SubElement(rPr, wt('i')); etree.SubElement(rPr, wt('iCs'))
-        if color:
-            c = etree.SubElement(rPr, wt('color')); c.set(wt('val'), color)
-        if size_pt:
-            sz_val = str(int(round(size_pt * 2)))
-            sz = etree.SubElement(rPr, wt('sz')); sz.set(wt('val'), sz_val)
-            szCs = etree.SubElement(rPr, wt('szCs')); szCs.set(wt('val'), sz_val)
-        t = etree.SubElement(r, wt('t'))
-        t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-        t.text = text
+        p.append(_mk_run(text, bold=bold, italic=italic, size_pt=size_pt,
+                         font=font, color=color))
+    return p
+
+
+def _new_para_runs(segments, *, align=None, after_pt=0):
+    """Akapit złożony z kilku runów o RÓŻNYM formatowaniu.
+
+    segments: lista (tekst, słownik stylu) — styl przyjmuje te same klucze co
+    `_new_para` (bold/italic/size_pt/font/color). Potrzebne, żeby zmieścić
+    w jednej linii szary podtytuł i wyróżniony PIN: osobny akapit na PIN
+    podnosił kartę na tyle, że przy 12-14 kartach wypychał je na drugą stronę."""
+    p = etree.Element(wt('p'))
+    pPr = etree.SubElement(p, wt('pPr'))
+    if align:
+        jc = etree.SubElement(pPr, wt('jc')); jc.set(wt('val'), align)
+    sp = etree.SubElement(pPr, wt('spacing'))
+    sp.set(wt('before'), '0'); sp.set(wt('after'), str(after_pt * 20))
+    sp.set(wt('line'), '240'); sp.set(wt('lineRule'), 'auto')
+    for text, style in segments:
+        if text:
+            p.append(_mk_run(text, **(style or {})))
     return p
 
 
@@ -772,14 +803,18 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     sub_parts = [f"Grupa {player['group']}"]
     if tournament_name: sub_parts.append(tournament_name)
     if tournament_date: sub_parts.append(tournament_date)
-    tc.append(_new_para(' · '.join(sub_parts), size_pt=7, align='left', after_pt=2,
-                        italic=True, color='707070'))
-
-    # PIN do aplikacji Mölkkify — tylko gdy dopięty przez match_pins_to_schedules.
-    # Osobna linia (nie w subtitle), bo ma być czytelny na pociętej karteczce.
+    # PIN dopisujemy do TEJ SAMEJ linii co podtytuł. Osobny akapit podnosił
+    # kartę na tyle, że przy 12-14 kartach (5-7 meczów na osobę) wypychał
+    # ostatnie na drugą stronę — zmierzone, nie teoretyczne.
+    _sub_style = dict(size_pt=7, italic=True, color='707070')
+    _segs = [(' · '.join(sub_parts), _sub_style)]
     if player.get('pin'):
-        tc.append(_new_para(f"{PIN_LABEL}: {player['pin']}", bold=True, size_pt=8,
-                            align='left', after_pt=2))
+        _segs.append((' · ', _sub_style))
+        # Ten sam rozmiar co podtytuł (nie podnosi wysokości linii), ale
+        # pogrubiony i czarny — PIN trzeba przepisać do aplikacji.
+        _segs.append((f"{PIN_LABEL}: {player['pin']}",
+                      dict(size_pt=7, bold=True, color='000000')))
+    tc.append(_new_para_runs(_segs, align='left', after_pt=2))
 
     # Inner table 4 col × (1 + N) rows
     inner_w = card_w_dxa - 280  # tcMar L+R

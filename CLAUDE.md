@@ -331,6 +331,13 @@ w wierszu tabeli (PIL).
   5 kolumnach to jedyny sposób, żeby zobaczył, że wczytano właściwe.
   Wiersze z PIN-em bez nazwy = niedokończone wpisy (potwierdzone przez usera):
   pomijane, ale POLICZONE i zgłoszone, nigdy po cichu.
+  **PIN W LINII PODTYTUŁU, NIE W OSOBNYM AKAPICIE.** Pierwsza wersja dawała
+  PIN jako osobny akapit — ZMIERZONE: przy 5 meczach/os. 14 kart szło z 1 na
+  2 strony, przy 7 meczach już 12 kart. Teraz PIN dokleja się do linii
+  „Grupa · turniej · data” przez nowe `_new_para_runs` (kilka runów o różnym
+  formatowaniu w jednym akapicie; wspólny `_mk_run` z `_new_para`). Ten sam
+  rozmiar co podtytuł (7pt, nie podnosi wysokości linii), ale bold + czarny.
+  Po zmianie paginacja z PIN-em i bez jest IDENTYCZNA.
   Testy: 11 asercji w regresji + weryfikacja renderem (docx→PDF→PNG).
 - 2026-08-11 — **Porządki po przeniesieniu repo na konto prywatne.**
   (a) **keepalive `*/30` → `0 */2`** (co 2 h). Publiczne repo ma minuty Actions
