@@ -322,6 +322,15 @@ w wierszu tabeli (PIL).
   **Świadoma decyzja o prywatności:** karty drukują się 2×5 na A4, więc przed
   pocięciem jedna kartka pokazuje PIN-y do 10 osób. Przy tej stawce uznane za
   akceptowalne — ale to znaczy, że arkuszy nie wolno rozdawać w całości.
+  **FORMAT PLIKU (realny eksport z Mölkkify):** `Team Name | Country | PIN |
+  Email | Members` — kolumna nazwy i PIN-u NIE sąsiadują i nie są dwiema
+  pierwszymi. Dlatego `pin_rows_to_pairs` szuka kolumn PO NAGŁÓWKU (lista
+  `PIN_NAME_HEADERS` / `PIN_CODE_HEADERS`, odporne na wielkość liter i ogonki),
+  a nie po pozycji; tryb awaryjny na dwóch pierwszych kolumnach zostaje dla
+  plików bez nagłówka. Rozpoznane nagłówki UI pokazuje użytkownikowi — przy
+  5 kolumnach to jedyny sposób, żeby zobaczył, że wczytano właściwe.
+  Wiersze z PIN-em bez nazwy = niedokończone wpisy (potwierdzone przez usera):
+  pomijane, ale POLICZONE i zgłoszone, nigdy po cichu.
   Testy: 11 asercji w regresji + weryfikacja renderem (docx→PDF→PNG).
 - 2026-08-11 — **Porządki po przeniesieniu repo na konto prywatne.**
   (a) **keepalive `*/30` → `0 */2`** (co 2 h). Publiczne repo ma minuty Actions
