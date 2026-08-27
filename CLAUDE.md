@@ -303,6 +303,26 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-08-11 (fix2) — **PIN-y Mölkkify na rozpiskach (nowa funkcja).**
+  Checkbox w expanderze rozpisek + uploader xlsx/xls/csv (2 kolumny: nazwa, PIN).
+  Domyślnie WYŁĄCZONE — bez pliku wydruk bez zmian.
+  **Dopasowanie nazw to właściwe ryzyko tej funkcji, nie samo drukowanie.**
+  Arkusz i plik z PIN-ami prawie nigdy nie są zapisane identycznie, więc
+  porównanie 1:1 dawałoby fałszywe braki. Stąd `normalize_person_name`
+  (ogonki/wielkość liter/spacje; UWAGA: `ł` NIE rozkłada się przez NFKD —
+  jawna podmiana) + `name_match_key` (kolejność członów) + dopasowanie
+  dwuetapowe.
+  **PUŁAPKA — zero wiodące w PIN.** Excel trzyma kolumnę liczbowo: `0042`
+  zapisuje się jako `42` i przy odczycie NIE DA SIĘ tego odtworzyć (informacja
+  ginie w pliku, nie przy parsowaniu). `clean_pin` obcina tylko artefakt
+  `'1234.0'`; resztę załatwia prośba w UI o sformatowanie kolumny jako tekst.
+  Raport zgodnosci: dopasowane / bez PIN-u / spoza arkusza / konflikty (ta sama
+  nazwa z różnymi PIN-ami → wpis pomijany, głośny alert zamiast zgadywania).
+  Generowanie idzie dalej mimo ostrzeżeń.
+  **Świadoma decyzja o prywatności:** karty drukują się 2×5 na A4, więc przed
+  pocięciem jedna kartka pokazuje PIN-y do 10 osób. Przy tej stawce uznane za
+  akceptowalne — ale to znaczy, że arkuszy nie wolno rozdawać w całości.
+  Testy: 11 asercji w regresji + weryfikacja renderem (docx→PDF→PNG).
 - 2026-08-11 — **Porządki po przeniesieniu repo na konto prywatne.**
   (a) **keepalive `*/30` → `0 */2`** (co 2 h). Publiczne repo ma minuty Actions
   za darmo bez limitu, prywatne dostaje 2000/mies., a GitHub zaokrągla KAŻDE
