@@ -2510,6 +2510,9 @@ with st.expander("Pobierz pusty formularz"):
 # z arkusza.
 rozp_clicked = False
 rozp_fmt = 'PDF'
+# Definiowane BEZWARUNKOWO — expander niżej renderuje się tylko dla wspieranych
+# typów turnieju, a handler generowania czyta tę zmienną zawsze.
+rozp_pin_pairs = None
 rozp_is_team = not is_individual
 rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
 rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'
@@ -2524,6 +2527,48 @@ if is_individual or is_trojka or is_czworka or is_dwojka:
             f"z normalnych zakładek `Gr. *` (te same kolumny co przy generowaniu "
             f"protokołów)."
         )
+        # ── PIN-y do aplikacji Mölkkify ──────────────────────────────────
+        # Karta rozpiski jest już spersonalizowana i wręczana konkretnej osobie,
+        # więc to naturalny nośnik dla PIN-u. Domyślnie WYŁĄCZONE — bez wgranego
+        # pliku nic się nie zmienia w wydruku.
+        _pin_who = 'drużyny' if rozp_is_team else 'osoby'
+        rozp_pin_on = st.checkbox(
+            "Dodaj PIN-y do aplikacji Mölkkify",
+            key="rozp_pin_on",
+            help=f"Nadrukuje na karcie każdej {_pin_who} linię „{generate_docx.PIN_LABEL}: ****”.")
+        if rozp_pin_on:
+            st.caption(
+                "Plik z **dwiema kolumnami**: nazwa (jak w arkuszu) i PIN. "
+                "Nagłówek rozpoznajemy sami. Dopasowanie ignoruje wielkość liter, "
+                "ogonki, nadmiarowe spacje i kolejność imienia z nazwiskiem."
+            )
+            st.caption(
+                "⚠️ Jeśli PIN-y mają **zera wiodące**, sformatuj kolumnę w Excelu "
+                "jako *tekst*. Przy kolumnie liczbowej `0042` zapisuje się jako "
+                "`42` i tego nie da się już odzyskać przy odczycie."
+            )
+            _pin_up = st.file_uploader("Plik z PIN-ami", type=['xlsx', 'xls', 'csv'],
+                                       key='rozp_pin_file')
+            if _pin_up is not None:
+                try:
+                    _pin_raw = (pd.read_csv(_pin_up, dtype=str, header=None)
+                                if _pin_up.name.lower().endswith('.csv')
+                                else pd.read_excel(_pin_up, dtype=str, header=None)).fillna('')
+                    rozp_pin_pairs = generate_docx.pin_rows_to_pairs(_pin_raw.values.tolist())
+                    if rozp_pin_pairs:
+                        _n = len(rozp_pin_pairs)
+                        st.success(
+                            f"Wczytano {_n} "
+                            f"{generate_docx.pluralize(_n, 'PIN', 'PIN-y', 'PIN-ów')}. "
+                            "Zgodność z listą z arkusza sprawdzimy przy generowaniu."
+                        )
+                    else:
+                        st.warning("Plik nie zawiera żadnych par nazwa + PIN.")
+                except Exception as e:
+                    st.error(f"Nie udało się wczytać pliku z PIN-ami: {e}")
+            else:
+                st.info("Bez wgranego pliku rozpiski wygenerują się normalnie, bez PIN-ów.")
+
         cols_rozp = st.columns([1, 1])
         with cols_rozp[0]:
             rozp_fmt = st.radio("Format pliku", ["PDF", "DOCX"], horizontal=True,
@@ -3087,6 +3132,34 @@ if rozp_clicked:
         plural = generate_docx.pluralize(len(schedules), 'drużyny', 'drużyn', 'drużyn')
     else:
         plural = generate_docx.pluralize(len(schedules), 'zawodnika', 'zawodników', 'zawodników')
+    # ── PIN-y: dopasowanie do listy z arkusza + raport zgodności ─────────
+    # Robione PO pobraniu rozpisek, bo dopiero tu znamy komplet nazw z arkusza.
+    if rozp_pin_pairs:
+        schedules, _pin_rep = generate_docx.match_pins_to_schedules(schedules, rozp_pin_pairs)
+        _miss, _unused, _confl = (_pin_rep['without_pin'], _pin_rep['unused'],
+                                  _pin_rep['conflicts'])
+        if _pin_rep['matched']:
+            progress_box.success(
+                f"Dopasowano {_pin_rep['matched']} z {len(schedules)} PIN-ów.")
+        if _miss or _unused or _confl:
+            _lines = []
+            if _miss:
+                _lines.append(f"**Bez PIN-u w pliku ({len(_miss)}):** " + ', '.join(_miss[:25])
+                              + (' …' if len(_miss) > 25 else ''))
+            if _unused:
+                _lines.append(f"**W pliku, ale nie ma ich w arkuszu ({len(_unused)}):** "
+                              + ', '.join(_unused[:25]) + (' …' if len(_unused) > 25 else ''))
+            if _confl:
+                _lines.append(f"**Ta sama nazwa z różnymi PIN-ami ({len(_confl)}):** "
+                              + ', '.join(_confl[:25]) + (' …' if len(_confl) > 25 else '')
+                              + " — te wpisy pominięto, bo nie da się zgadnąć który PIN jest właściwy.")
+            st.warning("Niedopasowane wpisy:\n\n" + '\n\n'.join(_lines)
+                       + "\n\nGenerowanie idzie dalej — karty bez dopasowanego PIN-u "
+                         "wydrukują się normalnie, tylko bez tej linii.")
+        elif not _pin_rep['matched']:
+            st.error("Żaden PIN nie pasuje do nazw z arkusza — sprawdź, czy plik "
+                     "ma nazwę w pierwszej kolumnie, a PIN w drugiej.")
+
     progress_box.info(f"Buduję rozpiski dla {len(schedules)} {plural}…")
     try:
         docx_bytes = generate_docx.build_player_schedules_doc(

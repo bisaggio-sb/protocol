@@ -9,7 +9,7 @@ CZWORKA layout (v cz4):
 - col_width_cm clamp = 18.46 (= TARGET_WIDTH) — nie skaluje grafik które już mieszczą się w tabeli.
 """
 
-import io, os, csv, re, copy, zipfile, string
+import io, os, csv, re, copy, zipfile, string, unicodedata
 from urllib.parse import quote
 import requests
 from lxml import etree
@@ -368,6 +368,117 @@ def matches_to_player_schedules(matches, group_letter):
     return out
 
 
+# ─── PIN-y do aplikacji Mölkkify (nadruk na rozpiskach) ──────────────────────
+PIN_LABEL = 'PIN Mölkkify'
+
+
+def _strip_diacritics(s):
+    """Usuwa ogonki. 'ł' NIE rozkłada się przez NFKD, stąd jawna podmiana."""
+    s = s.replace('ł', 'l').replace('Ł', 'L')
+    s = unicodedata.normalize('NFKD', s)
+    return ''.join(c for c in s if not unicodedata.combining(c))
+
+
+def normalize_person_name(name):
+    """Klucz porównania nazwisk: bez ogonków, bez wielkości liter, bez
+    nadmiarowych spacji. Arkusz i plik z PIN-ami prawie nigdy nie są zapisane
+    identycznie, więc porównanie 1:1 dawałoby fałszywe „braki”."""
+    s = re.sub(r'\s+', ' ', (name or '').strip())
+    return _strip_diacritics(s).casefold()
+
+
+def name_match_key(name):
+    """Klucz odporny na kolejność członów: „Kowalski Jan” == „Jan Kowalski”."""
+    return ' '.join(sorted(normalize_person_name(name).split()))
+
+
+def clean_pin(value):
+    """PIN zawsze jako tekst. Excel trzyma taką kolumnę liczbowo, więc PIN
+    potrafi wrócić jako '1234.0'. UWAGA: jeśli kolumna była liczbowa, zero
+    wiodące ('0042' → 42) przepadło już przy zapisie pliku i NIE da się go
+    odtworzyć — dlatego UI prosi o sformatowanie kolumny jako tekst."""
+    s = str(value if value is not None else '').strip()
+    if re.match(r'^\d+\.0+$', s):
+        s = s.split('.', 1)[0]
+    return s
+
+
+def pin_rows_to_pairs(rows):
+    """Z surowych wierszy pliku (lista list) robi pary (nazwa, PIN).
+
+    Bierze dwie pierwsze kolumny. Pierwszy wiersz pomija, gdy wygląda na
+    nagłówek — heurystyka: w komórce PIN-u nie ma ani jednej cyfry
+    („PIN”, „kod” → nagłówek; „1234” → już dane)."""
+    out = []
+    for i, r in enumerate(rows or []):
+        if r is None:
+            continue
+        cells = [('' if c is None else str(c)).strip() for c in list(r)[:2]]
+        while len(cells) < 2:
+            cells.append('')
+        name, pin = cells[0], cells[1]
+        if i == 0 and not re.search(r'\d', pin):
+            continue
+        if not name and not pin:
+            continue
+        out.append((name, pin))
+    return out
+
+
+def match_pins_to_schedules(schedules, pin_pairs):
+    """Dokleja klucz 'pin' do rozpisek. NIE modyfikuje wejścia.
+
+    pin_pairs: iterowalne par (nazwa, pin).
+    Zwraca (nowe_schedules, raport); raport ma klucze:
+      matched     – ile rozpisek dostało PIN,
+      without_pin – nazwy z arkusza, dla których w pliku nie ma PIN-u,
+      unused      – wpisy z pliku niepasujące do nikogo z arkusza,
+      conflicts   – nazwy występujące w pliku wielokrotnie z RÓŻNYMI PIN-ami.
+
+    Dopasowanie dwuetapowe: najpierw dokładne (po normalizacji), potem
+    z pominięciem kolejności imienia i nazwiska. Konflikt = wpis pomijany,
+    bo zgadywanie który PIN jest właściwy byłoby gorsze niż głośny alert."""
+    entries, by_exact, by_loose, seen_pin, conflicts = [], {}, {}, {}, []
+    for raw_name, raw_pin in pin_pairs:
+        nm = re.sub(r'\s+', ' ', (raw_name or '').strip())
+        pin = clean_pin(raw_pin)
+        if not nm or not pin:
+            continue
+        ek, lk = normalize_person_name(nm), name_match_key(nm)
+        if ek in seen_pin and seen_pin[ek] != pin:
+            if nm not in conflicts:
+                conflicts.append(nm)
+            continue
+        seen_pin[ek] = pin
+        by_exact.setdefault(ek, pin)
+        by_loose.setdefault(lk, pin)
+        entries.append((nm, lk))
+
+    used_loose, out, without_pin = set(), [], []
+    for s in schedules:
+        item = dict(s)
+        name = item.get('name', '')
+        pin = by_exact.get(normalize_person_name(name)) or by_loose.get(name_match_key(name))
+        if pin:
+            item['pin'] = pin
+            used_loose.add(name_match_key(name))
+        else:
+            without_pin.append(name)
+        out.append(item)
+
+    unused = []
+    for nm, lk in entries:
+        if lk not in used_loose and nm not in unused:
+            unused.append(nm)
+
+    return out, {
+        'matched': sum(1 for i in out if i.get('pin')),
+        'without_pin': without_pin,
+        'unused': unused,
+        'conflicts': conflicts,
+    }
+
+
 def fetch_all_player_schedules(sheet_id, progress_cb=None):
     """Pobiera rozpiski z wszystkich zakładek Gr. * w arkuszu (przez gviz).
     Reuse parse_group_rows + matches_to_player_schedules.
@@ -601,6 +712,12 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     if tournament_date: sub_parts.append(tournament_date)
     tc.append(_new_para(' · '.join(sub_parts), size_pt=7, align='left', after_pt=2,
                         italic=True, color='707070'))
+
+    # PIN do aplikacji Mölkkify — tylko gdy dopięty przez match_pins_to_schedules.
+    # Osobna linia (nie w subtitle), bo ma być czytelny na pociętej karteczce.
+    if player.get('pin'):
+        tc.append(_new_para(f"{PIN_LABEL}: {player['pin']}", bold=True, size_pt=8,
+                            align='left', after_pt=2))
 
     # Inner table 4 col × (1 + N) rows
     inner_w = card_w_dxa - 280  # tcMar L+R

@@ -379,11 +379,80 @@ except Exception as e:
     failures.append(f'helpery filtra torów: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# ── PIN-y Mölkkify na rozpiskach ────────────────────────────────────────────
+try:
+    # Nagłówek rozpoznawany po braku cyfry w kolumnie PIN-u; zera wiodące
+    # i artefakt '1234.0' z Excela nie mogą zepsuć PIN-u.
+    _rows = [['Imię i nazwisko', 'PIN'], ['Jan Kowalski', '0042'],
+             ['Anna Nowak', '1234.0'], ['', ''], ['Piotr Zych', '7777']]
+    _pairs = g.pin_rows_to_pairs(_rows)
+    if [p[0] for p in _pairs] != ['Jan Kowalski', 'Anna Nowak', 'Piotr Zych']:
+        failures.append(f'pin_rows_to_pairs: zle nazwy {[p[0] for p in _pairs]}')
+    if g.clean_pin('1234.0') != '1234':
+        failures.append('clean_pin: artefakt .0 z Excela nie usuniety')
+    if g.clean_pin('0042') != '0042':
+        failures.append('clean_pin: zero wiodace zgubione')
+    # Bez nagłówka pierwszy wiersz musi zostać danymi.
+    if len(g.pin_rows_to_pairs([['Jan Kowalski', '1111']])) != 1:
+        failures.append('pin_rows_to_pairs: wiersz danych potraktowany jak naglowek')
+
+    # Dopasowanie odporne na ogonki, wielkosc liter, spacje i kolejnosc czlonow.
+    if g.name_match_key('Kowalski Jan') != g.name_match_key('jan  KOWALSKI'):
+        failures.append('name_match_key: kolejnosc/wielkosc liter nie znormalizowana')
+    if g.normalize_person_name('Łukasz Żak') != g.normalize_person_name('Lukasz Zak'):
+        failures.append('normalize_person_name: ogonki nie usuniete')
+
+    _sched = [{'name': 'Jan Kowalski', 'group': 'A', 'matches': []},
+              {'name': 'Łukasz Żak', 'group': 'A', 'matches': []},
+              {'name': 'Ewa Bez Pinu', 'group': 'B', 'matches': []}]
+    _out, _rep = g.match_pins_to_schedules(_sched, [
+        ('kowalski  jan', '0042'),      # inna kolejnosc + podwojna spacja
+        ('Lukasz Zak', '5555'),         # bez ogonkow
+        ('Ktos Spoza Arkusza', '9999'),  # nadmiarowy wpis
+    ])
+    if _out[0].get('pin') != '0042':
+        failures.append('match_pins: nie dopasowano po odwroconej kolejnosci')
+    if _out[1].get('pin') != '5555':
+        failures.append('match_pins: nie dopasowano mimo braku ogonkow')
+    if _rep['without_pin'] != ['Ewa Bez Pinu']:
+        failures.append(f"match_pins: zly without_pin {_rep['without_pin']}")
+    if _rep['unused'] != ['Ktos Spoza Arkusza']:
+        failures.append(f"match_pins: zly unused {_rep['unused']}")
+    if _rep['matched'] != 2:
+        failures.append(f"match_pins: matched={_rep['matched']}, oczek. 2")
+    # Wejscie nie moze byc modyfikowane w miejscu.
+    if 'pin' in _sched[0]:
+        failures.append('match_pins: zmodyfikowal wejsciowa liste')
+    # Ta sama osoba z dwoma roznymi PIN-ami = konflikt, wpis pomijany.
+    _o2, _r2 = g.match_pins_to_schedules(
+        [{'name': 'Jan Kowalski', 'group': 'A', 'matches': []}],
+        [('Jan Kowalski', '1111'), ('Jan Kowalski', '2222')])
+    if _r2['conflicts'] != ['Jan Kowalski'] or _o2[0].get('pin') != '1111':
+        failures.append(f'match_pins: konflikt obsluzony zle ({_r2})')
+
+    # PIN musi realnie trafic do docx (i tylko wtedy, gdy jest dopiety).
+    _doc_pin = g.build_player_schedules_doc(
+        [{'name': 'Jan Kowalski', 'group': 'A', 'pin': '0042',
+          'matches': [{'godzina': '10:00', 'tor': '1', 'z1': 'Jan Kowalski', 'z2': 'X'}]}])
+    _doc_no = g.build_player_schedules_doc(
+        [{'name': 'Jan Kowalski', 'group': 'A',
+          'matches': [{'godzina': '10:00', 'tor': '1', 'z1': 'Jan Kowalski', 'z2': 'X'}]}])
+    import zipfile as _zf, io as _io
+    _xml = _zf.ZipFile(_io.BytesIO(_doc_pin)).read('word/document.xml').decode('utf-8')
+    _xml_no = _zf.ZipFile(_io.BytesIO(_doc_no)).read('word/document.xml').decode('utf-8')
+    if '0042' not in _xml:
+        failures.append('build_player_schedules_doc: PIN nie trafil do dokumentu')
+    if 'PIN' in _xml_no:
+        failures.append('build_player_schedules_doc: PIN drukuje sie mimo braku danych')
+except Exception as e:
+    failures.append(f'PIN-y Molkkify: {type(e).__name__}: {e}')
+    traceback.print_exc(file=sys.stderr)
+
 if failures:
     print('REGRESJA FAIL:', file=sys.stderr)
     for f in failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów + PIN-y Mölkkify')
 sys.exit(0)
