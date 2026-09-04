@@ -345,6 +345,27 @@ def _map_upload_to_cols(raw):
     return out.fillna('').astype(str)
 
 
+def _render_pin_report(rep, total):
+    """Wspólny widok raportu zgodności PIN-ów (podgląd i generowanie)."""
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Dopasowane", f"{rep['matched']} / {total}")
+    c2.metric("Bez PIN-u", len(rep['without_pin']))
+    c3.metric("Spoza listy", len(rep['unused']))
+    if rep['without_pin']:
+        with st.expander(f"Na liście, ale bez PIN-u w pliku ({len(rep['without_pin'])})"):
+            st.write('\n'.join(f"- {n}" for n in rep['without_pin']))
+    if rep['unused']:
+        with st.expander(f"W pliku, ale nie ma ich na liście ({len(rep['unused'])})"):
+            st.caption("Najczęściej literówka w nazwie albo osoba, która ostatecznie nie gra.")
+            st.write('\n'.join(f"- {n}" for n in rep['unused']))
+    if rep['conflicts']:
+        st.error(
+            f"Ta sama nazwa z różnymi PIN-ami ({len(rep['conflicts'])}): "
+            + ', '.join(rep['conflicts'])
+            + " — te wpisy pominięto, bo nie da się zgadnąć, który PIN jest właściwy."
+        )
+
+
 def _render_manual_generator(tournament_type, tournament_name, tournament_date):
     """Samodzielny generator z własnej listy meczów (upload lub ręczna tabela).
     Renderuje się zamiast ścieżki Google Sheets (wołający robi st.stop())."""
@@ -403,18 +424,23 @@ def _render_manual_generator(tournament_type, tournament_name, tournament_date):
         m_pdf = st.checkbox('PDF (.pdf)', value=True, key='manual_pdf')
         m_docx = st.checkbox('Word (.docx)', value=False, key='manual_docx')
 
-    if st.button('Generuj protokoły z listy', type='primary', key='manual_gen',
-                 use_container_width=True):
-        matches = []
+    def _collect_matches():
+        """Wiersze z edytora → lista meczów. Wspólne dla protokołów i rozpisek."""
+        out = []
         for _, row in edited.iterrows():
             z1 = str(row.get('p1', '') or '').strip()
             z2 = str(row.get('p2', '') or '').strip()
             if not z1 or not z2:
                 continue
-            matches.append({'z1': z1, 'z2': z2, 'grupa': '',
-                            'tor': str(row.get('tor', '') or '').strip(),
-                            'godz': str(row.get('godz', '') or '').strip(),
-                            'mecz': str(row.get('mecz', '') or '').strip()})
+            out.append({'z1': z1, 'z2': z2, 'grupa': '',
+                        'tor': str(row.get('tor', '') or '').strip(),
+                        'godz': str(row.get('godz', '') or '').strip(),
+                        'mecz': str(row.get('mecz', '') or '').strip()})
+        return out
+
+    if st.button('Generuj protokoły z listy', type='primary', key='manual_gen',
+                 use_container_width=True):
+        matches = _collect_matches()
         if not matches:
             st.error(f'Brak kompletnych meczów — wypełnij {side} 1 i {side} 2 w co najmniej jednym wierszu.')
             return
@@ -449,6 +475,102 @@ def _render_manual_generator(tournament_type, tournament_name, tournament_date):
                                    mime='application/pdf', key='manual_dl_pdf')
             else:
                 st.warning(f'PDF się nie udał ({err}). Pobierz wersję .docx.')
+
+    # ── Rozpiski meczowe z tej samej listy ──────────────────────────────────
+    # Rozpiski są wyprowadzane z meczów (`matches_to_player_schedules`), więc
+    # ręczna tabela w zupełności wystarcza — arkusz nie jest do niczego potrzebny.
+    _ent = 'zawodników' if is_ind else 'drużyn'
+    _ent_dla = 'zawodnikom' if is_ind else 'drużynom'
+    with st.expander(f'Rozpiski meczowe dla {_ent} (do druku i rozdania)'):
+        st.caption(
+            f"Karty A4 z rozpiską każdej {'osoby' if is_ind else 'drużyny'} "
+            f"(godzina · tor · przeciwnik) — do wycięcia i rozdania {_ent_dla} "
+            f"przed turniejem. Budowane z tej samej tabeli co protokoły."
+        )
+        m_link = st.text_input(
+            'Link do turnieju w Mölkkify (opcjonalnie)', key='manual_rozp_link',
+            placeholder='https://molkkify.app/t/...',
+            help='Pojawi się małym drukiem obok nazwiska oraz jako kod QR w rogu '
+                 'karty. Nie ubywa przez to rozpisek na stronie.')
+
+        m_pin_pairs = None
+        if st.checkbox('Dodaj PIN-y do aplikacji Mölkkify', key='manual_pin_on',
+                       help='Plik z kolumną nazwy (np. „Team Name”) i kolumną „PIN”.'):
+            st.caption('⚠️ Jeśli PIN-y mają zera wiodące, sformatuj kolumnę w Excelu '
+                       'jako *tekst* — inaczej `0042` zapisze się jako `42`.')
+            _mp = st.file_uploader('Plik z PIN-ami', type=['xlsx', 'csv'],
+                                   key='manual_pin_file')
+            if _mp is not None:
+                try:
+                    m_pin_pairs, _mi = generate_docx.pin_rows_to_pairs(
+                        generate_docx.read_pin_file(_mp.getvalue(), _mp.name))
+                    if m_pin_pairs:
+                        _n = len(m_pin_pairs)
+                        st.success(
+                            f"Wczytano {_n} {generate_docx.pluralize(_n, 'PIN', 'PIN-y', 'PIN-ów')}."
+                            + (f" Kolumny: „{_mi['name_col']}” i „{_mi['pin_col']}”."
+                               if _mi['name_col'] else
+                               ' Nie znaleziono nagłówków — wzięto dwie pierwsze kolumny.'))
+                        if _mi['skipped_no_name']:
+                            st.warning(f"Pominięto {_mi['skipped_no_name']} "
+                                       f"{generate_docx.pluralize(_mi['skipped_no_name'], 'wiersz', 'wiersze', 'wierszy')} "
+                                       'z PIN-em, ale bez nazwy.')
+                    else:
+                        st.warning('Plik nie zawiera żadnych par nazwa + PIN.')
+                except Exception as e:
+                    st.error(f'Nie udało się wczytać pliku z PIN-ami: {e}')
+
+        m_rozp_fmt = st.radio('Format pliku', ['PDF', 'DOCX'], horizontal=True,
+                              key='manual_rozp_fmt')
+        if st.button(f'Generuj rozpiski {_ent}', key='manual_rozp_btn',
+                     use_container_width=True):
+            _ms = _collect_matches()
+            if not _ms:
+                st.error(f'Brak kompletnych meczów — wypełnij {side} 1 i {side} 2 '
+                         'w co najmniej jednym wierszu.')
+                return
+            # Bez podziału na grupy — pusty klucz grupy, karta go wtedy pomija.
+            _sched = generate_docx.matches_to_player_schedules(_ms, '')
+            if not _sched:
+                st.error('Nie udało się zbudować rozpisek z tej listy.')
+                return
+            if m_pin_pairs:
+                _before = len(_sched)
+                _sched, _rep = generate_docx.match_pins_to_schedules(_sched, m_pin_pairs)
+                _render_pin_report(_rep, _before)
+            _pl = generate_docx.pluralize(
+                len(_sched), *(('zawodnika', 'zawodników', 'zawodników') if is_ind
+                               else ('drużyny', 'drużyn', 'drużyn')))
+            try:
+                with st.spinner(f'Buduję rozpiski dla {len(_sched)} {_pl}…'):
+                    _rdocx = generate_docx.build_player_schedules_doc(
+                        _sched,
+                        tournament_name=(tournament_name or '').strip() or None,
+                        tournament_date=(tournament_date or '').strip() or None,
+                        is_team=not is_ind,
+                        tournament_link=m_link.strip() or None)
+            except Exception as e:
+                st.error(f'Błąd budowania rozpisek: {e}')
+                return
+            _rsafe = re.sub(r'[^\w\s-]', '', f"Rozpiski_{(tournament_name or '').strip() or 'turniej'}"
+                            ).strip().replace(' ', '_') or 'Rozpiski'
+            st.success(f'Wygenerowano rozpiski dla {len(_sched)} {_pl}.')
+            if m_rozp_fmt == 'DOCX':
+                st.download_button('⬇ Pobierz .docx', data=_rdocx,
+                                   file_name=f'{_rsafe}.docx', key='manual_rozp_docx',
+                                   mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+            else:
+                _rpdf, _rerr = docx_to_pdf(_rdocx, _rsafe,
+                                           est_pages=max(1, (len(_sched) + 9) // 10))
+                if _rpdf:
+                    st.download_button('⬇ Pobierz .pdf', data=_rpdf,
+                                       file_name=f'{_rsafe}.pdf', mime='application/pdf',
+                                       key='manual_rozp_pdf')
+                else:
+                    st.warning(f'PDF się nie udał ({_rerr}). Pobierz wersję .docx.')
+                    st.download_button('⬇ Pobierz .docx', data=_rdocx,
+                                       file_name=f'{_rsafe}.docx', key='manual_rozp_docx_fb',
+                                       mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
 @st.cache_data(show_spinner=False)
@@ -2517,25 +2639,6 @@ rozp_pin_only = False
 rozp_link = ''
 
 
-def _render_pin_report(rep, total):
-    """Wspólny widok raportu zgodności PIN-ów (podgląd i generowanie)."""
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Dopasowane", f"{rep['matched']} / {total}")
-    c2.metric("Bez PIN-u", len(rep['without_pin']))
-    c3.metric("Spoza arkusza", len(rep['unused']))
-    if rep['without_pin']:
-        with st.expander(f"Z arkusza, ale bez PIN-u w pliku ({len(rep['without_pin'])})"):
-            st.write('\n'.join(f"- {n}" for n in rep['without_pin']))
-    if rep['unused']:
-        with st.expander(f"W pliku, ale nie ma ich w arkuszu ({len(rep['unused'])})"):
-            st.caption("Najczęściej literówka w nazwie albo osoba, która ostatecznie nie gra.")
-            st.write('\n'.join(f"- {n}" for n in rep['unused']))
-    if rep['conflicts']:
-        st.error(
-            f"Ta sama nazwa z różnymi PIN-ami ({len(rep['conflicts'])}): "
-            + ', '.join(rep['conflicts'])
-            + " — te wpisy pominięto, bo nie da się zgadnąć, który PIN jest właściwy."
-        )
 rozp_is_team = not is_individual
 rozp_entity = 'drużyn' if rozp_is_team else 'zawodników'
 rozp_entity_dla = 'drużynom' if rozp_is_team else 'zawodnikom'

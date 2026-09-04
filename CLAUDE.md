@@ -303,6 +303,23 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-09-04 — **Rozpiski meczowe w trybie „własna lista meczów".**
+  Rozpiski są wyprowadzane z meczów (`matches_to_player_schedules`), więc ręczna
+  tabela w zupełności wystarcza — arkusz nie jest do niczego potrzebny. Wspólny
+  `_collect_matches()` w `_render_manual_generator` zasila teraz i protokoły,
+  i rozpiski. Doszły tam też link+QR oraz PIN-y (te same helpery co w ścieżce
+  arkuszowej, zero duplikacji logiki).
+  **PUŁAPKA KOLEJNOŚCI DEFINICJI (ta sama co kiedyś z `docx_to_pdf`):**
+  `_render_manual_generator` jest WOŁANY w ~linii 1008, a `_render_pin_report`
+  był zdefiniowany dopiero w ~2620 → w tej ścieżce jeszcze nie istniał
+  (`NameError` dopiero u użytkownika, bo tryb ręczny nie jest domyślny).
+  Helper przeniesiony NAD tryb ręczny. Reguła: cokolwiek woła tryb ręczny,
+  musi być zdefiniowane przed linią jego wywołania.
+  **Karta bez grupy:** `_fill_player_card_tc` drukowało bezwarunkowo
+  „Grupa {group}" — przy pustej grupie wychodziło samo „Grupa ". Teraz człon
+  pojawia się tylko gdy grupa jest niepusta (ścieżka arkuszowa bez zmian).
+  Weryfikacja: AppTest przełączony na tryb ręczny = 0 wyjątków, klik z pustą
+  tabelą daje czytelny błąd zamiast wyjątku, render docx→PDF→PNG.
 - 2026-08-11 (fix3) — **Link do turnieju + QR na rozpiskach.**
   **QR MUSI KODOWAĆ ADRES ZE SCHEMATEM** (bug zgłoszony z produkcji): bez
   `https://` czytnik traktuje zawartość jak zwykły tekst i telefon otwiera

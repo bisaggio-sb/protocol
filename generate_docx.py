@@ -930,7 +930,11 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
             _name_segs.append(('   ' + _link_here, dict(size_pt=_link_pt, color='505050')))
     _head = [_new_para_runs(_name_segs, align='left', after_pt=1)]
     # Subtitle: Grupa · turniej · data
-    sub_parts = [f"Grupa {player['group']}"]
+    # Grupa tylko gdy jest — tryb „własna lista meczów” nie ma podziału na
+    # grupy i drukowanie samego „Grupa ” wyglądałoby na błąd.
+    sub_parts = []
+    if str(player.get('group') or '').strip():
+        sub_parts.append(f"Grupa {player['group']}")
     if tournament_name: sub_parts.append(tournament_name)
     if tournament_date: sub_parts.append(tournament_date)
     # PIN dopisujemy do TEJ SAMEJ linii co podtytuł. Osobny akapit podnosił
