@@ -303,6 +303,20 @@ w wierszu tabeli (PIL).
   at=AppTest.from_file('app.py'); at.run(); print(len(at.exception))"` → 0.
 
 ### Log zmian (najnowsze u góry)
+- 2026-09-09 — **Karta rozpiski: jedna kolumna „przeciwnik" zamiast dwóch stron meczu.**
+  Karta pokazywała `z1`/`z2` dokładnie jak w arkuszu, więc własne nazwisko
+  powtarzało się w KAŻDYM wierszu (7× na karcie z 6 meczami), a przeciwnik
+  wędrował raz w lewo, raz w prawo — trzeba go było szukać wzrokiem. Teraz
+  wiersz to `godz. | tor | przeciwnik`, a nazwisko jest tylko w nagłówku karty.
+  Przeciwnik wybierany przez `normalize_person_name` (odporne na ogonki/spacje),
+  więc działa też gdy arkusz zapisał nazwę nieco inaczej.
+  **ZMIERZONY ZYSK MIEJSCA (tylko przy długich nazwach):** krótkie nazwiska
+  indywidualne — 12 układów, ZERO różnicy w liczbie stron. Długie nazwy drużyn —
+  3 z 12 układów schodzą o stronę niżej (14 kart/5 meczów 2→1, 12 kart/7 meczów
+  2→1, 20 kart/7 meczów 3→2), bo szeroka kolumna nie zawija nazwy na 2 linie.
+  Zniknęło pogrubianie własnego nazwiska w wierszach — niepotrzebne, skoro
+  nazwiska w wierszach już nie ma.
+  Test: karta z 2 meczami musi zawierać nazwisko DOKŁADNIE raz i obu przeciwników.
 - 2026-09-04 — **Rozpiski meczowe w trybie „własna lista meczów".**
   Rozpiski są wyprowadzane z meczów (`matches_to_player_schedules`), więc ręczna
   tabela w zupełności wystarcza — arkusz nie jest do niczego potrzebny. Wspólny

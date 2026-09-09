@@ -892,8 +892,8 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
                          is_team=False, qr_rel_id=None, qr_dxa=0, link_url=None):
     """Wypełnia istniejący <w:tc> zawartością karty zawodnika.
     Layout: header (imię) → subtitle (Grupa/turniej/data) → tabela 4 kolumny
-    (godzina | tor | gracz 1 | gracz 2). Własne nazwisko w wierszach pogrubione
-    (jak na wzorcu z arkusza)."""
+    (godzina | tor | przeciwnik). Własne nazwisko pojawia się TYLKO w nagłówku
+    karty — w wierszach jest przeciwnik, bo to jedyna zmienna informacja."""
     _set_cell_borders(tc, all_val='single', sz='12', color='000000')
     _set_cell_margins(tc, top=80, left=140, bottom=80, right=140)
 
@@ -958,10 +958,9 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     else:
         for _el in _head:
             tc.append(_el)
-    # godz. | tor | gracz 1 | gracz 2 — gracze szerokie; "godz." mieści się w 1 linii
-    cw = [int(inner_w * 0.12), int(inner_w * 0.07), 0, 0]
-    cw[2] = (inner_w - cw[0] - cw[1]) // 2
-    cw[3] = inner_w - cw[0] - cw[1] - cw[2]
+    # godz. | tor | przeciwnik — kolumna przeciwnika bierze całą resztę szerokości
+    cw = [int(inner_w * 0.14), int(inner_w * 0.09), 0]
+    cw[2] = inner_w - cw[0] - cw[1]
 
     inner_tbl = etree.Element(wt('tbl'))
     ip = etree.SubElement(inner_tbl, wt('tblPr'))
@@ -978,13 +977,13 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
     for w in cw:
         gc = etree.SubElement(igrid, wt('gridCol')); gc.set(wt('w'), str(w))
 
-    def _add_row(godz, tor, p1, p2, *, header=False, shade=False, own_name=None):
+    def _add_row(godz, tor, opp, *, header=False, shade=False):
         tr = etree.SubElement(inner_tbl, wt('tr'))
         trPr = etree.SubElement(tr, wt('trPr'))
         etree.SubElement(trPr, wt('cantSplit'))
         if header:
             etree.SubElement(trPr, wt('tblHeader'))
-        for i, (val, w) in enumerate(zip((godz, tor, p1, p2), cw)):
+        for i, (val, w) in enumerate(zip((godz, tor, opp), cw)):
             cell = etree.SubElement(tr, wt('tc'))
             cPr = etree.SubElement(cell, wt('tcPr'))
             wEl = etree.SubElement(cPr, wt('tcW'))
@@ -998,16 +997,11 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
             for nm, mv in (('top', 10), ('left', 50), ('bottom', 10), ('right', 50)):
                 me = etree.SubElement(mar, wt(nm))
                 me.set(wt('w'), str(mv)); me.set(wt('type'), 'dxa')
-            # Kolumny gracz 1 / gracz 2 do lewej; godzina/tor wycentrowane
+            # Przeciwnik do lewej; godzina/tor wycentrowane
             align = 'left' if i >= 2 else 'center'
             # Pogrubienie własnego nazwiska (kolumny 2-3); header zawsze italic
             cell_bold = False
-            if header:
-                cell_italic = True
-            else:
-                cell_italic = False
-                if own_name and i >= 2 and val == own_name:
-                    cell_bold = True
+            cell_italic = bool(header)
             # Auto-shrink dla długich nazw w kol. gracz/drużyna 1/2 — kiedy bold
             # robi że "Stowarzyszenie Aktywny Orlik" rozjeżdża się na 2 wiersze.
             # Heurystyka ~75 dxa/char przy sz=16 bold (Calibri/Carlito) — tylko
@@ -1027,15 +1021,21 @@ def _fill_player_card_tc(tc, player, tournament_name, tournament_date, card_w_dx
                                   align=align, after_pt=0))
         return tr
 
-    side_label = 'drużyna' if is_team else 'gracz'
-    _add_row('godz.', 'tor', f'{side_label} 1', f'{side_label} 2', header=True)
+    # JEDNA kolumna z przeciwnikiem zamiast obu stron meczu. Poprzednio karta
+    # pokazywała z1/z2 dokładnie jak w arkuszu, więc własne nazwisko powtarzało
+    # się w KAŻDYM wierszu, a przeciwnik wędrował raz w lewo, raz w prawo —
+    # trzeba go było za każdym razem szukać wzrokiem. Przy okazji: szeroka
+    # kolumna nie zawija długich nazw drużyn, co przy nich potrafi zmieścić
+    # o stronę mniej (zmierzone: 14 kart/5 meczów 2→1 str.).
+    _add_row('godz.', 'tor', 'przeciwnik', header=True)
+    _me = normalize_person_name(player.get('name', ''))
     for idx, m in enumerate(player['matches']):
+        _z1, _z2 = m.get('z1') or '', m.get('z2') or ''
+        _opp = _z2 if normalize_person_name(_z1) == _me else _z1
         _add_row(m.get('godzina', '') or '—',
                  (m.get('tor') or '—'),
-                 m.get('z1') or '—',
-                 m.get('z2') or '—',
-                 shade=(idx % 2 == 1),
-                 own_name=player['name'])
+                 _opp or '—',
+                 shade=(idx % 2 == 1))
 
     tc.append(inner_tbl)
     # Pusty paragraf po tabeli (wymaganie OOXML: tc musi kończyć się <w:p>)

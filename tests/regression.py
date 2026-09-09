@@ -379,6 +379,30 @@ except Exception as e:
     failures.append(f'helpery filtra torów: {type(e).__name__}: {e}')
     traceback.print_exc(file=sys.stderr)
 
+# ── Karta rozpiski: kolumna przeciwnika ─────────────────────────────────────
+# Karta ma pokazywac PRZECIWNIKA, nie obie strony meczu. Wlasne nazwisko tylko
+# w naglowku - wczesniej powtarzalo sie w kazdym wierszu, a przeciwnik wedrowal
+# miedzy kolumnami.
+try:
+    import zipfile as _z0, io as _i0
+    _nm = 'Jan Sękowski'
+    _card = g.build_player_schedules_doc([{'name': _nm, 'group': 'A', 'matches': [
+        {'godzina': '10:00', 'tor': '3', 'z1': _nm, 'z2': 'Anna Kordecka'},
+        {'godzina': '10:30', 'tor': '7', 'z1': 'Szymon Szulc', 'z2': _nm},
+    ]}])
+    _cx = _z0.ZipFile(_i0.BytesIO(_card)).read('word/document.xml').decode('utf-8')
+    if _cx.count(_nm) != 1:
+        failures.append(f'karta: nazwisko wystepuje {_cx.count(_nm)}x, oczek. 1 (tylko naglowek)')
+    for _opp in ('Anna Kordecka', 'Szymon Szulc'):
+        if _opp not in _cx:
+            failures.append(f'karta: brak przeciwnika {_opp} (dziala tylko jedna strona meczu?)')
+    if 'przeciwnik' not in _cx:
+        failures.append('karta: brak naglowka kolumny "przeciwnik"')
+    if 'gracz 1' in _cx or 'drużyna 1' in _cx:
+        failures.append('karta: zostal stary naglowek dwoch kolumn')
+except Exception as e:
+    failures.append(f'karta przeciwnika: {type(e).__name__}: {e}')
+
 # ── PIN-y Mölkkify na rozpiskach ────────────────────────────────────────────
 try:
     # Nagłówek rozpoznawany po braku cyfry w kolumnie PIN-u; zera wiodące
@@ -558,5 +582,5 @@ if failures:
         print(f'  - {f}', file=sys.stderr)
     sys.exit(1)
 
-print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów + PIN-y Mölkkify + link i QR')
+print(f'REGRESJA OK: {len(TEMPLATES)} szablonów + filtr placeholderów + helpers + gviz drabinka + grupy gviz-drop + split-phase + rozpiski + filtr torów + PIN-y Mölkkify + link i QR + kolumna przeciwnika')
 sys.exit(0)
